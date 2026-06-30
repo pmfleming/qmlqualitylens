@@ -1,0 +1,13 @@
+{
+  "project_name": "quickshell-project",
+  "project_root": ".",
+  "source_roots": ["."],
+  "output_dir": "target/qmlqualitylens",
+  "qmllint_report": "target/qmllint.json",
+  "process_boundary": {
+    "objectTypes": ["Process", "ShellCommand"],
+    "textPatterns": ["\\b(?:quickshell\\s+ipc|openUrlExternally)\\b"],
+    "allowedFilePatterns": ["(^|/)shell\\.qml$", "(^|/)(?:service|api|process)(?:[._/-]|$)"]
+  },
+  "exclude": ["node_modules", ".git", "dist", "target", "build", ".direnv"]
+}

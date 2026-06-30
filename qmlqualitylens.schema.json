@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/pmfleming/qmlqualitylens/qmlqualitylens.schema.json",
+  "title": "qmlqualitylens config",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "project_name": { "type": "string" },
+    "project_root": { "type": "string" },
+    "source_roots": { "type": "array", "items": { "type": "string" } },
+    "output_dir": { "type": "string" },
+    "exclude": { "type": "array", "items": { "type": "string" } },
+    "qmllint_report": { "type": "string" },
+    "qmllint_command": { "type": "string" },
+    "suppressions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "anyOf": [
+          { "required": ["id"] },
+          { "required": ["kind"] },
+          { "required": ["file"] }
+        ],
+        "properties": {
+          "id": { "type": "string" },
+          "kind": { "type": "string" },
+          "file": { "type": "string" },
+          "reason": { "type": "string" }
+        }
+      }
+    },
+    "process_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "objectTypes": { "type": "array", "items": { "type": "string" } },
+        "textPatterns": { "type": "array", "items": { "type": "string" } },
+        "allowedFilePatterns": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "thresholds": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fileSlocHigh": { "type": "number" },
+        "componentObjectCountHigh": { "type": "number" },
+        "functionCyclomaticHigh": { "type": "number" },
+        "functionCognitiveHigh": { "type": "number" },
+        "handlerLinesHigh": { "type": "number" },
+        "bindingComplexityHigh": { "type": "number" },
+        "cloneWindow": { "type": "number" }
+      }
+    }
+  }
+}

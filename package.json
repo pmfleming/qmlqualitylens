@@ -1,0 +1,36 @@
+{
+  "name": "qmlqualitylens",
+  "version": "0.1.0",
+  "description": "Static quality lens for QML/Qt Quick and Quickshell projects.",
+  "type": "module",
+  "main": "./dist/src/cli.js",
+  "bin": {
+    "qmlqualitylens": "./dist/bin/qmlqualitylens.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/test/*.test.js",
+    "parser:test": "npm run build && node --test dist/test/qml-parser.test.js",
+    "analyze:shelllist": "npm run build && node dist/bin/qmlqualitylens.js analyze --config examples/shelllist.config.json --format summary",
+    "measure:shelllist": "npm run build && node dist/bin/qmlqualitylens.js measure all --config examples/shelllist.config.json",
+    "prepack": "npm run build"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist/",
+    "src/",
+    "bin/",
+    "README.md",
+    "ROADMAP.md",
+    "tsconfig.json",
+    "qmlqualitylens.schema.json"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^25.0.0",
+    "typescript": "^6.0.0"
+  }
+}
