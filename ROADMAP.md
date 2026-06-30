@@ -41,6 +41,8 @@
 - [x] Changed-file and changed-hunk gating with `audit --base`.
 - [x] Base-worktree comparison for introduced finding detection.
 - [x] Configurable thresholds for size, complexity, binding, and clone-window rules.
+- [x] Optional `qmllint` oracle calibration tier with labeled benchmark fixtures.
+- [x] Optional CI job for Qt/qmllint oracle calibration.
 - Suppressions with stale-suppression detection.
 - Moved-finding attribution across refactors.
 

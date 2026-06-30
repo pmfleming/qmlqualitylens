@@ -19,12 +19,13 @@ test("semantic rules catch binding, layout, public API, connection, and performa
     "qmldir": `module Demo\nWidget 1.0 Widget.qml\nTarget 1.0 Target.qml\n`,
     "Widget.qml": `import QtQuick\nItem {\n  property int usedProp: 0\n  property int unusedProp: 0\n  signal usedSignal()\n  signal unusedSignal()\n}\n`,
     "Target.qml": `import QtQuick\nItem {\n  signal expected()\n}\n`,
-    "Main.qml": `import "."\nimport QtQuick.Layouts\n\nItem {\n  id: root\n  Rectangle { id: a; width: b.width }\n  Rectangle { id: b; width: a.width }\n  Rectangle {\n    id: card\n    width: root.width\n    anchors.fill: parent\n    Layout.fillWidth: true\n  }\n  MouseArea {\n    onClicked: {\n      card.width = 10\n    }\n  }\n  Widget {\n    usedProp: 1\n    onUsedSignal: {}\n  }\n  Target { id: target }\n  Connections {\n    target: target\n    onMissing: {}\n  }\n  Loader { source: "Panel.qml" }\n  Image { source: "icon.png" }\n}\n`,
+    "Main.qml": `import "."\nimport QtQuick.Layouts\n\nItem {\n  id: root\n  Rectangle { id: a; width: b.width }\n  Rectangle { id: b; width: a.width }\n  Rectangle {\n    id: card\n    width: root.width\n    anchors.fill: parent\n    Layout.fillWidth: true\n  }\n  MouseArea {\n    onClicked: {\n      card.width = 10\n    }\n  }\n  Widget {\n    usedProp: 1\n    onUsedSignal: {}\n  }\n  Target { id: target }\n  Connections {\n    target: target\n    function onMissing() {}\n  }\n  Item {\n    width: parent.width\n    Component.onCompleted: width = Qt.binding(function() { return parent.width })\n  }\n  Loader { source: "Panel.qml" }\n  Image { source: "icon.png" }\n}\n`,
   });
 
-  const kinds = new Set(qmlSemanticFindings(context).map((finding) => finding.kind));
+  const findings = qmlSemanticFindings(context);
+  const kinds = new Set(findings.map((finding) => finding.kind));
 
-  assert.ok(kinds.has("qml.binding_loss"));
+  assert.equal(findings.filter((finding) => finding.kind === "qml.binding_loss").length, 1);
   assert.ok(kinds.has("qml.binding_cycle"));
   assert.ok(kinds.has("qml.layout_conflict.anchors_with_layout"));
   assert.ok(kinds.has("qml.layout_conflict.anchors_with_geometry"));

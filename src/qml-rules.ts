@@ -99,7 +99,7 @@ function connectionMismatchFindings(entry: AnalysisContext["qmlDocuments"][numbe
       const targetFile = targetObject ? context.resolution.componentsByName.get(baseTypeName(targetObject.typeName)) : null;
       const targetSignals = targetFile ? signalsForComponent(context, targetFile) : null;
       if (!targetSignals || targetSignals.size === 0) return [];
-      return connection.handlers.flatMap((handler) => {
+      return connectionHandlerEntries(connection).flatMap((handler) => {
         const signal = signalNameForHandler(handler.name);
         return signal && !targetSignals.has(signal) ? [finding(`qml.connection_mismatch.${entry.file}.${handler.line}.${handler.name}`, "qml.connection_signal_mismatch", "medium", entry.file, handler.line, `Connections handler '${handler.name}' does not match a signal declared by ${targetObject?.typeName}`, "Rename the handler or add the matching signal to the target component.")] : [];
       });
@@ -159,9 +159,21 @@ function assignmentTargets(expression: string): Array<{ owner: string | null; pr
   const results: Array<{ owner: string | null; property: string }> = [];
   for (const match of expression.matchAll(ASSIGNMENT_PATTERN)) {
     if (DECLARATION_PREFIX.test(expression.slice(Math.max(0, (match.index ?? 0) - 16), match.index ?? 0))) continue;
+    if (isQtBindingAssignment(expression, match.index ?? 0, match[0].length)) continue;
     results.push(match[2] ? { owner: match[1] ?? null, property: match[2] } : { owner: null, property: match[1] ?? "" });
   }
   return results.filter((item) => item.property.length > 0 && !EXTERNAL_API_PREFIXES.has(item.owner ?? item.property));
+}
+
+function isQtBindingAssignment(expression: string, index: number, matchLength: number): boolean {
+  return /^\s*Qt\.binding\s*\(/.test(expression.slice(index + matchLength));
+}
+
+function connectionHandlerEntries(object: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number]): Array<{ name: string; line: number }> {
+  return [
+    ...object.handlers,
+    ...object.functions.filter((fn) => /^on[A-Z]/.test(fn.name)),
+  ].map((item) => ({ name: item.name, line: item.line }));
 }
 
 function targetExpression(object: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number]): string | null {

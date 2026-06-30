@@ -1,0 +1,7 @@
+{
+  "project_name": "oracle-qmllint-fixtures",
+  "project_root": ".",
+  "source_roots": ["."],
+  "output_dir": "target/qmlqualitylens",
+  "exclude": ["target"]
+}

@@ -35,6 +35,14 @@ node dist/bin/qmlqualitylens.js measure all --config qmlqualitylens.config.json
 node dist/bin/qmlqualitylens.js audit --config qmlqualitylens.config.json --format markdown
 ```
 
+Optional oracle calibration (heuristic labels always run; Qt diagnostics skip when `qmllint` is not installed):
+
+```sh
+npm run oracle:qmllint
+```
+
+Qt tooling is only an opt-in test oracle for calibrating heuristics; the shipped analyzer and default `npm test` remain static and dependency-free. The CI workflow keeps this oracle job optional. See `docs/oracle-calibration.md`.
+
 Analyze the local Shelllist checkout from this repository:
 
 ```sh

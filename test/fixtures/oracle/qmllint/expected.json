@@ -1,0 +1,37 @@
+{
+  "positives": [
+    { "kind": "resolution.unknown_type", "file": "UnknownType.qml" },
+    { "kind": "resolution.unresolved_import", "file": "UnresolvedImport.qml" },
+    { "kind": "qml.layout_conflict.anchors_with_layout", "file": "LayoutConflict.qml" },
+    { "kind": "qml.binding_cycle", "file": "BindingCycle.qml" },
+    { "kind": "qml.connection_signal_mismatch", "file": "BadConnection.qml" },
+    { "kind": "qml.binding_loss", "file": "BindingLoss.qml" }
+  ],
+  "negatives": [
+    { "kind": "resolution.unknown_type", "file": "Good.qml" },
+    { "kind": "resolution.unresolved_import", "file": "Good.qml" },
+    { "kind": "qml.layout_conflict.anchors_with_layout", "file": "Good.qml" },
+    { "kind": "qml.binding_cycle", "file": "Good.qml" },
+    { "kind": "qml.connection_signal_mismatch", "file": "Good.qml" },
+    { "kind": "qml.binding_loss", "file": "Good.qml" },
+    { "kind": "qml.binding_loss", "file": "QtBindingRebind.qml" }
+  ],
+  "qmllint_categories": [
+    {
+      "name": "unresolved_import_or_type",
+      "patterns": ["not found", "unknown.*type", "is not a type", "module.*not", "import.*not", "missing"]
+    },
+    {
+      "name": "signal_or_property_mismatch",
+      "patterns": ["non-existent.*(?:property|signal)", "no such.*(?:property|signal)", "cannot assign", "rejected"]
+    },
+    {
+      "name": "binding_or_layout_warning",
+      "patterns": ["binding loop", "anchors", "layout"]
+    }
+  ],
+  "qmllint_expected": [
+    { "category": "unresolved_import_or_type", "file": "UnknownType.qml" },
+    { "category": "unresolved_import_or_type", "file": "UnresolvedImport.qml" }
+  ]
+}
