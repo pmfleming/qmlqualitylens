@@ -70,6 +70,17 @@ function parseTextQmllint(text: string, config: Config): QmllintFinding[] {
 }
 
 function parseTextLine(line: string, config: Config): QmllintFinding[] {
+  const prefixed = line.match(/^(warning|error|info|note):\s*(.*?):(\d+)(?::(\d+))?:\s*(.*)$/i);
+  if (prefixed?.[2] && prefixed[3] && prefixed[5]) {
+    return [{
+      file: relativeFile(prefixed[2], config),
+      line: Number(prefixed[3]),
+      column: prefixed[4] ? Number(prefixed[4]) : null,
+      severity: severityFor(prefixed[1]),
+      message: prefixed[5].trim(),
+      rule: ruleFromMessage(prefixed[5]),
+    }];
+  }
   const match = line.match(/^(.*?):(\d+)(?::(\d+))?:\s*(?:(warning|error|info|note):\s*)?(.*)$/i);
   if (!match?.[1] || !match[2] || !match[5]) return [];
   return [{
@@ -78,7 +89,7 @@ function parseTextLine(line: string, config: Config): QmllintFinding[] {
     column: match[3] ? Number(match[3]) : null,
     severity: severityFor(match[4]),
     message: match[5].trim(),
-    rule: null,
+    rule: ruleFromMessage(match[5]),
   }];
 }
 
@@ -109,4 +120,8 @@ function severityFor(value: string | null | undefined): QmllintFinding["severity
   if (normalized === "error" || normalized === "fatal") return "error";
   if (normalized === "info" || normalized === "note") return "info";
   return "warning";
+}
+
+function ruleFromMessage(message: string): string | null {
+  return message.match(/\[([^\]]+)\]\s*$/)?.[1] ?? null;
 }

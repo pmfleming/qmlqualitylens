@@ -25,6 +25,10 @@ test("parses qmllint JSON and text output", () => {
     rule: "missing-type",
   }]);
   assert.equal(parseQmllintOutput("Main.qml:7:2: warning: unused import", config)[0]?.message, "unused import");
+  const prefixed = parseQmllintOutput("Warning: Main.qml:9:5: MissingWidget was not found. [import]", config)[0];
+  assert.equal(prefixed?.file, "Main.qml");
+  assert.equal(prefixed?.severity, "warning");
+  assert.equal(prefixed?.rule, "import");
 });
 
 test("runs qmllint_command when no report exists", () => {

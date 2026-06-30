@@ -13,6 +13,7 @@
     "test": "npm run build && node --test dist/test/*.test.js",
     "parser:test": "npm run build && node --test dist/test/qml-parser.test.js",
     "oracle:qmllint": "npm run build && node dist/test/oracle-qmllint.oracle.js",
+    "oracle:qmllint:nix": "nix-shell --run 'npm run oracle:qmllint'",
     "analyze:shelllist": "npm run build && node dist/bin/qmlqualitylens.js analyze --config examples/shelllist.config.json --format summary",
     "measure:shelllist": "npm run build && node dist/bin/qmlqualitylens.js measure all --config examples/shelllist.config.json",
     "prepack": "npm run build"
@@ -29,6 +30,7 @@
     "docs/",
     "test/fixtures/",
     "test/oracle-qmllint.oracle.ts",
+    "shell.nix",
     "tsconfig.json",
     "qmlqualitylens.schema.json"
   ],

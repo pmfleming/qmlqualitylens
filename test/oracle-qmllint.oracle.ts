@@ -63,13 +63,14 @@ function qmllintAvailable(): boolean {
 }
 
 function runQmllint(config: Config, expected: Expected): QmllintOracleResult {
-  const result = spawnSync("qmllint", ["."], { cwd: fixtureRoot, encoding: "utf8", maxBuffer: 10 * 1024 * 1024 });
+  const args = [...qmllintImportArgs(), ...qmlFixtureFiles()];
+  const result = spawnSync("qmllint", args, { cwd: fixtureRoot, encoding: "utf8", maxBuffer: 10 * 1024 * 1024 });
   const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
   const diagnostics = safeParseQmllint(output, config);
   const categories = categorizeDiagnostics(diagnostics, expected.qmllint_categories);
   const expectedLabels = expected.qmllint_expected ?? [];
   return {
-    command: "qmllint .",
+    command: `qmllint ${args.join(" ")}`,
     exit_code: result.status,
     error: result.error?.message ?? null,
     diagnostics: diagnostics.length,
@@ -85,6 +86,35 @@ function safeParseQmllint(output: string, config: Config): QmllintFinding[] {
   } catch (error) {
     return [{ file: "<qmllint>", line: 1, column: null, severity: "warning", message: error instanceof Error ? error.message : String(error), rule: "parse_error" }];
   }
+}
+
+function qmlFixtureFiles(): string[] {
+  return fs.readdirSync(fixtureRoot).filter((file) => file.endsWith(".qml")).sort();
+}
+
+function qmllintImportArgs(): string[] {
+  const paths = qtImportPaths();
+  return paths.flatMap((item) => ["-I", item]);
+}
+
+function qtImportPaths(): string[] {
+  return unique([
+    ...splitPathEnv(process.env.QML_IMPORT_PATH),
+    ...splitPathEnv(process.env.QML2_IMPORT_PATH),
+    detectedQtImportPath(),
+  ].filter((item): item is string => Boolean(item && fs.existsSync(item))));
+}
+
+function detectedQtImportPath(): string | null {
+  const which = spawnSync("which", ["qmllint"], { encoding: "utf8" });
+  const executable = which.stdout.trim();
+  if (!executable) return null;
+  const root = path.dirname(path.dirname(fs.realpathSync(executable)));
+  return path.join(root, "lib/qt-6/qml");
+}
+
+function splitPathEnv(value: string | undefined): string[] {
+  return value ? value.split(path.delimiter).filter(Boolean) : [];
 }
 
 function scoreBenchmark(expected: Expected, findings: Finding[]): BenchmarkResult {

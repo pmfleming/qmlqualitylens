@@ -16,11 +16,26 @@ The shipped `qmlqualitylens` analyzer stays static and dependency-free. Qt tools
 npm run oracle:qmllint
 ```
 
+On Nix/NixOS this repository includes a local shell with Qt tooling:
+
+```sh
+nix-shell
+npm run oracle:qmllint
+
+# or in one command
+npm run oracle:qmllint:nix
+
+# or with direnv
+# direnv allow
+```
+
+The Nix shell provides `node`, `qmllint`, `qml`, `qmltestrunner`, Qt QML import paths, and `QT_QPA_PLATFORM=offscreen` for future loader/runtime experiments.
+
 The script:
 
 - always runs `qmlqualitylens` heuristics over the labeled fixture corpus;
 - detects `qmllint` and skips only Qt oracle diagnostics if unavailable;
-- runs `qmllint .` in the same corpus and normalizes diagnostics through the existing parser;
+- runs `qmllint` over the fixture QML files with detected Qt import paths and normalizes diagnostics through the existing parser;
 - checks expected `qmllint` category/file labels when the tool is available;
 - prints per-rule precision/recall-style counts for the labeled heuristic corpus plus grouped `qmllint` oracle diagnostics.
 

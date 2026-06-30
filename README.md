@@ -39,9 +39,11 @@ Optional oracle calibration (heuristic labels always run; Qt diagnostics skip wh
 
 ```sh
 npm run oracle:qmllint
+# Nix/NixOS convenience environment with Qt tooling:
+npm run oracle:qmllint:nix
 ```
 
-Qt tooling is only an opt-in test oracle for calibrating heuristics; the shipped analyzer and default `npm test` remain static and dependency-free. The CI workflow keeps this oracle job optional. See `docs/oracle-calibration.md`.
+Qt tooling is only an opt-in test oracle for calibrating heuristics; the shipped analyzer and default `npm test` remain static and dependency-free. On Nix/NixOS, enter `nix-shell` or run `direnv allow` to get `qmllint`, `qml`, `qmltestrunner`, Qt import paths, and `QT_QPA_PLATFORM=offscreen`. The CI workflow keeps this oracle job optional. See `docs/oracle-calibration.md`.
 
 Analyze the local Shelllist checkout from this repository:
 

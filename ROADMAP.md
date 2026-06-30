@@ -43,6 +43,7 @@
 - [x] Configurable thresholds for size, complexity, binding, and clone-window rules.
 - [x] Optional `qmllint` oracle calibration tier with labeled benchmark fixtures.
 - [x] Optional CI job for Qt/qmllint oracle calibration.
+- [x] Local Nix/direnv Qt oracle environment.
 - Suppressions with stale-suppression detection.
 - Moved-finding attribution across refactors.
 
