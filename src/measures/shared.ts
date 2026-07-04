@@ -26,6 +26,10 @@ export function writeArtifact(config: Config, filename: string, artifact: unknow
 
 export function findingSummary(findings: Finding[]): Record<string, JsonValue> {
   const active = findings.filter((finding) => !finding.suppressed);
+  const byKind = active.reduce<Record<string, number>>((counts, finding) => {
+    counts[finding.kind] = (counts[finding.kind] ?? 0) + 1;
+    return counts;
+  }, {});
   return {
     findings: findings.length,
     active: active.length,
@@ -33,7 +37,7 @@ export function findingSummary(findings: Finding[]): Record<string, JsonValue> {
     high: active.filter((finding) => finding.severity === "high").length,
     medium: active.filter((finding) => finding.severity === "medium").length,
     low: active.filter((finding) => finding.severity === "low").length,
-    by_kind: active.reduce<Record<string, number>>((counts, finding) => ({ ...counts, [finding.kind]: (counts[finding.kind] ?? 0) + 1 }), {}),
+    by_kind: byKind,
   };
 }
 

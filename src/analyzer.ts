@@ -3,9 +3,11 @@ import path from "node:path";
 import { detectClones } from "./clone-detector.js";
 import { discoverSourceFiles } from "./file-walk.js";
 import { boundedScore, complexityForCode, countMatches, lineNumberAt, locFor, percentilePenalty } from "./metrics.js";
-import { baseTypeName } from "./qml-model.js";
+import { isProcessBoundaryFile } from "./config.js";
+import { baseTypeName, matchesAnyConfiguredTypeName } from "./qml-model.js";
 import { parseQmlDocument, type QmlDocument, type QmlExecutableNode } from "./qml-parser.js";
 import { buildProjectResolution, type ProjectResolution } from "./qml-resolution.js";
+import { qmlSemanticFindings } from "./qml-rules.js";
 import { loadQmllintResult, type QmllintResult } from "./qmllint.js";
 import { applySuppressions } from "./suppressions.js";
 import type {
@@ -55,9 +57,10 @@ export function createAnalysisContext(config: Config): AnalysisContext {
   const qmllint = loadQmllintResult(config);
   const qmllintFindings = qmllint.findings;
   const clones = detectClones(sources, config.thresholds.cloneWindow);
-  const findings = applySuppressions(deriveFindings(config, files, components, functions, bindings, clones, resolution), config);
+  const baseContext: AnalysisContext = { config, sources, qmlDocuments, resolution, files, components, functions, bindings, parserDiagnostics, qmllint, qmllintFindings, clones, findings: [], scores: emptyScores() };
+  const findings = applySuppressions([...deriveFindings(config, files, components, functions, bindings, clones, resolution), ...qmlSemanticFindings(baseContext)], config);
   const scores = scoreProject(files, components, functions, bindings, clones, findings);
-  return { config, sources, qmlDocuments, resolution, files, components, functions, bindings, parserDiagnostics, qmllint, qmllintFindings, clones, findings, scores };
+  return { ...baseContext, findings, scores };
 }
 
 export function analyzeProject(config: Config): AnalysisArtifact {
@@ -128,7 +131,7 @@ function parseComponent(file: SourceFile, functions: FunctionRecord[], bindings:
   const aliases = document.objects.reduce((sum, object) => sum + object.properties.filter((property) => property.alias).length, 0);
   const signals = document.objects.reduce((sum, object) => sum + object.signals.length, 0);
   const handlerCount = document.objects.reduce((sum, object) => sum + object.handlers.length, 0);
-  const processObjectCount = document.objects.filter((object) => config.processBoundary.objectTypes.includes(object.typeName) || config.processBoundary.objectTypes.includes(baseTypeName(object.typeName))).length;
+  const processObjectCount = document.objects.filter((object) => matchesAnyConfiguredTypeName(object.typeName, config.processBoundary.objectTypes)).length;
   const component: ComponentRecord = {
     file: file.relativePath,
     name: path.basename(file.relativePath, ".qml"),
@@ -295,7 +298,7 @@ function componentFindings(component: ComponentRecord, config: Config): Finding[
     component.hardcodedColors >= 4
       ? finding(`styling.colors.${component.file}`, "styling.hardcoded_colors", "low", component.file, `${component.name} contains ${component.hardcodedColors} hardcoded color literals`, undefined, component.hardcodedColors, 4, "Move visual tokens into Theme.qml or semantic palette properties.")
       : null,
-    component.processBoundaryCalls > 0
+    component.processBoundaryCalls > 0 && !isProcessBoundaryFile(component.file, config)
       ? finding(`boundary.process.${component.file}`, "boundary.process_calls_in_qml", "high", component.file, `${component.name} contains process/API boundary references`, undefined, component.processBoundaryCalls, 0, "Centralize process execution and protocol parsing in a boundary module.")
       : null,
   ].filter(isFinding);
@@ -359,6 +362,10 @@ function resolutionFinding(id: string, kind: string, file: string, line: number,
 
 function isFinding(value: Finding | null): value is Finding {
   return value !== null;
+}
+
+function emptyScores(): ScoreBreakdown {
+  return { overall: 0, complexity: 0, cognitive: 0, effort: 0, locality: 0, leverage: 0, duplication: 0, size: 0, styling: 0, boundary: 0 };
 }
 
 function scoreProject(

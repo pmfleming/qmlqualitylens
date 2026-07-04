@@ -35,3 +35,13 @@ test("semantic rules catch binding, layout, public API, connection, and performa
   assert.ok(kinds.has("qml.performance.loader_without_active"));
   assert.ok(kinds.has("qml.performance.image_without_source_size"));
 });
+
+test("binding-cycle rule does not treat parent alias plus child read as a cycle", () => {
+  const context = fixtureContext({
+    "Main.qml": `import QtQuick\nItem {\n  id: root\n  property alias text: label.text\n  visible: true\n  Text {\n    id: label\n    text: root.visible ? \"yes\" : \"no\"\n  }\n}\n`,
+  });
+
+  const findings = qmlSemanticFindings(context).filter((finding) => finding.kind === "qml.binding_cycle");
+
+  assert.equal(findings.length, 0);
+});

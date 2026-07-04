@@ -73,17 +73,36 @@ export async function runCli(argv: string[]): Promise<void> {
   throw new Error(`Unknown command: ${args.command}`);
 }
 
+type TaskResult = { summary?: unknown };
+
 export function runMeasure(config: Config, taskId: string, command: string): unknown[] {
   const context = createAnalysisContext(config);
-  const taskIds = taskId === "all" ? MEASURE_ORDER : [taskId];
+  const taskIds = taskId === "all" ? MEASURE_ORDER : taskIdsWithDependencies(taskId);
   const results = [];
   for (const id of taskIds) {
     const task = findTask(id);
     if (!task) throw new Error(`Unknown task id: ${id}. Available task ids: all, ${TASKS.map((item) => item.id).join(", ")}`);
-    const artifact = task.handler(config, command, context) as any;
+    const artifact = task.handler(config, command, context) as TaskResult;
     results.push({ task_id: id, artifact: task.artifact, summary: artifact.summary ?? null });
   }
   return results;
+}
+
+function taskIdsWithDependencies(taskId: string): string[] {
+  const ordered = new Set<string>();
+  const visiting = new Set<string>();
+  const visit = (id: string): void => {
+    if (ordered.has(id)) return;
+    if (visiting.has(id)) throw new Error(`Circular task dependency involving ${id}`);
+    const task = findTask(id);
+    if (!task) throw new Error(`Unknown task id: ${id}. Available task ids: all, ${TASKS.map((item) => item.id).join(", ")}`);
+    visiting.add(id);
+    for (const dependency of task.dependsOn ?? []) visit(dependency);
+    visiting.delete(id);
+    ordered.add(id);
+  };
+  visit(taskId);
+  return [...ordered];
 }
 
 function printArtifact(artifact: any, format: ParsedArgs["format"]): void {

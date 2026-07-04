@@ -35,19 +35,62 @@ function bindingLossFindings({ file, document }: AnalysisContext["qmlDocuments"]
 }
 
 function bindingCycleFindings({ file, document }: AnalysisContext["qmlDocuments"][number]): Finding[] {
+  const objectById = new Map(document.objects.map((object) => [object.objectId, object]));
   const edges = document.bindings
     .filter((binding) => !isHandlerPath(binding.propertyPath))
-    .flatMap((binding) => binding.references.flatMap((reference) => reference.targetObjectId && reference.targetObjectId !== binding.ownerObjectId ? [{ from: binding.ownerObjectId, to: reference.targetObjectId, line: binding.line, property: binding.propertyPath }] : []));
+    .flatMap((binding) => binding.references.flatMap((reference) => {
+      const target = reference.targetObjectId ? objectById.get(reference.targetObjectId) : null;
+      if (!target || target.objectId === binding.ownerObjectId) return [];
+      return referencedProperties(binding.expression, reference.name, target).map((targetProperty) => ({
+        fromObjectId: binding.ownerObjectId,
+        fromProperty: binding.propertyPath,
+        toObjectId: target.objectId,
+        toProperty: targetProperty,
+        line: binding.line,
+      }));
+    }));
   const seen = new Set<string>();
   const findings: Finding[] = [];
   for (const edge of edges) {
-    const reverse = edges.find((item) => item.from === edge.to && item.to === edge.from);
-    const key = reverse ? [edge.from, edge.to].sort().join("<->") : "";
+    const reverse = edges.find((item) => item.fromObjectId === edge.toObjectId && item.fromProperty === edge.toProperty && item.toObjectId === edge.fromObjectId && item.toProperty === edge.fromProperty);
+    const key = reverse ? [edgeKey(edge), edgeKey(reverse)].sort().join("<->") : "";
     if (!reverse || seen.has(key)) continue;
     seen.add(key);
-    findings.push(finding(`qml.binding_cycle.${file}.${edge.line}.${reverse.line}`, "qml.binding_cycle", "high", file, edge.line, `Bindings '${edge.property}' and '${reverse.property}' reference each other through ids`, "Break the cycle with a source-of-truth property, one-way data flow, or an explicit signal update."));
+    findings.push(finding(`qml.binding_cycle.${file}.${edge.line}.${reverse.line}`, "qml.binding_cycle", "high", file, edge.line, `Bindings '${edge.fromProperty}' and '${reverse.fromProperty}' reference each other through ids`, "Break the cycle with a source-of-truth property, one-way data flow, or an explicit signal update."));
   }
   return findings;
+}
+
+type BindingCycleEdge = {
+  fromObjectId: number;
+  fromProperty: string;
+  toObjectId: number;
+  toProperty: string;
+  line: number;
+};
+
+function edgeKey(edge: BindingCycleEdge): string {
+  return `${edge.fromObjectId}.${edge.fromProperty}->${edge.toObjectId}.${edge.toProperty}`;
+}
+
+function referencedProperties(expression: string, idName: string, target: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number]): string[] {
+  const knownProperties = new Set([...target.bindings.map((binding) => binding.propertyPath), ...target.properties.map((property) => property.name)]);
+  const regex = new RegExp(`\\b${escapeRegex(idName)}\\s*\\.\\s*([A-Za-z_]\\w*(?:\\s*\\.\\s*[A-Za-z_]\\w*)*)`, "g");
+  const properties = new Set<string>();
+  for (const match of expression.matchAll(regex)) {
+    const segments = (match[1] ?? "").split(".").map((segment) => segment.trim()).filter(Boolean);
+    if (segments.length === 0) continue;
+    properties.add(bestKnownPropertyPath(segments, knownProperties));
+  }
+  return [...properties];
+}
+
+function bestKnownPropertyPath(segments: string[], knownProperties: Set<string>): string {
+  for (let length = segments.length; length > 0; length -= 1) {
+    const candidate = segments.slice(0, length).join(".");
+    if (knownProperties.has(candidate)) return candidate;
+  }
+  return segments[0] ?? "";
 }
 
 function layoutConflictFindings({ file, document }: AnalysisContext["qmlDocuments"][number]): Finding[] {

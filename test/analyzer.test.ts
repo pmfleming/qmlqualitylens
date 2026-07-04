@@ -51,6 +51,30 @@ test("resolves component uses through import scope and aliases", () => {
   assert.ok(context.resolution.unresolvedTypes.some((use) => use.from === "Other.qml" && use.typeName === "Widget"));
 });
 
+test("honors process boundary allowlist in analyzer findings", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-process-boundary-"));
+  fs.writeFileSync(path.join(root, "Service.qml"), `import QtQuick\nItem {\n  Process {}\n}\n`);
+  fs.writeFileSync(path.join(root, "Main.qml"), `import QtQuick\nItem {\n  Process {}\n}\n`);
+  fs.writeFileSync(path.join(root, "qmlqualitylens.config.json"), JSON.stringify({ project_name: "fixture", project_root: ".", source_roots: ["."], output_dir: "target", process_boundary: { objectTypes: ["Process"], allowedFilePatterns: ["(^|/)Service\\.qml$"] } }));
+
+  const context = createAnalysisContext(loadConfig(path.join(root, "qmlqualitylens.config.json")));
+  const processFindings = context.findings.filter((finding) => finding.kind === "boundary.process_calls_in_qml");
+
+  assert.equal(processFindings.some((finding) => finding.file === "Service.qml"), false);
+  assert.equal(processFindings.some((finding) => finding.file === "Main.qml"), true);
+});
+
+test("matches process object types by exact or base type name only", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-process-types-"));
+  fs.writeFileSync(path.join(root, "Main.qml"), `import QtQuick\nItem {\n  MyPostProcess {}\n  QtCore.Process {}\n}\n`);
+  fs.writeFileSync(path.join(root, "qmlqualitylens.config.json"), JSON.stringify({ project_name: "fixture", project_root: ".", source_roots: ["."], output_dir: "target", process_boundary: { objectTypes: ["Process"] } }));
+
+  const context = createAnalysisContext(loadConfig(path.join(root, "qmlqualitylens.config.json")));
+  const component = context.components.find((item) => item.file === "Main.qml");
+
+  assert.equal(component?.processBoundaryCalls, 1);
+});
+
 test("builds project-wide resolution from qmldir and component uses", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-resolution-"));
   fs.writeFileSync(path.join(root, "qmldir"), `module Demo\nWidget 1.0 Widget.qml\ninternal Private 1.0 Private.qml\n`);

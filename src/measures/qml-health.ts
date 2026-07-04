@@ -1,4 +1,6 @@
 import type { AnalysisContext } from "../analyzer.js";
+import { isProcessBoundaryFile } from "../config.js";
+import { matchesAnyConfiguredTypeName } from "../qml-model.js";
 import { qmlSemanticFindings } from "../qml-rules.js";
 import { applySuppressions } from "../suppressions.js";
 import type { Config, Finding } from "../types.js";
@@ -38,21 +40,9 @@ function sideEffectBindingFinding(binding: AnalysisContext["bindings"][number]):
 }
 
 function processPlacementFinding(entry: AnalysisContext["qmlDocuments"][number], config: Config): Finding[] {
-  const processObjects = entry.document.objects.filter((object) => config.processBoundary.objectTypes.includes(object.typeName) || config.processBoundary.objectTypes.some((type) => object.typeName.endsWith(type)));
+  const processObjects = entry.document.objects.filter((object) => matchesAnyConfiguredTypeName(object.typeName, config.processBoundary.objectTypes));
   if (!entry.document.imports.some((item) => item.module.includes("Quickshell")) || processObjects.length === 0 || isProcessBoundaryFile(entry.file, config)) return [];
   return [{ id: `quickshell.process_placement.${entry.file}`, kind: "quickshell.process_placement", severity: "medium", file: entry.file, line: processObjects[0]?.line, message: `${entry.file} declares ${processObjects.length} Process-like object(s)`, actions: ["Prefer a dedicated service/boundary component for Quickshell Process orchestration."] }];
-}
-
-function isProcessBoundaryFile(file: string, config: Config): boolean {
-  return config.processBoundary.allowedFilePatterns.some((pattern) => matchesConfiguredPattern(file, pattern));
-}
-
-function matchesConfiguredPattern(value: string, pattern: string): boolean {
-  try {
-    return new RegExp(pattern, "i").test(value);
-  } catch {
-    return false;
-  }
 }
 
 function healthFinding(id: string, kind: string, component: AnalysisContext["components"][number], message: string, action: string): Finding {

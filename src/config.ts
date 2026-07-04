@@ -59,6 +59,18 @@ export function starterConfig(): RawConfig {
   };
 }
 
+export function isProcessBoundaryFile(file: string, config: Config): boolean {
+  return config.processBoundary.allowedFilePatterns.some((pattern) => matchesConfiguredPattern(file, pattern));
+}
+
+export function matchesConfiguredPattern(value: string, pattern: string): boolean {
+  try {
+    return new RegExp(pattern, "i").test(value);
+  } catch {
+    return false;
+  }
+}
+
 function resolveFrom(base: string, value: string): string {
   return path.isAbsolute(value) ? path.normalize(value) : path.resolve(base, value);
 }

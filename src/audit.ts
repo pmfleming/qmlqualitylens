@@ -88,8 +88,8 @@ export function runAudit(config: Config, command: string, options: AuditOptions)
       low: summary.low as number,
       changed_files: diff.files.size,
       changed_hunks: diff.hunks,
-      introduced: findings.filter((finding) => finding.introduced).length,
-      active_introduced: gateFindings.length,
+      introduced: options.base ? findings.filter((finding) => finding.introduced).length : 0,
+      active_introduced: options.base ? gateFindings.length : 0,
       base_comparison: base.status === "available" ? diff.status : base.status,
       base_reason: base.reason ?? diff.reason,
     },
@@ -108,13 +108,13 @@ export function auditMarkdown(artifact: AuditArtifact): string {
     `Verdict: **${artifact.summary.verdict}**`,
     "",
     `Active findings: ${artifact.summary.active}`,
-    `Introduced active findings: ${artifact.summary.active_introduced}`,
+    artifact.summary.base ? `Introduced active findings: ${artifact.summary.active_introduced}` : null,
     `Suppressed findings: ${artifact.summary.suppressed}`,
     artifact.summary.base ? `Base: ${artifact.summary.base} (${artifact.summary.base_comparison})` : "Base: not configured",
     "",
     artifact.summary.base ? "## Top introduced findings" : "## Top active findings",
     "",
-  ];
+  ].filter((line): line is string => line !== null);
   const topFindings = artifact.findings.filter((item) => !item.suppressed && (!artifact.summary.base || item.introduced));
   for (const finding of topFindings.slice(0, 20)) {
     lines.push(`- **${finding.severity}** ${finding.file ?? "project"}${finding.line ? `:${finding.line}` : ""} ${finding.kind}: ${finding.message}`);
@@ -138,7 +138,7 @@ function auditFinding(finding: Finding, baselineIds: Set<string>, diff: DiffCont
 }
 
 function introducedFinding(finding: Finding, changedFile: boolean, inChangedHunk: boolean, presentInBase: boolean | null, diff: DiffContext): boolean {
-  if (diff.status === "disabled") return true;
+  if (diff.status === "disabled") return false;
   if (!changedFile) return false;
   const changedLocation = finding.line ? inChangedHunk : changedFile;
   if (!changedLocation) return false;
