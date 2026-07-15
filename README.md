@@ -43,7 +43,7 @@ npm run oracle:qmllint
 npm run oracle:qmllint:nix
 ```
 
-Qt tooling is only an opt-in test oracle for calibrating heuristics; the shipped analyzer and default `npm test` remain static and dependency-free. On Nix/NixOS, enter `nix-shell` or run `direnv allow` to get `qmllint`, `qml`, `qmltestrunner`, Qt import paths, and `QT_QPA_PLATFORM=offscreen`. The CI workflow keeps this oracle job optional. See `docs/oracle-calibration.md`.
+Qt tooling is only an opt-in test oracle for calibrating heuristics; the shipped analyzer and default `npm test` remain static and dependency-free. On Nix/NixOS, enter `nix-shell` or run `direnv allow` to get `qmllint`, `qml`, `qmltestrunner`, Qt import paths, and `QT_QPA_PLATFORM=offscreen`. CI requires the heuristic benchmark while allowing the Qt/qmllint portion to skip when the optional toolchain is unavailable. See `docs/oracle-calibration.md`.
 
 Analyze the local Shelllist checkout from this repository:
 
@@ -64,6 +64,8 @@ npm run analyze:shelllist
   "output_dir": "target/qmlqualitylens",
   "qmllint_report": "target/qmllint.json",
   "qmllint_command": "qmllint .",
+  "external_modules": ["MyCompany.Controls"],
+  "external_types": ["CompanyButton"],
   "process_boundary": {
     "objectTypes": ["Process", "ShellCommand"],
     "textPatterns": ["\\b(?:nm-api|quickshell\\s+ipc|openUrlExternally)\\b"],
@@ -85,7 +87,7 @@ npm run analyze:shelllist
 }
 ```
 
-Paths in `project_root` are resolved relative to the config file. `source_roots`, `output_dir`, and `qmllint_report` are resolved relative to `project_root`. If `qmllint_report` exists it is ingested; otherwise `qmllint_command` is run from `project_root` when configured. `suppressions` can match findings by `id`, `kind`, and/or `file` with an optional `reason`. `thresholds` override the default size, complexity, binding, and clone-window limits shown above.
+Paths in `project_root` are resolved relative to the config file. `source_roots`, `output_dir`, and `qmllint_report` are resolved relative to `project_root`. If `qmllint_report` exists it is ingested; otherwise `qmllint_command` is run from `project_root` when configured. `external_modules` accepts installed module prefixes that are outside the analyzed source roots, while `external_types` accepts their known QML type names. `suppressions` can match findings by `id`, `kind`, and/or `file` with an optional `reason`. Suppressed findings remain in JSON records but do not affect active counts or scores. `thresholds` override the default size, complexity, binding, and clone-window limits shown above. Invalid configuration, thresholds, and regular expressions fail fast with actionable errors; missing source roots and analyses with no QML input are emitted as high-severity input findings.
 
 ## Commands
 
@@ -100,7 +102,7 @@ qmlqualitylens audit [--config qmlqualitylens.config.json] [--baseline file] [--
 ## Next build steps
 
 - Expand parser recovery for malformed JavaScript blocks and uncommon QML grammar edges.
-- Add stale suppression reporting and moved-finding attribution in audit mode.
+- Add moved-finding attribution in audit mode.
 - Add style-literal clone groups beyond normalized line-window and structural object clones.
 - Add accessibility/keyboard-navigation checks for visible interactive controls.
 - Deepen Quickshell-specific rules for IPC, shell surfaces, popups, and layer-shell configuration.

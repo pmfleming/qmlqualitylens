@@ -16,7 +16,7 @@ export function summaryReport(artifact: AnalysisArtifact): string {
     "Scores:",
     ...Object.entries(artifact.scores).map(([key, value]) => `  ${key}: ${value}`),
   ];
-  const top = artifact.findings.slice(0, 8);
+  const top = sortedActiveFindings(artifact.findings).slice(0, 8);
   if (top.length) {
     lines.push("", "Top findings:");
     for (const finding of top) lines.push(`  [${finding.severity}] ${location(finding)} ${finding.message}`);
@@ -64,9 +64,19 @@ export function markdownReport(artifact: AnalysisArtifact): string {
     "## Findings",
     "",
   ];
-  if (!artifact.findings.length) lines.push("No findings.");
-  for (const finding of artifact.findings) lines.push(findingMarkdown(finding));
+  const active = sortedActiveFindings(artifact.findings);
+  if (!active.length) lines.push("No active findings.");
+  for (const finding of active) lines.push(findingMarkdown(finding));
   return `${lines.join("\n")}\n`;
+}
+
+function sortedActiveFindings(findings: Finding[]): Finding[] {
+  const severityRank: Record<Finding["severity"], number> = { high: 0, medium: 1, low: 2 };
+  return findings.filter((finding) => !finding.suppressed).slice().sort((left, right) =>
+    severityRank[left.severity] - severityRank[right.severity]
+    || ((right.metric ?? 0) - (right.threshold ?? 0)) - ((left.metric ?? 0) - (left.threshold ?? 0))
+    || (left.file ?? "").localeCompare(right.file ?? "")
+    || (left.line ?? 0) - (right.line ?? 0));
 }
 
 function findingMarkdown(finding: Finding): string {

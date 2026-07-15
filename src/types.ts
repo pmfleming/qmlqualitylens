@@ -10,6 +10,8 @@ export type RawConfig = {
   exclude?: string[];
   qmllint_report?: string;
   qmllint_command?: string;
+  external_modules?: string[];
+  external_types?: string[];
   process_boundary?: Partial<ProcessBoundaryConfig>;
   suppressions?: Suppression[];
   thresholds?: Partial<Thresholds>;
@@ -48,6 +50,8 @@ export type Config = {
   exclude: string[];
   qmllintReport: string | null;
   qmllintCommand: string | null;
+  externalModules: string[];
+  externalTypes: string[];
   processBoundary: ProcessBoundaryConfig;
   suppressions: Suppression[];
   thresholds: Thresholds;
@@ -121,6 +125,7 @@ export type ComponentRecord = {
   hardcodedColors: number;
   numericStyleLiterals: number;
   processBoundaryCalls: number;
+  processBoundaryViolations: number;
   useCount: number;
   fanOut: number;
   complexityScore: number;

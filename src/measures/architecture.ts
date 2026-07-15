@@ -46,6 +46,7 @@ function componentMetrics(component: AnalysisContext["components"][number]) {
     locality: component.localityScore,
     leverage: component.leverageScore,
     process_boundary_calls: component.processBoundaryCalls,
+    process_boundary_violations: component.processBoundaryViolations,
   };
 }
 
@@ -71,7 +72,7 @@ function riskFor(component: AnalysisContext["components"][number] | undefined): 
   const score = Math.round(
     component.effort * 0.25 +
       component.distinctIdReferences * 5 +
-      component.processBoundaryCalls * 15 +
+      component.processBoundaryViolations * 15 +
       Math.max(0, component.objectCount - 20) * 2 +
       Math.max(0, component.loc.source - 200) * 0.1,
   );

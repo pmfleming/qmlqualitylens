@@ -14,7 +14,8 @@ export type QmllintResult = {
 
 export function loadQmllintResult(config: Config): QmllintResult {
   if (config.qmllintReport && fs.existsSync(config.qmllintReport)) {
-    return { source: "report", command: null, report: config.qmllintReport, exitCode: null, error: null, findings: parseQmllintOutput(fs.readFileSync(config.qmllintReport, "utf8"), config) };
+    const parsed = safeParseQmllintOutput(fs.readFileSync(config.qmllintReport, "utf8"), config);
+    return { source: "report", command: null, report: config.qmllintReport, exitCode: null, error: parsed.error, findings: parsed.findings };
   }
   if (config.qmllintCommand) return runQmllintCommand(config);
   return { source: "none", command: null, report: config.qmllintReport, exitCode: null, error: null, findings: [] };
@@ -27,14 +28,23 @@ export function loadQmllintFindings(config: Config): QmllintFinding[] {
 function runQmllintCommand(config: Config): QmllintResult {
   const result = spawnSync(config.qmllintCommand ?? "", { cwd: config.projectRoot, shell: true, encoding: "utf8", maxBuffer: 10 * 1024 * 1024 });
   const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+  const parsed = safeParseQmllintOutput(output, config);
   return {
     source: "command",
     command: config.qmllintCommand,
     report: null,
     exitCode: result.status,
-    error: result.error?.message ?? null,
-    findings: parseQmllintOutput(output, config),
+    error: [result.error?.message, parsed.error].filter(Boolean).join("; ") || null,
+    findings: parsed.findings,
   };
+}
+
+function safeParseQmllintOutput(text: string, config: Config): { findings: QmllintFinding[]; error: string | null } {
+  try {
+    return { findings: parseQmllintOutput(text, config), error: null };
+  } catch (error) {
+    return { findings: [], error: `Unable to parse qmllint output: ${error instanceof Error ? error.message : String(error)}` };
+  }
 }
 
 export function parseQmllintOutput(text: string, config: Config): QmllintFinding[] {

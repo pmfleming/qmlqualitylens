@@ -39,4 +39,4 @@ The script:
 - checks expected `qmllint` category/file labels when the tool is available;
 - prints per-rule precision/recall-style counts for the labeled heuristic corpus plus grouped `qmllint` oracle diagnostics.
 
-The oracle tier is intended for calibration and CI jobs that opt in to Qt tooling. `.github/workflows/ci.yml` runs the default dependency-free suite as a required job and an `oracle-qmllint` job with `continue-on-error: true`; projects can make that job required once their Qt package set is stable. It must not become a required dependency for normal package installation or `npm test`.
+The oracle tier is intended for calibration and CI jobs that opt in to Qt tooling. `.github/workflows/ci.yml` requires both the default dependency-free suite and the labeled heuristic benchmark. The Qt diagnostic portion skips when `qmllint` is unavailable, so Qt remains optional for normal package installation and `npm test`.

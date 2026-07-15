@@ -56,6 +56,12 @@ test("parser tracks bare id references", () => {
   assert.ok(document.idReferences.some((reference) => reference.name === "backend" && reference.targetObjectId === backend.objectId && reference.external));
 });
 
+test("parser does not treat function parameters and locals as id references", () => {
+  const document = parseQmlDocument(`import QtQuick\nItem {\n  Rectangle { id: card }\n  function inspect(card) {\n    const local = card\n    return local.width\n  }\n}\n`, "Scoped.qml");
+
+  assert.equal(document.idReferences.some((reference) => reference.name === "card" || reference.name === "local"), false);
+});
+
 test("parser surfaces diagnostics", () => {
   const document = parseQmlDocument(`Item {\n  width: (1 + 2\n`, "Broken.qml");
   assert.ok(document.diagnostics.length >= 1);

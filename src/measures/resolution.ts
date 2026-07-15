@@ -7,7 +7,8 @@ export function measureResolution(config: Config, command: string, context: Anal
   const artifact = {
     ...baseArtifact(context, "map.resolution", command),
     summary: {
-      components: resolution.componentsByName.size,
+      components: context.components.length,
+      ambiguous_component_names: resolution.ambiguousComponentNames.size,
       public_files: resolution.publicFiles.size,
       qmldir_modules: resolution.qmldirModules.length,
       imports: resolution.imports.length,
@@ -15,7 +16,8 @@ export function measureResolution(config: Config, command: string, context: Anal
       unresolved_imports: resolution.unresolvedImports.length,
       unresolved_types: resolution.unresolvedTypes.length,
     },
-    components: [...resolution.componentsByName.entries()].map(([name, file]) => ({ name, file, public: resolution.publicFiles.has(file), referenced: resolution.referencedFiles.has(file) })),
+    components: context.components.map(({ name, file }) => ({ name, file, public: resolution.publicFiles.has(file), referenced: resolution.referencedFiles.has(file) })),
+    ambiguous_component_names: [...resolution.ambiguousComponentNames.entries()].map(([name, files]) => ({ name, files })),
     qmldir_modules: resolution.qmldirModules,
     imports: resolution.imports,
     component_uses: resolution.componentUses,

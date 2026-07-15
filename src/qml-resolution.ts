@@ -1,7 +1,7 @@
 import path from "node:path";
 import type { QmlDocument } from "./qml-parser.js";
 import { baseTypeName, isShellEntrypoint } from "./qml-model.js";
-import type { ComponentRecord, ImportRecord, SourceFile } from "./types.js";
+import type { ComponentRecord, Config, ImportRecord, SourceFile } from "./types.js";
 
 export type QmlDocumentEntry = { file: string; document: QmlDocument };
 
@@ -39,6 +39,7 @@ export type ComponentUseResolution = {
 
 export type ProjectResolution = {
   componentsByName: Map<string, string>;
+  ambiguousComponentNames: Map<string, string[]>;
   publicFiles: Set<string>;
   referencedFiles: Set<string>;
   qmldirModules: QmldirModule[];
@@ -51,48 +52,112 @@ export type ProjectResolution = {
 const EXTERNAL_MODULE_PREFIXES = ["Qt", "QtQuick", "Quickshell", "QML", "org.kde", "org.freedesktop"];
 
 const BUILTIN_TYPES = new Set([
+  "AbstractButton",
   "Action",
+  "AnchorAnimation",
   "ApplicationWindow",
   "Behavior",
+  "BorderImage",
+  "BusyIndicator",
   "Button",
+  "ButtonGroup",
+  "Canvas",
+  "CheckBox",
+  "CheckDelegate",
+  "ColorAnimation",
   "Column",
   "ColumnLayout",
   "ComboBox",
   "Component",
   "Connections",
+  "Control",
+  "DelayButton",
   "Dialog",
+  "DialogButtonBox",
+  "DragHandler",
+  "Drawer",
   "Flickable",
   "Flow",
   "FocusScope",
   "Grid",
+  "Gradient",
+  "GradientStop",
   "GridLayout",
+  "GroupBox",
+  "HandlerPoint",
+  "HoverHandler",
   "Image",
+  "Instantiator",
   "Item",
   "Label",
   "Layout",
+  "ListElement",
   "ListModel",
   "ListView",
   "Loader",
   "Menu",
+  "MenuBar",
+  "MenuItem",
+  "NumberAnimation",
+  "Page",
+  "PageIndicator",
+  "Pane",
+  "ParallelAnimation",
+  "ParentAnimation",
+  "ParentChange",
+  "PauseAnimation",
   "MouseArea",
+  "PinchHandler",
+  "PointHandler",
   "Popup",
   "Process",
+  "ProgressBar",
+  "PropertyAction",
   "PropertyAnimation",
   "QtObject",
+  "RadioButton",
+  "RangeSlider",
   "Rectangle",
   "Repeater",
+  "RoundButton",
+  "RotationAnimation",
   "Row",
   "RowLayout",
+  "ScrollBar",
+  "ScrollIndicator",
   "ScrollView",
+  "SequentialAnimation",
+  "ShaderEffect",
+  "ShaderEffectSource",
   "ShellRoot",
   "ShellCommand",
+  "Slider",
+  "SpinBox",
+  "SplitView",
   "StackView",
+  "State",
+  "StateChangeScript",
+  "StateGroup",
   "StdioCollector",
   "SplitParser",
+  "SwipeDelegate",
+  "SwipeView",
+  "Switch",
+  "SwitchDelegate",
   "SystemPalette",
+  "TabBar",
+  "TabButton",
+  "TapHandler",
   "Text",
+  "TextArea",
+  "TextEdit",
   "TextField",
   "TextInput",
+  "ToolBar",
+  "ToolButton",
+  "ToolSeparator",
+  "ToolTip",
+  "Tumbler",
   "Timer",
   "Transition",
   "Window",
@@ -100,20 +165,23 @@ const BUILTIN_TYPES = new Set([
   "FloatingWindow",
   "PopupWindow",
   "HyprlandFocusGrab",
+  "WheelHandler",
 ]);
 
-export function buildProjectResolution(sources: SourceFile[], documents: QmlDocumentEntry[], components: ComponentRecord[]): ProjectResolution {
+export function buildProjectResolution(sources: SourceFile[], documents: QmlDocumentEntry[], components: ComponentRecord[], config: Config): ProjectResolution {
   const sourcePaths = new Set(sources.map((source) => source.relativePath));
   const qmldirModules = parseQmldirModules(sources.filter((source) => source.kind === "qmldir"), sourcePaths);
-  const componentsByName = buildComponentMap(components, qmldirModules);
+  const componentNames = buildComponentMaps(components, qmldirModules);
+  const componentsByName = componentNames.unique;
   const componentByFile = new Map(components.map((component) => [component.file, component]));
-  const imports = documents.flatMap(({ file, document }) => document.imports.map((record) => resolveImport(file, record, qmldirModules, sourcePaths)));
-  const componentUses = resolveComponentUses(documents, imports, components, componentByFile, qmldirModules);
+  const imports = documents.flatMap(({ file, document }) => document.imports.map((record) => resolveImport(file, record, qmldirModules, sourcePaths, config)));
+  const componentUses = resolveComponentUses(documents, imports, components, componentByFile, qmldirModules, config);
   const referencedFiles = new Set(componentUses.flatMap((use) => use.target ? [use.target] : []));
   const publicFiles = publicComponentFiles(qmldirModules, sourcePaths);
   for (const component of components) if (isShellEntrypoint(component.file)) publicFiles.add(component.file);
   return {
     componentsByName,
+    ambiguousComponentNames: componentNames.ambiguous,
     publicFiles,
     referencedFiles,
     qmldirModules,
@@ -155,10 +223,24 @@ function qmldirComponent(parts: string[], qmldir: string, line: number, sourcePa
   return { name, file, qmldir, line, public: directive !== "internal", singleton: directive === "singleton" };
 }
 
-function buildComponentMap(components: ComponentRecord[], modules: QmldirModule[]): Map<string, string> {
-  const map = new Map(components.map((component) => [component.name, component.file]));
-  for (const entry of modules.flatMap((module) => module.components)) map.set(entry.name, entry.file);
-  return map;
+function buildComponentMaps(components: ComponentRecord[], modules: QmldirModule[]): { unique: Map<string, string>; ambiguous: Map<string, string[]> } {
+  const filesByName = new Map<string, Set<string>>();
+  for (const component of components) addNamedFile(filesByName, component.name, component.file);
+  for (const entry of modules.flatMap((module) => module.components)) addNamedFile(filesByName, entry.name, entry.file);
+  const unique = new Map<string, string>();
+  const ambiguous = new Map<string, string[]>();
+  for (const [name, files] of filesByName) {
+    const values = [...files].sort();
+    if (values.length === 1 && values[0]) unique.set(name, values[0]);
+    else ambiguous.set(name, values);
+  }
+  return { unique, ambiguous };
+}
+
+function addNamedFile(map: Map<string, Set<string>>, name: string, file: string): void {
+  const files = map.get(name) ?? new Set<string>();
+  files.add(file);
+  map.set(name, files);
 }
 
 function resolveComponentUses(
@@ -167,12 +249,13 @@ function resolveComponentUses(
   components: ComponentRecord[],
   componentByFile: Map<string, ComponentRecord>,
   modules: QmldirModule[],
+  config: Config,
 ): ComponentUseResolution[] {
   return documents.flatMap(({ file, document }) => {
     const scope = componentScope(file, imports.filter((item) => item.from === file), components, componentByFile, modules);
     return document.objects.flatMap((object) => {
       const target = resolveTypeInScope(object.typeName, scope);
-      const unresolved = target === null && isProjectTypeCandidate(baseTypeName(object.typeName));
+      const unresolved = target === null && isProjectTypeCandidate(baseTypeName(object.typeName), config);
       return target || unresolved ? [{ from: file, typeName: object.typeName, line: object.line, target, unresolved }] : [];
     });
   });
@@ -223,11 +306,11 @@ function resolveTypeInScope(typeName: string, scope: ComponentScope): string | n
   return scope.unqualified.get(typeName) ?? null;
 }
 
-function resolveImport(from: string, record: ImportRecord, modules: QmldirModule[], sourcePaths: Set<string>): ImportResolution {
+function resolveImport(from: string, record: ImportRecord, modules: QmldirModule[], sourcePaths: Set<string>, config: Config): ImportResolution {
   if (isPathLikeImport(record.module)) return resolveLocalImport(from, record, sourcePaths);
   const localModule = modules.find((module) => module.module === record.module);
   if (localModule) return { from, module: record.module, alias: record.alias, line: record.line, kind: "local_module", target: localModule.file };
-  if (EXTERNAL_MODULE_PREFIXES.some((prefix) => record.module === prefix || record.module.startsWith(`${prefix}.`) || (prefix === "Qt" && record.module.startsWith("Qt")))) return { from, module: record.module, alias: record.alias, line: record.line, kind: "external", target: null };
+  if ([...EXTERNAL_MODULE_PREFIXES, ...config.externalModules].some((prefix) => record.module === prefix || record.module.startsWith(`${prefix}.`) || (prefix === "Qt" && record.module.startsWith("Qt")))) return { from, module: record.module, alias: record.alias, line: record.line, kind: "external", target: null };
   if (localDirectoryHasQml(normalizeRelative(path.posix.dirname(from), record.module), sourcePaths)) return resolveLocalImport(from, record, sourcePaths);
   return { from, module: record.module, alias: record.alias, line: record.line, kind: "unresolved", target: null };
 }
@@ -268,8 +351,8 @@ function normalizeRelative(base: string, value: string): string {
   return normalized === "." ? "" : normalized;
 }
 
-function isProjectTypeCandidate(typeName: string): boolean {
-  return /^[A-Z]/.test(typeName) && !BUILTIN_TYPES.has(typeName);
+function isProjectTypeCandidate(typeName: string, config: Config): boolean {
+  return /^[A-Z]/.test(typeName) && !BUILTIN_TYPES.has(typeName) && !config.externalTypes.includes(typeName);
 }
 
 function stripQmldirComment(line: string): string {

@@ -238,7 +238,7 @@ class Parser {
       return;
     }
     const end = this.findMatchingBrace(brace);
-    this.collectReferences(object, brace + 1, end ?? this.tokens.length);
+    this.collectReferences(object, brace + 1, end ?? this.tokens.length, this.localNamesForFunction(this.index, brace, end ?? this.tokens.length));
     object.functions.push(this.executableNode(name, token?.line ?? object.line, brace, end));
     if (end === null) this.addDiagnostic(token?.line ?? object.line, `Function ${name} has an unclosed body`);
     this.index = end === null ? this.tokens.length : end + 1;
@@ -326,8 +326,24 @@ class Parser {
     };
   }
 
-  private collectReferences(object: QmlObjectNode, start: number, end: number): void {
-    for (let cursor = start; cursor < end; cursor += 1) this.maybeAddIdentifierReference(object, cursor);
+  private collectReferences(object: QmlObjectNode, start: number, end: number, ignored = new Set<string>()): void {
+    for (let cursor = start; cursor < end; cursor += 1) if (!ignored.has(this.tokens[cursor]?.value ?? "")) this.maybeAddIdentifierReference(object, cursor);
+  }
+
+  private localNamesForFunction(declarationStart: number, brace: number, end: number): Set<string> {
+    const names = new Set<string>();
+    const openParen = this.tokens.findIndex((token, index) => index >= declarationStart && index < brace && token.value === "(");
+    if (openParen >= 0) {
+      for (let cursor = openParen + 1; cursor < brace && this.tokens[cursor]?.value !== ")"; cursor += 1) {
+        const token = this.tokens[cursor];
+        const previous = this.tokens[cursor - 1];
+        if (token?.kind === "identifier" && (previous?.value === "(" || previous?.value === ",")) names.add(token.value);
+      }
+    }
+    for (let cursor = brace + 1; cursor < end; cursor += 1) {
+      if (["const", "let", "var", "function"].includes(this.tokens[cursor]?.value ?? "") && this.tokens[cursor + 1]?.kind === "identifier") names.add(this.tokens[cursor + 1]?.value ?? "");
+    }
+    return names;
   }
 
   private maybeAddIdentifierReference(object: QmlObjectNode, cursor: number): void {

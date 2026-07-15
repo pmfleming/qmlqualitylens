@@ -4,12 +4,12 @@ import { baseArtifact, writeArtifact } from "./shared.js";
 
 export function measureCorrectnessCatalog(config: Config, command: string, context: AnalysisContext): unknown {
   const tests = context.sources
-    .filter((file) => /(^|\/)tst_.*\.qml$/.test(file.relativePath) || /test/i.test(file.relativePath) || /\bTestCase\s*\{/.test(file.text))
+    .filter((file) => file.kind !== "qmldir" && isTestFile(file.relativePath, file.text))
     .map((file) => ({
       file: file.relativePath,
       kind: file.kind,
       framework: /\bTestCase\s*\{/.test(file.text) ? "qt_quick_test" : "unknown",
-      test_cases: [...file.text.matchAll(/\bfunction\s+(test_[A-Za-z0-9_]+)/g)].map((match) => ({ name: match[1], line: lineOf(file.text, match.index ?? 0) })),
+      test_cases: [...file.text.matchAll(/\bfunction\s+((?:test|benchmark)_[A-Za-z0-9_]+)/g)].map((match) => ({ name: match[1], line: lineOf(file.text, match.index ?? 0) })),
     }));
   const artifact = {
     ...baseArtifact(context, "correctness.catalog", command),
@@ -32,6 +32,12 @@ export function measureCorrectnessCatalog(config: Config, command: string, conte
   writeArtifact(config, "correctness_review.json", artifact);
   writeArtifact(config, "test_catalog.json", { schema_version: "0.1.0", project: (artifact as any).project, tests });
   return artifact;
+}
+
+function isTestFile(file: string, text: string): boolean {
+  return /(^|\/)tst_[^/]*\.qml$/i.test(file)
+    || /(^|\/)(?:test|tests|testing|spec|specs)(?:\/|$)/i.test(file)
+    || /\bTestCase\s*\{/.test(text);
 }
 
 function lineOf(text: string, offset: number): number {

@@ -1,5 +1,6 @@
 import type { AnalysisContext } from "../analyzer.js";
 import { isProcessBoundaryFile } from "../config.js";
+import { stripCommentsAndStrings } from "../metrics.js";
 import { matchesAnyConfiguredTypeName } from "../qml-model.js";
 import { qmlSemanticFindings } from "../qml-rules.js";
 import { applySuppressions } from "../suppressions.js";
@@ -34,7 +35,7 @@ function componentHealthFindings(component: AnalysisContext["components"][number
 }
 
 function sideEffectBindingFinding(binding: AnalysisContext["bindings"][number]): Finding[] {
-  return /\b(?:exec|spawn|openUrlExternally)\s*\(/.test(binding.expression)
+  return /\b(?:exec|spawn|openUrlExternally)\s*\(/.test(stripCommentsAndStrings(binding.expression))
     ? [{ id: `qml.side_effect_binding.${binding.file}.${binding.line}`, kind: "qml.side_effect_in_binding", severity: "high", file: binding.file, line: binding.line, message: `${binding.property} binding appears to call a side-effect API`, actions: ["Move side effects out of bindings and into explicit handlers or service modules."] }]
     : [];
 }

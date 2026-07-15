@@ -75,6 +75,70 @@ test("matches process object types by exact or base type name only", () => {
   assert.equal(component?.processBoundaryCalls, 1);
 });
 
+test("reports empty analysis input instead of awarding a quality score", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-empty-"));
+  fs.writeFileSync(path.join(root, "qmlqualitylens.config.json"), JSON.stringify({ project_root: ".", source_roots: ["missing"], output_dir: "target" }));
+
+  const context = createAnalysisContext(loadConfig(path.join(root, "qmlqualitylens.config.json")));
+
+  assert.equal(context.scores.overall, 0);
+  assert.ok(context.findings.some((finding) => finding.kind === "input.missing_source_root"));
+  assert.ok(context.findings.some((finding) => finding.kind === "input.no_qml_files"));
+});
+
+test("counts only root declarations as component public API", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-public-api-"));
+  fs.writeFileSync(path.join(root, "Main.qml"), `import QtQuick\nItem {\n  property int publicValue: 1\n  Rectangle { property int privateValue: 2; signal privateSignal() }\n}\n`);
+  fs.writeFileSync(path.join(root, "qmlqualitylens.config.json"), JSON.stringify({ project_root: ".", output_dir: "target" }));
+
+  const component = createAnalysisContext(loadConfig(path.join(root, "qmlqualitylens.config.json"))).components[0];
+
+  assert.equal(component?.publicProperties, 1);
+  assert.equal(component?.signals, 0);
+});
+
+test("does not penalize scores for suppressions or allowed process boundaries", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-score-policy-"));
+  fs.writeFileSync(path.join(root, "Service.qml"), `import Missing.Module\nItem { Process {} }\n`);
+  const configPath = path.join(root, "qmlqualitylens.config.json");
+  fs.writeFileSync(configPath, JSON.stringify({ project_root: ".", output_dir: "target", suppressions: [{ kind: "resolution.unresolved_import" }], process_boundary: { objectTypes: ["Process"], allowedFilePatterns: ["Service\\.qml$"] } }));
+
+  const context = createAnalysisContext(loadConfig(configPath));
+  fs.writeFileSync(configPath, JSON.stringify({ project_root: ".", output_dir: "target", process_boundary: { objectTypes: ["Process"], allowedFilePatterns: ["Service\\.qml$"] } }));
+  const unsuppressed = createAnalysisContext(loadConfig(configPath));
+
+  assert.equal(context.components[0]?.processBoundaryViolations, 0);
+  assert.equal(context.scores.boundary, 100);
+  assert.equal(context.findings.find((finding) => finding.kind === "resolution.unresolved_import")?.suppressed, true);
+  assert.ok(context.scores.overall > unsuppressed.scores.overall);
+});
+
+test("reports stale suppressions", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-stale-suppression-"));
+  fs.writeFileSync(path.join(root, "Main.qml"), `import QtQuick\nItem {}\n`);
+  fs.writeFileSync(path.join(root, "qmlqualitylens.config.json"), JSON.stringify({ project_root: ".", output_dir: "target", suppressions: [{ kind: "complexity.binding", reason: "obsolete" }] }));
+
+  const context = createAnalysisContext(loadConfig(path.join(root, "qmlqualitylens.config.json")));
+
+  assert.ok(context.findings.some((finding) => finding.kind === "suppression.stale" && !finding.suppressed));
+});
+
+test("recognizes common Qt types and preserves ambiguous component names", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-type-catalog-"));
+  fs.mkdirSync(path.join(root, "a"));
+  fs.mkdirSync(path.join(root, "b"));
+  fs.writeFileSync(path.join(root, "Main.qml"), `import QtQuick\nItem { TapHandler {}; State {}; NumberAnimation {} }\n`);
+  fs.writeFileSync(path.join(root, "a", "Card.qml"), `import QtQuick\nItem {}\n`);
+  fs.writeFileSync(path.join(root, "b", "Card.qml"), `import QtQuick\nItem {}\n`);
+  fs.writeFileSync(path.join(root, "qmlqualitylens.config.json"), JSON.stringify({ project_root: ".", output_dir: "target" }));
+
+  const context = createAnalysisContext(loadConfig(path.join(root, "qmlqualitylens.config.json")));
+
+  assert.equal(context.resolution.unresolvedTypes.some((item) => ["TapHandler", "State", "NumberAnimation"].includes(item.typeName)), false);
+  assert.deepEqual(context.resolution.ambiguousComponentNames.get("Card"), ["a/Card.qml", "b/Card.qml"]);
+  assert.equal(context.resolution.componentsByName.has("Card"), false);
+});
+
 test("builds project-wide resolution from qmldir and component uses", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-resolution-"));
   fs.writeFileSync(path.join(root, "qmldir"), `module Demo\nWidget 1.0 Widget.qml\ninternal Private 1.0 Private.qml\n`);

@@ -8,11 +8,13 @@
     "$schema": { "type": "string" },
     "project_name": { "type": "string" },
     "project_root": { "type": "string" },
-    "source_roots": { "type": "array", "items": { "type": "string" } },
+    "source_roots": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
     "output_dir": { "type": "string" },
     "exclude": { "type": "array", "items": { "type": "string" } },
     "qmllint_report": { "type": "string" },
     "qmllint_command": { "type": "string" },
+    "external_modules": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+    "external_types": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
     "suppressions": {
       "type": "array",
       "items": {
@@ -44,13 +46,13 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "fileSlocHigh": { "type": "number" },
-        "componentObjectCountHigh": { "type": "number" },
-        "functionCyclomaticHigh": { "type": "number" },
-        "functionCognitiveHigh": { "type": "number" },
-        "handlerLinesHigh": { "type": "number" },
-        "bindingComplexityHigh": { "type": "number" },
-        "cloneWindow": { "type": "number" }
+        "fileSlocHigh": { "type": "number", "exclusiveMinimum": 0 },
+        "componentObjectCountHigh": { "type": "number", "exclusiveMinimum": 0 },
+        "functionCyclomaticHigh": { "type": "number", "exclusiveMinimum": 0 },
+        "functionCognitiveHigh": { "type": "number", "exclusiveMinimum": 0 },
+        "handlerLinesHigh": { "type": "number", "exclusiveMinimum": 0 },
+        "bindingComplexityHigh": { "type": "number", "exclusiveMinimum": 0 },
+        "cloneWindow": { "type": "integer", "minimum": 2 }
       }
     }
   }

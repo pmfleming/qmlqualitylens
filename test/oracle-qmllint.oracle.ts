@@ -3,7 +3,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { createAnalysisContext } from "../src/analyzer.js";
 import { loadConfig } from "../src/config.js";
-import { qmlSemanticFindings } from "../src/qml-rules.js";
 import { parseQmllintOutput } from "../src/qmllint.js";
 import type { Config, Finding, QmllintFinding } from "../src/types.js";
 
@@ -38,7 +37,7 @@ async function main(): Promise<void> {
   const config = loadConfig(configPath);
   const expected = JSON.parse(fs.readFileSync(expectedPath, "utf8")) as Expected;
   const context = createAnalysisContext(config);
-  const findings = [...context.findings, ...qmlSemanticFindings(context)];
+  const findings = context.findings;
   const benchmark = scoreBenchmark(expected, findings);
   const qmllint = qmllintAvailable()
     ? runQmllint(config, expected)

@@ -41,6 +41,16 @@ test("runs qmllint_command when no report exists", () => {
   assert.equal(result.findings[0]?.message, "command diagnostic");
 });
 
+test("malformed qmllint reports are surfaced without aborting analysis", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-qmllint-malformed-"));
+  fs.writeFileSync(path.join(root, "qmllint.json"), "{not-json");
+
+  const result = loadQmllintResult(configWithRoot(root));
+
+  assert.equal(result.findings.length, 0);
+  assert.match(result.error ?? "", /Unable to parse qmllint output/);
+});
+
 test("qml health ingests configured qmllint reports", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-qmllint-context-"));
   fs.writeFileSync(path.join(root, "Main.qml"), "import QtQuick\nItem {}\n");

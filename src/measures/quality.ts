@@ -17,6 +17,7 @@ export function measureLocality(config: Config, command: string, context: Analys
       id_reference_count: component.idReferenceCount,
       distinct_id_references: component.distinctIdReferences,
       process_boundary_calls: component.processBoundaryCalls,
+      process_boundary_violations: component.processBoundaryViolations,
       fan_out: component.fanOut,
     }))
     .sort((a, b) => a.locality_score - b.locality_score);

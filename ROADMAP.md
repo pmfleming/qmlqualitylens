@@ -44,7 +44,7 @@
 - [x] Optional `qmllint` oracle calibration tier with labeled benchmark fixtures.
 - [x] Optional CI job for Qt/qmllint oracle calibration.
 - [x] Local Nix/direnv Qt oracle environment.
-- Suppressions with stale-suppression detection.
+- [x] Suppressions with stale-suppression detection.
 - Moved-finding attribution across refactors.
 
 ## Phase 5: Ecosystem support

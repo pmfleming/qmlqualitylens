@@ -10,24 +10,30 @@ const EXTENSION_KIND = new Map<string, SourceKind>([
 export function discoverSourceFiles(config: Config): SourceFile[] {
   const files: SourceFile[] = [];
   const seen = new Set<string>();
-  for (const root of config.sourceRoots) walk(root, config, seen, files);
+  const visitedDirectories = new Set<string>();
+  for (const root of config.sourceRoots) walk(root, config, seen, visitedDirectories, files);
   return files.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
 }
 
-function walk(current: string, config: Config, seen: Set<string>, files: SourceFile[]): void {
+function walk(current: string, config: Config, seen: Set<string>, visitedDirectories: Set<string>, files: SourceFile[]): void {
   if (!fs.existsSync(current)) return;
-  const stat = fs.statSync(current);
+  let stat: fs.Stats;
+  try { stat = fs.statSync(current); } catch { return; }
   if (stat.isDirectory()) {
     if (isExcluded(current, config)) return;
-    for (const entry of fs.readdirSync(current)) walk(path.join(current, entry), config, seen, files);
+    const realDirectory = fs.realpathSync(current);
+    if (visitedDirectories.has(realDirectory)) return;
+    visitedDirectories.add(realDirectory);
+    for (const entry of fs.readdirSync(current)) walk(path.join(current, entry), config, seen, visitedDirectories, files);
     return;
   }
   if (!stat.isFile()) return;
   const kind = sourceKind(current);
   if (!kind || isExcluded(current, config)) return;
   const absolute = path.resolve(current);
-  if (seen.has(absolute)) return;
-  seen.add(absolute);
+  const realFile = fs.realpathSync(absolute);
+  if (seen.has(realFile)) return;
+  seen.add(realFile);
   const text = fs.readFileSync(absolute, "utf8");
   files.push({
     path: absolute,

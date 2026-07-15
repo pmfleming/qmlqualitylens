@@ -22,7 +22,8 @@
     "node": ">=20"
   },
   "files": [
-    "dist/",
+    "dist/bin/",
+    "dist/src/",
     "src/",
     "bin/",
     "README.md",

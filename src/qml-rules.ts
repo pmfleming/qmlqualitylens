@@ -1,4 +1,5 @@
 import type { AnalysisContext } from "./analyzer.js";
+import { stripCommentsAndStrings } from "./metrics.js";
 import { baseTypeName } from "./qml-model.js";
 import type { Finding } from "./types.js";
 
@@ -36,41 +37,79 @@ function bindingLossFindings({ file, document }: AnalysisContext["qmlDocuments"]
 
 function bindingCycleFindings({ file, document }: AnalysisContext["qmlDocuments"][number]): Finding[] {
   const objectById = new Map(document.objects.map((object) => [object.objectId, object]));
-  const edges = document.bindings
-    .filter((binding) => !isHandlerPath(binding.propertyPath))
-    .flatMap((binding) => binding.references.flatMap((reference) => {
+  const bindings = document.bindings.filter((binding) => !isHandlerPath(binding.propertyPath));
+  const lineByNode = new Map(bindings.map((binding) => [bindingNodeKey(binding.ownerObjectId, binding.propertyPath), binding.line]));
+  const edges = new Map<string, Set<string>>();
+  for (const binding of bindings) {
+    const from = bindingNodeKey(binding.ownerObjectId, binding.propertyPath);
+    const owner = objectById.get(binding.ownerObjectId);
+    const targets = edges.get(from) ?? new Set<string>();
+    if (owner) {
+      for (const candidate of owner.bindings.filter((item) => !isHandlerPath(item.propertyPath))) {
+        if (usesBareProperty(binding.expression, candidate.propertyPath)) targets.add(bindingNodeKey(owner.objectId, candidate.propertyPath));
+      }
+    }
+    for (const reference of binding.references) {
       const target = reference.targetObjectId ? objectById.get(reference.targetObjectId) : null;
-      if (!target || target.objectId === binding.ownerObjectId) return [];
-      return referencedProperties(binding.expression, reference.name, target).map((targetProperty) => ({
-        fromObjectId: binding.ownerObjectId,
-        fromProperty: binding.propertyPath,
-        toObjectId: target.objectId,
-        toProperty: targetProperty,
-        line: binding.line,
-      }));
-    }));
-  const seen = new Set<string>();
-  const findings: Finding[] = [];
-  for (const edge of edges) {
-    const reverse = edges.find((item) => item.fromObjectId === edge.toObjectId && item.fromProperty === edge.toProperty && item.toObjectId === edge.fromObjectId && item.toProperty === edge.fromProperty);
-    const key = reverse ? [edgeKey(edge), edgeKey(reverse)].sort().join("<->") : "";
-    if (!reverse || seen.has(key)) continue;
-    seen.add(key);
-    findings.push(finding(`qml.binding_cycle.${file}.${edge.line}.${reverse.line}`, "qml.binding_cycle", "high", file, edge.line, `Bindings '${edge.fromProperty}' and '${reverse.fromProperty}' reference each other through ids`, "Break the cycle with a source-of-truth property, one-way data flow, or an explicit signal update."));
+      if (!target || target.objectId === binding.ownerObjectId) continue;
+      for (const property of referencedProperties(binding.expression, reference.name, target)) targets.add(bindingNodeKey(target.objectId, property));
+    }
+    edges.set(from, targets);
   }
-  return findings;
+  return stronglyConnectedComponents(edges)
+    .filter((nodes) => nodes.length > 1 || (nodes[0] ? edges.get(nodes[0])?.has(nodes[0]) : false))
+    .map((nodes) => {
+      const lines = nodes.map((node) => lineByNode.get(node) ?? 1).sort((left, right) => left - right);
+      const labels = nodes.map(bindingNodeLabel).sort();
+      return finding(`qml.binding_cycle.${file}.${lines.join(".")}`, "qml.binding_cycle", "high", file, lines[0] ?? 1, `Binding cycle connects ${labels.map((label) => `'${label}'`).join(", ")}`, "Break the cycle with a source-of-truth property, one-way data flow, or an explicit signal update.");
+    });
 }
 
-type BindingCycleEdge = {
-  fromObjectId: number;
-  fromProperty: string;
-  toObjectId: number;
-  toProperty: string;
-  line: number;
-};
+function bindingNodeKey(objectId: number, property: string): string {
+  return `${objectId}:${property}`;
+}
 
-function edgeKey(edge: BindingCycleEdge): string {
-  return `${edge.fromObjectId}.${edge.fromProperty}->${edge.toObjectId}.${edge.toProperty}`;
+function bindingNodeLabel(key: string): string {
+  return key.slice(key.indexOf(":") + 1);
+}
+
+function usesBareProperty(expression: string, propertyPath: string): boolean {
+  const name = propertyPath.split(".")[0] ?? propertyPath;
+  return new RegExp(`(^|[^A-Za-z0-9_$.])${escapeRegex(name)}\\b`).test(stripCommentsAndStrings(expression));
+}
+
+function stronglyConnectedComponents(edges: Map<string, Set<string>>): string[][] {
+  let nextIndex = 0;
+  const indexes = new Map<string, number>();
+  const lowLinks = new Map<string, number>();
+  const stack: string[] = [];
+  const onStack = new Set<string>();
+  const result: string[][] = [];
+  const visit = (node: string): void => {
+    indexes.set(node, nextIndex);
+    lowLinks.set(node, nextIndex);
+    nextIndex += 1;
+    stack.push(node);
+    onStack.add(node);
+    for (const target of edges.get(node) ?? []) {
+      if (!edges.has(target)) continue;
+      if (!indexes.has(target)) {
+        visit(target);
+        lowLinks.set(node, Math.min(lowLinks.get(node) ?? 0, lowLinks.get(target) ?? 0));
+      } else if (onStack.has(target)) lowLinks.set(node, Math.min(lowLinks.get(node) ?? 0, indexes.get(target) ?? 0));
+    }
+    if (lowLinks.get(node) !== indexes.get(node)) return;
+    const component: string[] = [];
+    let current = "";
+    do {
+      current = stack.pop() ?? "";
+      onStack.delete(current);
+      if (current) component.push(current);
+    } while (current && current !== node);
+    if (component.length) result.push(component);
+  };
+  for (const node of edges.keys()) if (!indexes.has(node)) visit(node);
+  return result;
 }
 
 function referencedProperties(expression: string, idName: string, target: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number]): string[] {
@@ -139,7 +178,7 @@ function connectionMismatchFindings(entry: AnalysisContext["qmlDocuments"][numbe
     .flatMap((connection) => {
       const targetId = targetExpression(connection)?.match(/^([A-Za-z_]\w*)$/)?.[1];
       const targetObject = targetId ? idToObject.get(targetId) : null;
-      const targetFile = targetObject ? context.resolution.componentsByName.get(baseTypeName(targetObject.typeName)) : null;
+      const targetFile = targetObject ? resolvedTargetForObject(context, entry.file, targetObject.typeName, targetObject.line) : null;
       const targetSignals = targetFile ? signalsForComponent(context, targetFile) : null;
       if (!targetSignals || targetSignals.size === 0) return [];
       return connectionHandlerEntries(connection).flatMap((handler) => {
@@ -161,7 +200,7 @@ function usedPublicApi(context: AnalysisContext): Map<string, Set<string>> {
   const used = new Map<string, Set<string>>();
   for (const { file, document } of context.qmlDocuments) {
     for (const object of document.objects) {
-      const target = context.resolution.componentsByName.get(baseTypeName(object.typeName));
+      const target = resolvedTargetForObject(context, file, object.typeName, object.line);
       if (!target || target === file) continue;
       const names = used.get(target) ?? new Set<string>();
       for (const binding of object.bindings) names.add(apiNameForBinding(binding.propertyPath));
@@ -188,6 +227,10 @@ function internalApiUses(entry: AnalysisContext["qmlDocuments"][number]): Set<st
 function expressionUsesName(expression: string, name: string, rootPrefix: string): boolean {
   const escaped = escapeRegex(name);
   return rootPrefix ? new RegExp(`\\b${escapeRegex(rootPrefix)}${escaped}\\b`).test(expression) : false;
+}
+
+function resolvedTargetForObject(context: AnalysisContext, from: string, typeName: string, line: number): string | null {
+  return context.resolution.componentUses.find((use) => use.from === from && use.typeName === typeName && use.line === line)?.target ?? null;
 }
 
 function hasExternalUser(context: AnalysisContext, file: string): boolean {
@@ -256,7 +299,7 @@ function leafName(path: string): string {
 }
 
 function branchCount(expression: string): number {
-  return (expression.match(/\?|&&|\|\||\b(?:if|switch|for|while)\b/g) ?? []).length;
+  return (stripCommentsAndStrings(expression).match(/\?|&&|\|\||\b(?:if|switch|for|while)\b/g) ?? []).length;
 }
 
 function escapeRegex(value: string): string {

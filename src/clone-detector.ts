@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { stripComments } from "./metrics.js";
 import type { CloneGroup, SourceFile } from "./types.js";
 
 type CloneWindow = { file: string; startLine: number; endLine: number };
@@ -20,7 +21,7 @@ function collectCloneWindows(sources: SourceFile[], windowSize: number): Map<str
 }
 
 function collectFileWindows(windows: Map<string, CloneWindowBucket>, file: SourceFile, windowSize: number): void {
-  const normalized = file.lines.map(normalizeCloneLine);
+  const normalized = stripComments(file.text).split(/\r?\n/).map(normalizeCloneLine);
   for (let index = 0; index <= normalized.length - windowSize; index += 1) {
     const key = cloneKey(normalized, index, windowSize);
     if (!key || (!windows.has(key) && windows.size >= MAX_CLONE_KEYS)) continue;
@@ -99,7 +100,7 @@ function contentKey(instance: CloneWindow | undefined, lookup: SourceLookup): st
 
 function sourceLookup(sources: SourceFile[]): SourceLookup {
   return {
-    normalized: new Map(sources.map((file) => [file.relativePath, file.lines.map(normalizeCloneLine)])),
+    normalized: new Map(sources.map((file) => [file.relativePath, stripComments(file.text).split(/\r?\n/).map(normalizeCloneLine)])),
     original: new Map(sources.map((file) => [file.relativePath, file.lines])),
   };
 }
@@ -112,7 +113,6 @@ function addCloneWindow(windows: Map<string, CloneWindowBucket>, key: string, in
 
 function normalizeCloneLine(line: string): string {
   return line
-    .replace(/\/\/.*$/, "")
     .replace(/#[0-9a-fA-F]{3,8}\b/g, "#COLOR")
     .replace(/"(?:\\.|[^"])*"|'(?:\\.|[^'])*'/g, "STR")
     .replace(/\b\d+(?:\.\d+)?\b/g, "NUM")

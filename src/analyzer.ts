@@ -2,14 +2,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { detectClones } from "./clone-detector.js";
 import { discoverSourceFiles } from "./file-walk.js";
-import { boundedScore, complexityForCode, countMatches, lineNumberAt, locFor, percentilePenalty } from "./metrics.js";
+import { boundedScore, complexityForCode, countMatches, lineNumberAt, locFor, stripComments, stripCommentsAndStrings } from "./metrics.js";
 import { isProcessBoundaryFile } from "./config.js";
 import { baseTypeName, matchesAnyConfiguredTypeName } from "./qml-model.js";
 import { parseQmlDocument, type QmlDocument, type QmlExecutableNode } from "./qml-parser.js";
 import { buildProjectResolution, type ProjectResolution } from "./qml-resolution.js";
 import { qmlSemanticFindings } from "./qml-rules.js";
 import { loadQmllintResult, type QmllintResult } from "./qmllint.js";
-import { applySuppressions } from "./suppressions.js";
+import { applySuppressions, staleSuppressionFindings } from "./suppressions.js";
 import type {
   AnalysisArtifact,
   BindingRecord,
@@ -49,7 +49,7 @@ export function createAnalysisContext(config: Config): AnalysisContext {
   const documentByFile = new Map(qmlDocuments.map((entry) => [entry.file, entry.document]));
   const files = sources.map((file) => analyzeFile(file, documentByFile.get(file.relativePath) ?? null, config));
   const components = files.flatMap((file) => file.qmlComponent ? [file.qmlComponent] : []);
-  const resolution = buildProjectResolution(sources, qmlDocuments, components);
+  const resolution = buildProjectResolution(sources, qmlDocuments, components, config);
   applyReuseMetrics(components, resolution);
   const functions = files.flatMap((file) => file.functions);
   const bindings = files.flatMap((file) => file.bindings);
@@ -58,8 +58,9 @@ export function createAnalysisContext(config: Config): AnalysisContext {
   const qmllintFindings = qmllint.findings;
   const clones = detectClones(sources, config.thresholds.cloneWindow);
   const baseContext: AnalysisContext = { config, sources, qmlDocuments, resolution, files, components, functions, bindings, parserDiagnostics, qmllint, qmllintFindings, clones, findings: [], scores: emptyScores() };
-  const findings = applySuppressions([...deriveFindings(config, files, components, functions, bindings, clones, resolution), ...qmlSemanticFindings(baseContext)], config);
-  const scores = scoreProject(files, components, functions, bindings, clones, findings);
+  const rawFindings = [...inputFindings(config, sources), ...deriveFindings(config, files, components, functions, bindings, clones, resolution), ...qmlSemanticFindings(baseContext)];
+  const findings = [...applySuppressions(rawFindings, config), ...staleSuppressionFindings(rawFindings, config)];
+  const scores = scoreProject(config, files, components, functions, clones, findings);
   return { ...baseContext, findings, scores };
 }
 
@@ -87,7 +88,7 @@ export function legacyQualityArtifact(context: AnalysisContext): AnalysisArtifac
       bindings: bindings.length,
       cloneGroups: clones.length,
       parserDiagnostics: parserDiagnostics.length,
-      findings: findings.length,
+      findings: findings.filter((finding) => !finding.suppressed).length,
       score: scores.overall,
     },
     scores,
@@ -127,11 +128,14 @@ function bindingsFromDocument(file: SourceFile, document: QmlDocument): BindingR
 function parseComponent(file: SourceFile, functions: FunctionRecord[], bindings: BindingRecord[], document: QmlDocument, config: Config): ComponentRecord {
   const loc = locFor(file.text);
   const externalIdReferences = document.idReferences.filter((reference) => reference.external);
-  const publicProperties = document.objects.reduce((sum, object) => sum + object.properties.filter((property) => !property.alias).length, 0);
-  const aliases = document.objects.reduce((sum, object) => sum + object.properties.filter((property) => property.alias).length, 0);
-  const signals = document.objects.reduce((sum, object) => sum + object.signals.length, 0);
+  const publicProperties = document.root?.properties.filter((property) => !property.alias).length ?? 0;
+  const aliases = document.root?.properties.filter((property) => property.alias).length ?? 0;
+  const signals = document.root?.signals.length ?? 0;
   const handlerCount = document.objects.reduce((sum, object) => sum + object.handlers.length, 0);
+  const sourceWithoutComments = stripComments(file.text);
   const processObjectCount = document.objects.filter((object) => matchesAnyConfiguredTypeName(object.typeName, config.processBoundary.objectTypes)).length;
+  const processBoundaryCalls = processObjectCount + configuredPatternMatches(sourceWithoutComments, config.processBoundary.textPatterns);
+  const processBoundaryViolations = isProcessBoundaryFile(file.relativePath, config) ? 0 : processBoundaryCalls;
   const component: ComponentRecord = {
     file: file.relativePath,
     name: path.basename(file.relativePath, ".qml"),
@@ -149,9 +153,10 @@ function parseComponent(file: SourceFile, functions: FunctionRecord[], bindings:
     idsDeclared: document.objects.filter((object) => object.idName).length,
     idReferenceCount: externalIdReferences.length,
     distinctIdReferences: new Set(externalIdReferences.map((reference) => reference.name)).size,
-    hardcodedColors: countMatches(file.text, /#[0-9a-fA-F]{3,8}\b|\bQt\.rgba\s*\(/g),
-    numericStyleLiterals: countMatches(file.text, /\b(?:width|height|implicitWidth|implicitHeight|radius|spacing|margins?|padding|font\.pixelSize)\s*:\s*[0-9]+(?:\.[0-9]+)?\b/g),
-    processBoundaryCalls: processObjectCount + configuredPatternMatches(file.text, config.processBoundary.textPatterns),
+    hardcodedColors: countMatches(sourceWithoutComments, /#[0-9a-fA-F]{3,8}\b|\bQt\.rgba\s*\(/g),
+    numericStyleLiterals: countMatches(sourceWithoutComments, /\b(?:width|height|implicitWidth|implicitHeight|radius|spacing|margins?|padding|font\.pixelSize)\s*:\s*[0-9]+(?:\.[0-9]+)?\b/g),
+    processBoundaryCalls,
+    processBoundaryViolations,
     useCount: 0,
     fanOut: 0,
     complexityScore: 100,
@@ -161,7 +166,7 @@ function parseComponent(file: SourceFile, functions: FunctionRecord[], bindings:
   };
   component.effort = effortForComponent(component, functions, bindings);
   component.complexityScore = boundedScore(100 - component.maxObjectDepth * 4 - component.objectCount * 0.7 - average(functions.map((item) => item.cognitive)) * 2);
-  component.localityScore = boundedScore(100 - component.distinctIdReferences * 4 - component.processBoundaryCalls * 10 - Math.max(0, component.bindings - 25));
+  component.localityScore = boundedScore(100 - component.distinctIdReferences * 4 - component.processBoundaryViolations * 10 - Math.max(0, component.bindings - 25));
   return component;
 }
 
@@ -238,7 +243,8 @@ function advanceStringState(state: StringScanState, char: string): boolean {
 }
 
 function bindingComplexity(expression: string): number {
-  return 1 + countMatches(expression, /\?|&&|\|\||\b(?:if|for|while|switch)\b/g) + Math.max(0, (expression.match(/\./g)?.length ?? 0) - 2);
+  const code = stripCommentsAndStrings(expression);
+  return 1 + countMatches(code, /\?|&&|\|\||\b(?:if|for|while|switch)\b/g) + Math.max(0, (code.match(/\./g)?.length ?? 0) - 2);
 }
 
 function configuredPatternMatches(text: string, patterns: string[]): number {
@@ -257,6 +263,15 @@ function applyReuseMetrics(components: ComponentRecord[], resolution: ProjectRes
     component.fanOut = new Set(resolution.componentUses.filter((use) => use.from === component.file && use.target && use.target !== component.file).map((use) => use.target)).size;
     component.leverageScore = boundedScore(50 + component.useCount * 15 - component.effort * 0.15 - component.fanOut * 2);
   }
+}
+
+function inputFindings(config: Config, sources: SourceFile[]): Finding[] {
+  const findings: Finding[] = [];
+  for (const root of config.sourceRoots) {
+    if (!fs.existsSync(root)) findings.push({ id: `input.missing_source_root.${path.relative(config.projectRoot, root)}`, kind: "input.missing_source_root", severity: "high", message: `Configured source root does not exist: ${root}`, actions: ["Correct source_roots or create the expected directory before running analysis."] });
+  }
+  if (!sources.some((source) => source.kind === "qml")) findings.push({ id: "input.no_qml_files", kind: "input.no_qml_files", severity: "high", message: "No QML files were discovered; a quality score cannot be meaningfully calculated", actions: ["Check project_root, source_roots, and exclude patterns."] });
+  return findings;
 }
 
 function deriveFindings(
@@ -298,8 +313,8 @@ function componentFindings(component: ComponentRecord, config: Config): Finding[
     component.hardcodedColors >= 4
       ? finding(`styling.colors.${component.file}`, "styling.hardcoded_colors", "low", component.file, `${component.name} contains ${component.hardcodedColors} hardcoded color literals`, undefined, component.hardcodedColors, 4, "Move visual tokens into Theme.qml or semantic palette properties.")
       : null,
-    component.processBoundaryCalls > 0 && !isProcessBoundaryFile(component.file, config)
-      ? finding(`boundary.process.${component.file}`, "boundary.process_calls_in_qml", "high", component.file, `${component.name} contains process/API boundary references`, undefined, component.processBoundaryCalls, 0, "Centralize process execution and protocol parsing in a boundary module.")
+    component.processBoundaryViolations > 0
+      ? finding(`boundary.process.${component.file}`, "boundary.process_calls_in_qml", "high", component.file, `${component.name} contains process/API boundary references`, undefined, component.processBoundaryViolations, 0, "Centralize process execution and protocol parsing in a boundary module.")
       : null,
   ].filter(isFinding);
 }
@@ -369,35 +384,31 @@ function emptyScores(): ScoreBreakdown {
 }
 
 function scoreProject(
+  config: Config,
   files: FileRecord[],
   components: ComponentRecord[],
   functions: FunctionRecord[],
-  bindings: BindingRecord[],
   clones: CloneGroup[],
   findings: Finding[],
 ): ScoreBreakdown {
-  const highFindings = findings.filter((item) => item.severity === "high").length;
-  const mediumFindings = findings.filter((item) => item.severity === "medium").length;
-  const complexity = boundedScore(100 - percentilePenalty(sum(functions.map((item) => Math.max(0, item.cyclomatic - 4))), 2) - highFindings * 4);
-  const cognitive = boundedScore(100 - percentilePenalty(sum(functions.map((item) => Math.max(0, item.cognitive - 6))), 1.5));
-  const effort = boundedScore(100 - percentilePenalty(sum(components.map((item) => Math.max(0, item.effort - 90))), 0.08));
-  const locality = boundedScore(average(components.map((item) => item.localityScore), 100) - highFindings * 6);
+  if (components.length === 0) return emptyScores();
+  const active = findings.filter((item) => !item.suppressed);
+  const highRate = active.filter((item) => item.severity === "high").length / components.length;
+  const mediumRate = active.filter((item) => item.severity === "medium").length / components.length;
+  const complexity = boundedScore(100 - average(functions.map((item) => Math.max(0, item.cyclomatic - 4))) * 10);
+  const cognitive = boundedScore(100 - average(functions.map((item) => Math.max(0, item.cognitive - 6))) * 7);
+  const effort = boundedScore(100 - average(components.map((item) => Math.max(0, item.effort - 90))) * 0.2);
+  const locality = boundedScore(average(components.map((item) => item.localityScore), 100));
   const leverage = boundedScore(average(components.map((item) => item.leverageScore), 70));
-  const duplication = boundedScore(100 - clones.length * 3);
-  const size = boundedScore(100 - sum(files.map((item) => Math.max(0, item.loc.source - 180))) * 0.08);
-  const styling = boundedScore(100 - sum(components.map((item) => item.hardcodedColors + Math.max(0, item.numericStyleLiterals - 8))) * 1.2);
-  const boundary = boundedScore(100 - sum(components.map((item) => item.processBoundaryCalls)) * 12);
+  const sourceLines = Math.max(1, sum(files.map((item) => item.loc.source)));
+  const repeatedLines = sum(clones.map((clone) => clone.lines * Math.max(1, clone.instances.length - 1)));
+  const duplication = boundedScore(100 - (repeatedLines / sourceLines) * 100);
+  const size = boundedScore(100 - average(files.map((item) => Math.max(0, item.loc.source - config.thresholds.fileSlocHigh))) * 0.4);
+  const styling = boundedScore(100 - average(components.map((item) => item.hardcodedColors + Math.max(0, item.numericStyleLiterals - 8))) * 4);
+  const boundary = boundedScore(100 - average(components.map((item) => item.processBoundaryViolations)) * 20);
   const overall = boundedScore(
-    complexity * 0.18 +
-      cognitive * 0.14 +
-      effort * 0.12 +
-      locality * 0.14 +
-      leverage * 0.12 +
-      duplication * 0.1 +
-      size * 0.08 +
-      styling * 0.06 +
-      boundary * 0.06 -
-      mediumFindings,
+    complexity * 0.18 + cognitive * 0.14 + effort * 0.12 + locality * 0.14 + leverage * 0.12 +
+      duplication * 0.1 + size * 0.08 + styling * 0.06 + boundary * 0.06 - highRate * 4 - mediumRate * 2,
   );
   return { overall, complexity, cognitive, effort, locality, leverage, duplication, size, styling, boundary };
 }
@@ -415,7 +426,7 @@ function effortForComponent(component: ComponentRecord, functions: FunctionRecor
       sum(functions.map((item) => item.effort)) * 0.7 +
       sum(bindings.map((item) => item.complexity)) * 0.6 +
       component.distinctIdReferences * 2 +
-      component.processBoundaryCalls * 8,
+      component.processBoundaryViolations * 8,
   );
 }
 
