@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { Config, ProcessBoundaryConfig, RawConfig, Thresholds } from "./types.js";
+import type { Config, Enforcement, PolicyConfig, ProcessBoundaryConfig, ProjectProfile, RawConfig, Thresholds } from "./types.js";
 
 export const DEFAULT_PROCESS_BOUNDARY: ProcessBoundaryConfig = {
   objectTypes: ["Process", "ShellCommand"],
@@ -18,6 +18,13 @@ export const DEFAULT_THRESHOLDS: Thresholds = {
   cloneWindow: 6,
 };
 
+export const DEFAULT_POLICY: PolicyConfig = {
+  requireQmllint: false,
+  newCodeOnly: true,
+  failOn: ["block"],
+  incomplete: "warn",
+};
+
 export function loadConfig(configPath: string | null): Config {
   const resolvedConfig = path.resolve(configPath ?? "qmlqualitylens.config.json");
   const configDir = path.dirname(resolvedConfig);
@@ -28,6 +35,8 @@ export function loadConfig(configPath: string | null): Config {
   const outputDir = resolveFrom(projectRoot, raw.output_dir ?? "target/qmlqualitylens");
   const qmllintReport = raw.qmllint_report ? resolveFrom(projectRoot, raw.qmllint_report) : null;
   const qmllintCommand = raw.qmllint_command ?? null;
+  const profile = raw.profile ?? "generic";
+  const profileRoles = typeRolesForProfile(profile);
   return {
     configPath: resolvedConfig,
     configDir,
@@ -36,11 +45,34 @@ export function loadConfig(configPath: string | null): Config {
     sourceRoots,
     outputDir,
     exclude: raw.exclude ?? ["node_modules", ".git", "dist", "target", "build", ".direnv"],
+    profile,
     qmllintReport,
     qmllintCommand,
     externalModules: raw.external_modules ?? [],
     externalTypes: raw.external_types ?? [],
     processBoundary: { ...DEFAULT_PROCESS_BOUNDARY, ...(raw.process_boundary ?? {}) },
+    policy: {
+      requireQmllint: raw.policy?.require_qmllint ?? DEFAULT_POLICY.requireQmllint,
+      newCodeOnly: raw.policy?.new_code_only ?? DEFAULT_POLICY.newCodeOnly,
+      failOn: raw.policy?.fail_on ?? DEFAULT_POLICY.failOn,
+      incomplete: raw.policy?.incomplete ?? DEFAULT_POLICY.incomplete,
+    },
+    tools: {
+      qmlformatCommand: raw.tools?.qmlformat?.command ?? null,
+      qmlformatCheck: raw.tools?.qmlformat?.check ?? false,
+    },
+    typeRoles: {
+      interactiveTypes: [...new Set([...profileRoles.interactiveTypes, ...(raw.type_roles?.interactive_types ?? [])])],
+      layoutTypes: [...new Set([...profileRoles.layoutTypes, ...(raw.type_roles?.layout_types ?? [])])],
+      delegateOwnerTypes: [...new Set([...profileRoles.delegateOwnerTypes, ...(raw.type_roles?.delegate_owner_types ?? [])])],
+    },
+    reports: {
+      tests: raw.reports?.tests ? resolveFrom(projectRoot, raw.reports.tests) : null,
+      runtimeWarnings: raw.reports?.runtime_warnings ? resolveFrom(projectRoot, raw.reports.runtime_warnings) : null,
+      qmlProfiler: raw.reports?.qml_profiler ? resolveFrom(projectRoot, raw.reports.qml_profiler) : null,
+    },
+    performanceBudgets: (raw.performance_budgets ?? []).map((budget) => ({ scenario: budget.scenario, platform: budget.platform, frameP95Ms: budget.frame_p95_ms, maxEventMs: budget.max_event_ms })),
+    rules: raw.rules ?? {},
     suppressions: raw.suppressions ?? [],
     thresholds: { ...DEFAULT_THRESHOLDS, ...(raw.thresholds ?? {}) },
     raw,
@@ -54,8 +86,15 @@ export function starterConfig(): RawConfig {
     project_root: ".",
     source_roots: ["."],
     output_dir: "target/qmlqualitylens",
+    profile: "qtquick",
     qmllint_report: "target/qmllint.json",
     qmllint_command: "qmllint .",
+    policy: { require_qmllint: false, new_code_only: true, fail_on: ["block"], incomplete: "warn" },
+    tools: { qmlformat: { command: "qmlformat", check: false } },
+    type_roles: { interactive_types: [], layout_types: [], delegate_owner_types: [] },
+    reports: {},
+    performance_budgets: [],
+    rules: {},
     external_modules: [],
     external_types: [],
     process_boundary: DEFAULT_PROCESS_BOUNDARY,
@@ -76,7 +115,7 @@ export function matchesConfiguredPattern(value: string, pattern: string): boolea
   }
 }
 
-const CONFIG_KEYS = new Set(["$schema", "project_name", "project_root", "source_roots", "output_dir", "exclude", "qmllint_report", "qmllint_command", "external_modules", "external_types", "process_boundary", "suppressions", "thresholds"]);
+const CONFIG_KEYS = new Set(["$schema", "project_name", "project_root", "source_roots", "output_dir", "exclude", "profile", "qmllint_report", "qmllint_command", "external_modules", "external_types", "process_boundary", "policy", "tools", "type_roles", "reports", "performance_budgets", "rules", "suppressions", "thresholds"]);
 const THRESHOLD_KEYS = new Set(Object.keys(DEFAULT_THRESHOLDS));
 const PROCESS_BOUNDARY_KEYS = new Set(Object.keys(DEFAULT_PROCESS_BOUNDARY));
 
@@ -87,6 +126,7 @@ function validateRawConfig(value: unknown, file: string): RawConfig {
   for (const key of ["$schema", "project_name", "project_root", "output_dir", "qmllint_report", "qmllint_command"] as const) {
     if (value[key] !== undefined && typeof value[key] !== "string") errors.push(`${key} must be a string`);
   }
+  if (value.profile !== undefined && !isOneOf(value.profile, ["generic", "qtquick", "kirigami", "quickshell", "custom"] satisfies ProjectProfile[])) errors.push("profile must be one of: generic, qtquick, kirigami, quickshell, custom");
   for (const key of ["source_roots", "exclude", "external_modules", "external_types"] as const) validateStringArray(value[key], key, errors);
   if (Array.isArray(value.source_roots) && value.source_roots.length === 0) errors.push("source_roots must not be empty");
   validateObjectKeys(value.process_boundary, "process_boundary", PROCESS_BOUNDARY_KEYS, errors);
@@ -94,6 +134,12 @@ function validateRawConfig(value: unknown, file: string): RawConfig {
     for (const key of PROCESS_BOUNDARY_KEYS) validateStringArray(value.process_boundary[key], `process_boundary.${key}`, errors);
     for (const key of ["textPatterns", "allowedFilePatterns"]) validateRegexArray(value.process_boundary[key], `process_boundary.${key}`, errors);
   }
+  validatePolicy(value.policy, errors);
+  validateTools(value.tools, errors);
+  validateTypeRoles(value.type_roles, errors);
+  validateReports(value.reports, errors);
+  validatePerformanceBudgets(value.performance_budgets, errors);
+  validateRules(value.rules, errors);
   validateObjectKeys(value.thresholds, "thresholds", THRESHOLD_KEYS, errors);
   if (isRecord(value.thresholds)) {
     for (const [key, threshold] of Object.entries(value.thresholds)) {
@@ -131,6 +177,58 @@ function validateObjectKeys(value: unknown, name: string, keys: Set<string>, err
   for (const key of Object.keys(value)) if (!keys.has(key)) errors.push(`unknown property '${name}.${key}'`);
 }
 
+function validatePolicy(value: unknown, errors: string[]): void {
+  validateObjectKeys(value, "policy", new Set(["require_qmllint", "new_code_only", "fail_on", "incomplete"]), errors);
+  if (!isRecord(value)) return;
+  for (const key of ["require_qmllint", "new_code_only"]) if (value[key] !== undefined && typeof value[key] !== "boolean") errors.push(`policy.${key} must be a boolean`);
+  if (value.fail_on !== undefined && (!Array.isArray(value.fail_on) || value.fail_on.some((item) => !isOneOf(item, ["block", "warn", "review"] satisfies Enforcement[])))) errors.push("policy.fail_on must contain only block, warn, or review");
+  if (value.incomplete !== undefined && !isOneOf(value.incomplete, ["fail", "warn", "pass"])) errors.push("policy.incomplete must be one of: fail, warn, pass");
+}
+
+function validateTools(value: unknown, errors: string[]): void {
+  validateObjectKeys(value, "tools", new Set(["qmlformat"]), errors);
+  if (!isRecord(value)) return;
+  validateObjectKeys(value.qmlformat, "tools.qmlformat", new Set(["command", "check"]), errors);
+  if (!isRecord(value.qmlformat)) return;
+  if (value.qmlformat.command !== undefined && typeof value.qmlformat.command !== "string") errors.push("tools.qmlformat.command must be a string");
+  if (value.qmlformat.check !== undefined && typeof value.qmlformat.check !== "boolean") errors.push("tools.qmlformat.check must be a boolean");
+}
+
+function validateTypeRoles(value: unknown, errors: string[]): void {
+  validateObjectKeys(value, "type_roles", new Set(["interactive_types", "layout_types", "delegate_owner_types"]), errors);
+  if (!isRecord(value)) return;
+  for (const key of ["interactive_types", "layout_types", "delegate_owner_types"]) validateStringArray(value[key], `type_roles.${key}`, errors);
+}
+
+function validateReports(value: unknown, errors: string[]): void {
+  validateObjectKeys(value, "reports", new Set(["tests", "runtime_warnings", "qml_profiler"]), errors);
+  if (!isRecord(value)) return;
+  for (const key of ["tests", "runtime_warnings", "qml_profiler"]) if (value[key] !== undefined && typeof value[key] !== "string") errors.push(`reports.${key} must be a string`);
+}
+
+function validatePerformanceBudgets(value: unknown, errors: string[]): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value)) { errors.push("performance_budgets must be an array"); return; }
+  value.forEach((budget, index) => {
+    validateObjectKeys(budget, `performance_budgets[${index}]`, new Set(["scenario", "platform", "frame_p95_ms", "max_event_ms"]), errors);
+    if (!isRecord(budget)) return;
+    if (typeof budget.scenario !== "string" || !budget.scenario) errors.push(`performance_budgets[${index}].scenario must be a non-empty string`);
+    if (budget.platform !== undefined && typeof budget.platform !== "string") errors.push(`performance_budgets[${index}].platform must be a string`);
+    for (const key of ["frame_p95_ms", "max_event_ms"]) if (budget[key] !== undefined && (typeof budget[key] !== "number" || !Number.isFinite(budget[key]) || budget[key] <= 0)) errors.push(`performance_budgets[${index}].${key} must be a positive number`);
+  });
+}
+
+function validateRules(value: unknown, errors: string[]): void {
+  if (value === undefined) return;
+  if (!isRecord(value)) { errors.push("rules must be an object"); return; }
+  for (const [rule, override] of Object.entries(value)) {
+    validateObjectKeys(override, `rules.${rule}`, new Set(["enabled", "enforcement"]), errors);
+    if (!isRecord(override)) continue;
+    if (override.enabled !== undefined && typeof override.enabled !== "boolean") errors.push(`rules.${rule}.enabled must be a boolean`);
+    if (override.enforcement !== undefined && !isOneOf(override.enforcement, ["block", "warn", "review"] satisfies Enforcement[])) errors.push(`rules.${rule}.enforcement must be block, warn, or review`);
+  }
+}
+
 function validateSuppression(value: unknown, index: number, errors: string[]): void {
   if (!isRecord(value)) {
     errors.push(`suppressions[${index}] must be an object`);
@@ -140,6 +238,16 @@ function validateSuppression(value: unknown, index: number, errors: string[]): v
   for (const key of Object.keys(value)) if (!keys.has(key)) errors.push(`unknown property 'suppressions[${index}].${key}'`);
   for (const key of keys) if (value[key] !== undefined && typeof value[key] !== "string") errors.push(`suppressions[${index}].${key} must be a string`);
   if (!value.id && !value.kind && !value.file) errors.push(`suppressions[${index}] must specify id, kind, or file`);
+}
+
+function typeRolesForProfile(profile: ProjectProfile): Config["typeRoles"] {
+  const interactiveTypes = ["Button", "ToolButton", "RoundButton", "CheckBox", "RadioButton", "Switch", "Slider", "TextField", "ComboBox", "SpinBox", "TabButton"];
+  if (profile === "kirigami") interactiveTypes.push("Action", "BasicListItem", "SwipeListItem", "LinkButton", "Chip", "NavigationTabButton");
+  return { interactiveTypes, layoutTypes: ["RowLayout", "ColumnLayout", "GridLayout", "StackLayout"], delegateOwnerTypes: ["ListView", "GridView", "TableView", "PathView", "Repeater", "Instantiator"] };
+}
+
+function isOneOf<T>(value: unknown, allowed: readonly T[]): value is T {
+  return allowed.includes(value as T);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

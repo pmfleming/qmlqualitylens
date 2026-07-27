@@ -11,9 +11,17 @@ export function qmlSemanticFindings(context: AnalysisContext): Finding[] {
   return [
     ...context.qmlDocuments.flatMap((entry) => bindingLossFindings(entry)),
     ...context.qmlDocuments.flatMap((entry) => bindingCycleFindings(entry)),
-    ...context.qmlDocuments.flatMap((entry) => layoutConflictFindings(entry)),
+    ...context.qmlDocuments.flatMap((entry) => layoutConflictFindings(entry, context)),
     ...unusedPublicApiFindings(context),
     ...context.qmlDocuments.flatMap((entry) => connectionMismatchFindings(entry, context)),
+    ...context.qmlDocuments.flatMap((entry) => delegateStateFindings(entry, context)),
+    ...context.qmlDocuments.flatMap((entry) => typedPropertyFindings(entry)),
+    ...missingRequiredFindings(context),
+    ...context.qmlDocuments.flatMap((entry) => nativeStyleFindings(entry)),
+    ...context.qmlDocuments.flatMap((entry) => internationalizationFindings(entry)),
+    ...context.qmlDocuments.flatMap((entry) => accessibilityFindings(entry, context)),
+    ...context.qmlDocuments.flatMap((entry) => processCommandFindings(entry, context)),
+    ...context.qmlDocuments.flatMap((entry) => functionConventionFindings(entry)),
     ...context.qmlDocuments.flatMap((entry) => performanceSmellFindings(entry)),
   ];
 }
@@ -31,7 +39,7 @@ function bindingLossFindings({ file, document }: AnalysisContext["qmlDocuments"]
       })));
 
   function hasDeclarativeBinding(object: NonNullable<ReturnType<typeof objectById.get>>, property: string): boolean {
-    return object.bindings.some((binding) => !isHandlerPath(binding.propertyPath) && leafName(binding.propertyPath) === property);
+    return object.bindings.some((binding) => !isHandlerPath(binding.propertyPath) && leafName(binding.propertyPath) === property && (binding.references.length > 0 || isDynamicBinding(binding.expression)));
   }
 }
 
@@ -57,12 +65,18 @@ function bindingCycleFindings({ file, document }: AnalysisContext["qmlDocuments"
     edges.set(from, targets);
   }
   return stronglyConnectedComponents(edges)
-    .filter((nodes) => nodes.length > 1 || (nodes[0] ? edges.get(nodes[0])?.has(nodes[0]) : false))
+    .filter((nodes) => nodes.length > 1)
     .map((nodes) => {
       const lines = nodes.map((node) => lineByNode.get(node) ?? 1).sort((left, right) => left - right);
       const labels = nodes.map(bindingNodeLabel).sort();
       return finding(`qml.binding_cycle.${file}.${lines.join(".")}`, "qml.binding_cycle", "high", file, lines[0] ?? 1, `Binding cycle connects ${labels.map((label) => `'${label}'`).join(", ")}`, "Break the cycle with a source-of-truth property, one-way data flow, or an explicit signal update.");
     });
+}
+
+function isDynamicBinding(expression: string): boolean {
+  const value = expression.trim().replace(/;$/, "");
+  if (/^(?:true|false|null|undefined|[+-]?(?:\d+(?:\.\d*)?|\.\d+)|["'](?:[^"'\\]|\\.)*["']|[A-Z]\w*(?:\.[A-Za-z_]\w*)+)$/.test(value)) return false;
+  return true;
 }
 
 function bindingNodeKey(objectId: number, property: string): string {
@@ -132,16 +146,28 @@ function bestKnownPropertyPath(segments: string[], knownProperties: Set<string>)
   return segments[0] ?? "";
 }
 
-function layoutConflictFindings({ file, document }: AnalysisContext["qmlDocuments"][number]): Finding[] {
+function layoutConflictFindings({ file, document }: AnalysisContext["qmlDocuments"][number], context: AnalysisContext): Finding[] {
+  const objectById = new Map(document.objects.map((object) => [object.objectId, object]));
   return document.objects.flatMap((object) => {
     const names = new Set(object.bindings.map((binding) => binding.propertyPath));
+    const parent = object.parentObjectId ? objectById.get(object.parentObjectId) : null;
+    const layoutManaged = Boolean(parent && context.config.typeRoles.layoutTypes.some((type) => baseTypeName(type) === baseTypeName(parent.typeName)));
     const hasAnchors = hasPrefix(names, "anchors.");
     const hasLayout = hasPrefix(names, "Layout.");
+    const contradictoryGeometry = hasContradictoryGeometry(names);
     return [
-      hasAnchors && hasLayout ? finding(`qml.layout_conflict.anchors_layout.${file}.${object.line}`, "qml.layout_conflict.anchors_with_layout", "medium", file, object.line, `${object.typeName} mixes anchors with Layout attached properties`, "Use either anchors or Layout attached properties for this item, not both.") : null,
-      hasAnchors && ["x", "y", "width", "height"].some((name) => names.has(name)) ? finding(`qml.layout_conflict.anchors_geometry.${file}.${object.line}`, "qml.layout_conflict.anchors_with_geometry", "medium", file, object.line, `${object.typeName} mixes anchors with explicit x/y/width/height`, "Avoid explicit geometry on anchored items unless the property is intentionally independent.") : null,
+      hasAnchors && (layoutManaged || hasLayout) ? finding(`qml.layout_conflict.anchors_layout.${file}.${object.line}`, "qml.layout_conflict.anchors_with_layout", "medium", file, object.line, `${object.typeName} uses anchors while its geometry is managed by a Layout`, "Remove anchors from the layout child and use Layout attached properties; anchoring the layout itself to a non-layout parent is valid.") : null,
+      contradictoryGeometry ? finding(`qml.layout_conflict.anchors_geometry.${file}.${object.line}`, "qml.layout_conflict.anchors_with_geometry", "medium", file, object.line, `${object.typeName} has anchors that contradict explicit geometry`, "Remove the explicit geometry controlled by fill/edge anchors, or narrow the anchors so there is one geometry owner.") : null,
     ].filter(isFinding);
   });
+}
+
+function hasContradictoryGeometry(names: Set<string>): boolean {
+  if (names.has("anchors.fill") && ["x", "y", "width", "height"].some((name) => names.has(name))) return true;
+  if (names.has("anchors.left") && names.has("anchors.right") && names.has("width")) return true;
+  if (names.has("anchors.top") && names.has("anchors.bottom") && names.has("height")) return true;
+  if (names.has("anchors.centerIn") && (names.has("x") || names.has("y"))) return true;
+  return false;
 }
 
 function unusedPublicApiFindings(context: AnalysisContext): Finding[] {
@@ -188,12 +214,167 @@ function connectionMismatchFindings(entry: AnalysisContext["qmlDocuments"][numbe
     });
 }
 
+function delegateStateFindings(entry: AnalysisContext["qmlDocuments"][number], context: AnalysisContext): Finding[] {
+  const source = context.sources.find((item) => item.relativePath === entry.file)?.text ?? "";
+  const findings: Finding[] = [];
+  for (const owner of entry.document.objects) {
+    if (!context.config.typeRoles.delegateOwnerTypes.some((type) => baseTypeName(type) === baseTypeName(owner.typeName))) continue;
+    for (const binding of owner.bindings.filter((item) => leafName(item.propertyPath) === "delegate")) {
+      const endLine = lineAtOffset(source, binding.endOffset);
+      const roots = owner.children.filter((child) => child.line >= binding.line && child.line <= endLine);
+      for (const root of roots) {
+        const objects = descendantObjects(root);
+        const handlers = objects.flatMap((object) => [...object.handlers, ...object.functions.filter((fn) => /^on[A-Z]/.test(fn.name))]);
+        for (const object of objects) {
+          for (const property of object.properties.filter((item) => !item.readonly && !item.alias && item.name !== "index")) {
+            const assigned = handlers.some((handler) => new RegExp(`(?:^|[^A-Za-z0-9_.])${escapeRegex(property.name)}\\s*=(?!=|>)`).test(stripCommentsAndStrings(handler.body)));
+            if (!assigned) continue;
+            findings.push(finding(`qml.delegate_state.${entry.file}.${property.line}.${property.name}`, "qml.delegate_state", "medium", entry.file, property.line, `Mutable delegate property '${property.name}' is changed inside a disposable delegate`, "Store durable state in the model/backend; keep only derived or transient visual state in the delegate."));
+          }
+        }
+      }
+    }
+  }
+  return findings;
+}
+
+function descendantObjects(root: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number]): AnalysisContext["qmlDocuments"][number]["document"]["objects"] {
+  return [root, ...root.children.flatMap(descendantObjects)];
+}
+
+function lineAtOffset(text: string, offset: number): number {
+  let line = 1;
+  for (let index = 0; index < offset && index < text.length; index += 1) if (text.charCodeAt(index) === 10) line += 1;
+  return line;
+}
+
+function typedPropertyFindings({ file, document }: AnalysisContext["qmlDocuments"][number]): Finding[] {
+  return document.objects.flatMap((object) => object.properties.flatMap((property) => {
+    if (property.typeName !== "var" || !property.expression) return [];
+    const inferred = inferLiteralType(property.expression);
+    return inferred ? [finding(`qml.prefer_typed_property.${file}.${property.line}.${property.name}`, "qml.prefer_typed_property", "medium", file, property.line, `Property '${property.name}' uses var although its initializer is ${inferred}`, `Use property ${inferred} ${property.name} unless the property intentionally stores multiple unrelated types.`)] : [];
+  }));
+}
+
+function inferLiteralType(expression: string): "string" | "bool" | "int" | "real" | null {
+  const value = expression.trim().replace(/;$/, "");
+  if (/^(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')$/.test(value)) return "string";
+  if (/^(?:true|false)$/.test(value)) return "bool";
+  if (/^[+-]?\d+$/.test(value)) return "int";
+  if (/^[+-]?(?:\d+\.\d*|\d*\.\d+)$/.test(value)) return "real";
+  return null;
+}
+
+function missingRequiredFindings(context: AnalysisContext): Finding[] {
+  return context.components.flatMap((component) => {
+    const entry = context.qmlDocuments.find((item) => item.file === component.file);
+    const root = entry?.document.root;
+    if (!root) return [];
+    const uses = context.resolution.componentUses.filter((use) => use.target === component.file && use.from !== component.file);
+    if (uses.length < 2) return [];
+    return root.properties.flatMap((property) => {
+      if (property.required || property.readonly || property.alias || property.expression !== null) return [];
+      const supplied = uses.every((use) => {
+        const user = context.qmlDocuments.find((item) => item.file === use.from);
+        const object = user?.document.objects.find((candidate) => candidate.line === use.line && candidate.typeName === use.typeName);
+        return object?.bindings.some((binding) => binding.propertyPath === property.name);
+      });
+      return supplied ? [finding(`qml.missing_required.${component.file}.${property.line}.${property.name}`, "qml.missing_required", "low", component.file, property.line, `All ${uses.length} resolved users supply '${property.name}', but the property is not required`, "Mark the property required if component creation without it is invalid; otherwise document the optional default contract.")] : [];
+    });
+  });
+}
+
+const CUSTOMIZABLE_CONTROL_PARTS = new Set(["background", "contentItem", "indicator"]);
+const CONTROL_TYPES = new Set(["Button", "ToolButton", "RoundButton", "CheckBox", "RadioButton", "Switch", "Slider", "TextField", "ComboBox", "SpinBox", "TabButton"]);
+
+function nativeStyleFindings({ file, document }: AnalysisContext["qmlDocuments"][number]): Finding[] {
+  const native = document.imports.find((item) => /QtQuick\.Controls\.(?:Windows|macOS)$/.test(item.module));
+  if (!native) return [];
+  return document.objects.flatMap((object) => CONTROL_TYPES.has(baseTypeName(object.typeName)) && object.bindings.some((binding) => CUSTOMIZABLE_CONTROL_PARTS.has(binding.propertyPath))
+    ? [finding(`qml.native_style_customization.${file}.${object.line}`, "qml.native_style_customization", "medium", file, object.line, `${object.typeName} customizes a control part while importing native style '${native.module}'`, "Use a cross-platform customizable style such as Basic, Fusion, Imagine, Material, or Universal, or provide a custom style.")]
+    : []);
+}
+
+const USER_FACING_PROPERTIES = new Set(["text", "title", "placeholderText", "toolTip", "Accessible.name", "Accessible.description"]);
+
+function internationalizationFindings({ file, document }: AnalysisContext["qmlDocuments"][number]): Finding[] {
+  return document.bindings.flatMap((binding) => {
+    if (!USER_FACING_PROPERTIES.has(binding.propertyPath) && !USER_FACING_PROPERTIES.has(leafName(binding.propertyPath))) return [];
+    const expression = binding.expression.trim();
+    if (/\b(?:qsTr|qsTranslate|qsTrId|QT_TR_NOOP)\s*\(/.test(expression)) return [];
+    const literal = expression.match(/^["']([^"']+)["']\s*;?$/)?.[1];
+    if (!literal || !/[A-Za-z]{2}/.test(literal) || /^(?:qrc:|file:|https?:|[:/.#_A-Z0-9-]+)$/i.test(literal)) return [];
+    return [finding(`qml.untranslated_string.${file}.${binding.line}.${binding.propertyPath}`, "qml.untranslated_string", "low", file, binding.line, `Likely user-facing string '${literal.slice(0, 60)}' is not wrapped in a translation function`, "Wrap user-facing text with qsTr(), qsTranslate(), or qsTrId(); suppress protocol/debug strings with a reason.")];
+  });
+}
+
+function accessibilityFindings({ file, document }: AnalysisContext["qmlDocuments"][number], context: AnalysisContext): Finding[] {
+  const objectById = new Map(document.objects.map((object) => [object.objectId, object]));
+  return document.objects.flatMap((object) => {
+    const names = new Set(object.bindings.map((binding) => binding.propertyPath));
+    const type = baseTypeName(object.typeName);
+    const interactive = context.config.typeRoles.interactiveTypes.some((candidate) => baseTypeName(candidate) === type);
+    const iconOnly = interactive && (names.has("icon.source") || names.has("icon.name")) && !hasMeaningfulText(object) && !names.has("Accessible.name") && !names.has("Accessible.description");
+    const parent = object.parentObjectId ? objectById.get(object.parentObjectId) : null;
+    const parentInteractive = parent && context.config.typeRoles.interactiveTypes.some((candidate) => baseTypeName(candidate) === baseTypeName(parent.typeName));
+    const pointerOnly = type === "MouseArea" && object.handlers.some((handler) => /onClicked|onPressed|onReleased/.test(handler.name)) && parent && !parentInteractive && !parent.bindings.some((binding) => /^(?:Keys\.on|activeFocusOnTab|focus)/.test(binding.propertyPath));
+    const closePolicy = object.bindings.find((binding) => binding.propertyPath === "closePolicy")?.expression ?? "";
+    const trappedPopup = /(?:Popup|Dialog)$/.test(type) && /NoAutoClose/.test(closePolicy) && !object.bindings.some((binding) => /Keys\.onEscape/.test(binding.propertyPath)) && !object.handlers.some((handler) => /onRejected|onClosed/.test(handler.name));
+    return [
+      iconOnly ? finding(`qml.accessibility.icon_only.${file}.${object.line}`, "qml.accessibility.icon_only_control", "low", file, object.line, `${object.typeName} appears to be icon-only without an accessible name`, "Set Accessible.name or meaningful text so screen-reader users can identify the control.") : null,
+      pointerOnly ? finding(`qml.accessibility.pointer_keyboard.${file}.${object.line}`, "qml.accessibility.pointer_without_keyboard", "low", file, object.line, "Custom pointer interaction has no apparent keyboard activation on its parent", "Use a Qt Quick Control or add focus/tab behavior and Enter/Space key activation; verify manually with keyboard and assistive technology.") : null,
+      trappedPopup ? finding(`qml.accessibility.popup_escape.${file}.${object.line}`, "qml.accessibility.popup_without_escape", "low", file, object.line, `${object.typeName} disables automatic closing with no apparent Escape/reject path`, "Provide an Escape/reject action and verify that keyboard users can leave the popup; suppress if another explicit close path is guaranteed.") : null,
+    ].filter(isFinding);
+  });
+}
+
+function hasMeaningfulText(object: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number]): boolean {
+  const text = object.bindings.find((binding) => binding.propertyPath === "text")?.expression.trim();
+  return Boolean(text && !/^["']\s*["']$/.test(text));
+}
+
+function processCommandFindings({ file, document }: AnalysisContext["qmlDocuments"][number], context: AnalysisContext): Finding[] {
+  return document.objects.flatMap((object) => {
+    if (!matchesConfiguredProcessType(object.typeName, context)) return [];
+    const command = object.bindings.find((binding) => /^(?:command|arguments)$/.test(binding.propertyPath));
+    if (!command) return [];
+    const expression = stripCommentsAndStrings(command.expression);
+    const risky = /\+|`|\b(?:sh|bash)\s+-c\b|\$\{/.test(command.expression) || /\b(?:text|input|query|user|modelData)\b/i.test(expression);
+    return risky ? [finding(`qml.process_command_construction.${file}.${command.line}`, "qml.process_command_construction", "high", file, command.line, "Process command appears to be dynamically constructed from UI/model data", "Pass a structured argument list without a shell, validate each value at the service boundary, and keep command construction out of presentation components.")] : [];
+  });
+}
+
+function matchesConfiguredProcessType(typeName: string, context: AnalysisContext): boolean {
+  const base = baseTypeName(typeName);
+  return context.config.processBoundary.objectTypes.some((configured) => baseTypeName(configured) === base);
+}
+
+function functionConventionFindings({ file, document }: AnalysisContext["qmlDocuments"][number]): Finding[] {
+  return document.objects.flatMap((object) => object.functions.flatMap((fn) => {
+    const untyped = fn.parameters.some((parameter) => !parameter.typeName) || (fn.parameters.length > 0 && !fn.returnType);
+    if (!untyped || fn.body.split(/\r?\n/).length <= 3) return [];
+    return [finding(`qml.function_missing_types.${file}.${fn.line}.${fn.name}`, "qml.function_missing_types", "low", file, fn.line, `Non-trivial function '${fn.name}' has incomplete parameter/return type annotations`, "Add parameter and return type annotations where supported to improve tooling and refactoring safety.")];
+  }));
+}
+
 function performanceSmellFindings({ file, document }: AnalysisContext["qmlDocuments"][number]): Finding[] {
   return document.objects.flatMap((object) => [
-    baseTypeName(object.typeName) === "Loader" && !hasBinding(object, "active") ? finding(`qml.performance.loader_active.${file}.${object.line}`, "qml.performance.loader_without_active", "low", file, object.line, "Loader has no active binding, so lazy loading intent is unclear", "Add an explicit active binding when the Loader should be lazy or conditional.") : null,
-    baseTypeName(object.typeName) === "Image" && !hasPrefix(new Set(object.bindings.map((binding) => binding.propertyPath)), "sourceSize.") ? finding(`qml.performance.image_source_size.${file}.${object.line}`, "qml.performance.image_without_source_size", "low", file, object.line, "Image has no sourceSize binding", "Set sourceSize for large or remote images to avoid decoding more pixels than needed.") : null,
+    baseTypeName(object.typeName) === "Loader" && !hasBinding(object, "active") && loaderHasConditionalIntent(object) ? finding(`qml.performance.loader_active.${file}.${object.line}`, "qml.performance.loader_without_active", "low", file, object.line, "Conditional/asynchronous Loader has no explicit active policy", "Add an explicit active binding when the Loader should be lazy or conditional.") : null,
+    baseTypeName(object.typeName) === "Image" && likelyExpensiveImage(object) && !hasPrefix(new Set(object.bindings.map((binding) => binding.propertyPath)), "sourceSize.") ? finding(`qml.performance.image_source_size.${file}.${object.line}`, "qml.performance.image_without_source_size", "low", file, object.line, "Potentially large, remote, or dynamic Image has no sourceSize binding", "Set sourceSize when the source may decode substantially more pixels than are displayed; verify with the QML Profiler.") : null,
     /Delegate$/.test(baseTypeName(object.typeName)) && object.bindings.some((binding) => binding.expression.length > 120 || branchCount(binding.expression) >= 2) ? finding(`qml.performance.delegate_js.${file}.${object.line}`, "qml.performance_complex_delegate_js", "medium", file, object.line, `${object.typeName} contains non-trivial JavaScript in bindings`, "Move delegate computation to a model role, helper, or cached readonly property.") : null,
   ].filter(isFinding));
+}
+
+function loaderHasConditionalIntent(object: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number]): boolean {
+  const source = object.bindings.find((binding) => binding.propertyPath === "source" || binding.propertyPath === "sourceComponent")?.expression ?? "";
+  const asynchronous = object.bindings.find((binding) => binding.propertyPath === "asynchronous")?.expression.trim();
+  return asynchronous === "true" || /\?|&&|\|\||\b(?:if|undefined|null)\b/.test(stripCommentsAndStrings(source));
+}
+
+function likelyExpensiveImage(object: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number]): boolean {
+  const source = object.bindings.find((binding) => binding.propertyPath === "source")?.expression.trim() ?? "";
+  if (/^["'][^"']*(?:icon|glyph|symbol)[^"']*["']$/i.test(source) || /\.svg["']$/i.test(source)) return false;
+  return /https?:|\bmodel\.|\bsource\b|\burl\b/i.test(source) || /^["'][^"']+\.(?:png|jpe?g|webp|bmp)["']$/i.test(source);
 }
 
 function usedPublicApi(context: AnalysisContext): Map<string, Set<string>> {

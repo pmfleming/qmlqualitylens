@@ -9,7 +9,7 @@ export function provenance(config: Config, command: string): Record<string, Json
     config_path: config.configPath,
     project_root: config.projectRoot,
     lens: "qmlqualitylens",
-    lens_version: "0.1.0",
+    lens_version: "0.2.0",
   };
 }
 
@@ -24,8 +24,15 @@ export function confidence(context: AnalysisContext): Record<string, JsonValue> 
     complete: diagnostics === 0 && unresolved === 0 && !incompleteInputs,
     partial: diagnostics > 0 || unresolved > 0 || incompleteInputs,
     confidence_scope: "static QML parser with project-wide qmldir/type resolution and heuristic JavaScript analysis",
-    observed_inputs: ["qml_files", "js_files", "project_resolution", ...(qmldirFiles ? ["qmldir"] : []), ...(context.qmllintFindings.length ? ["qmllint_report"] : [])],
+    observed_inputs: ["qml_files", "js_files", "project_resolution", ...(qmldirFiles ? ["qmldir"] : []), ...(context.qmllint.source !== "none" ? ["qmllint"] : [])],
+    profile: context.config.profile,
     qmllint_source: context.qmllint.source,
+    qmllint_status: context.qmllint.status,
+    qmllint_version: context.qmllint.version,
+    qmllint_settings: context.qmllint.settings,
+    qmllint_disabled_categories: context.qmllint.disabledCategories,
+    qmllint_compiler_warnings_enabled: context.qmllint.compilerWarningsEnabled,
+    qmllint_import_paths: context.qmllint.importPaths,
     qmllint_command: context.qmllint.command,
     qmllint_report: context.qmllint.report,
     qmllint_exit_code: context.qmllint.exitCode,

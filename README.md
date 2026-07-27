@@ -2,7 +2,9 @@
 
 Static quality lens for QML, Qt Quick, and Quickshell projects.
 
-The lens is intentionally heuristic-first: it produces explainable metrics and stable JSON artifacts without requiring a full QML runtime. It is designed to complement existing QML linters by focusing on architectural maintainability rather than syntax alone. When configured with a `qmllint_report`, it ingests qmllint diagnostics as syntax-layer context in `qml_health.json`.
+See [`docs/qml-quality-research.md`](docs/qml-quality-research.md) for the official Qt recommendations and available tools, [`docs/qml-quality-improvement-plan.md`](docs/qml-quality-improvement-plan.md) for the implementation sequence, [`docs/evidence-model.md`](docs/evidence-model.md) for pass/incomplete semantics and CI usage, and [`docs/migration-0.2.md`](docs/migration-0.2.md) for upgrade guidance.
+
+The lens is evidence-aware while retaining a dependency-free static default. It separates authoritative tool/test/runtime evidence, high-confidence parsed semantics, and heuristic architecture review signals. Optional `qmllint`, `qmlformat`, test, runtime-warning, and performance reports strengthen the result without requiring application execution during ordinary analysis.
 
 The MVP includes a small dependency-free QML lexer/parser in `src/qml-parser.ts`. It understands imports, object scopes, nested object declarations, qualified type paths, grouped property scopes, attached property scopes/handlers, properties, aliases, signals, functions, multiline bindings, ids, and id references well enough to produce locality and component-shape metrics without relying on broad regular expressions. Parser diagnostics are surfaced in the JSON artifact and as findings when precision is reduced.
 
@@ -10,17 +12,22 @@ The MVP includes a small dependency-free QML lexer/parser in `src/qml-parser.ts`
 
 `qmlqualitylens analyze` writes the legacy combined `qml_quality_report.json`. `qmlqualitylens measure all` now writes split lens artifacts:
 
-- `qml_quality_report.json`: legacy combined score, records, clones, and findings
+- `quality_contract.json`: primary CI verdict separating tool, semantic, heuristic, and incomplete evidence
+- `qml_quality_report.json`: legacy heuristic maintainability score, records, clones, and findings
 - `hotspots.json`: ranked QML complexity/effort/locality hotspots
 - `clones.json`: normalized line clones plus parser-derived structural QML clones
-- `qmllint.json`: normalized qmllint diagnostics from a configured report or command
+- `qmllint.json`: normalized qmllint diagnostics with tool status/version provenance
+- `formatting.json`: optional non-mutating `qmlformat` comparison
+- `build_evidence.json`: discovered CMake `qt_add_qml_module` and lint integration evidence
 - `resolution.json`: project-wide symbol table, qmldir modules, resolved imports/component uses, and unresolved references
 - `semantic_rules.json`: binding loss/cycles, layout conflicts, unused public API, Connections mismatches, and performance smells
 - `qml_health.json`: aggregate QML/Quickshell API, semantic, qmllint, side-effect, and Process-placement rules
 - `locality_metrics.json`: id-coupling, fan-out, and process-boundary locality records
 - `leverage_metrics.json`: component reuse/centrality relative to effort
 - `cleanup.json`: unused components and unused id candidates
-- `correctness_review.json` and `test_catalog.json`: QML/Qt Quick Test discovery
+- `correctness_review.json`, `test_catalog.json`, and `test_evidence.json`: QML test discovery and optional JUnit/JSON execution evidence
+- `runtime_warnings.json`: optional imported runtime QML warnings
+- `runtime_performance.json`: optional provenance-bearing frame/event performance scenarios
 - `map.json`: dashboard-ready architecture graph with nodes, edges, roles, and risk
 
 ## Usage
@@ -62,8 +69,34 @@ npm run analyze:shelllist
   "project_root": ".",
   "source_roots": ["."],
   "output_dir": "target/qmlqualitylens",
+  "profile": "qtquick",
   "qmllint_report": "target/qmllint.json",
   "qmllint_command": "qmllint .",
+  "policy": {
+    "require_qmllint": false,
+    "new_code_only": true,
+    "fail_on": ["block"],
+    "incomplete": "warn"
+  },
+  "tools": {
+    "qmlformat": { "command": "qmlformat", "check": false }
+  },
+  "type_roles": {
+    "interactive_types": ["CompanyButton"],
+    "layout_types": [],
+    "delegate_owner_types": []
+  },
+  "reports": {
+    "tests": "target/qml-tests.xml",
+    "runtime_warnings": "target/qml-runtime.log",
+    "qml_profiler": "target/qml-profile.json"
+  },
+  "performance_budgets": [
+    { "scenario": "startup", "platform": "linux-x86_64", "frame_p95_ms": 16.67, "max_event_ms": 8 }
+  ],
+  "rules": {
+    "qml.performance.image_without_source_size": { "enforcement": "review" }
+  },
   "external_modules": ["MyCompany.Controls"],
   "external_types": ["CompanyButton"],
   "process_boundary": {
@@ -87,16 +120,16 @@ npm run analyze:shelllist
 }
 ```
 
-Paths in `project_root` are resolved relative to the config file. `source_roots`, `output_dir`, and `qmllint_report` are resolved relative to `project_root`. If `qmllint_report` exists it is ingested; otherwise `qmllint_command` is run from `project_root` when configured. `external_modules` accepts installed module prefixes that are outside the analyzed source roots, while `external_types` accepts their known QML type names. `suppressions` can match findings by `id`, `kind`, and/or `file` with an optional `reason`. Suppressed findings remain in JSON records but do not affect active counts or scores. `thresholds` override the default size, complexity, binding, and clone-window limits shown above. Invalid configuration, thresholds, and regular expressions fail fast with actionable errors; missing source roots and analyses with no QML input are emitted as high-severity input findings.
+Paths in `project_root` are resolved relative to the config file. Source, output, tool-report, and runtime-report paths are resolved relative to `project_root`. If `qmllint_report` exists it is ingested; otherwise `qmllint_command` is run from `project_root` when configured. `policy` controls evidence-based audit gating and whether missing required Qt evidence is a failure, warning/incomplete verdict, or pass. Profiles are `generic`, `qtquick`, `kirigami`, `quickshell`, and `custom`. Rule overrides can disable a rule or change its enforcement to `block`, `warn`, or `review`. `external_modules` accepts installed module prefixes outside the analyzed roots, while `external_types` accepts known QML type names. Suppressions can match findings by `id`, `kind`, and/or `file` with a reason. Suppressed findings remain in artifacts but do not affect active counts or the heuristic maintainability score. Invalid configuration fails fast with actionable errors.
 
 ## Commands
 
 ```text
 qmlqualitylens init [--config qmlqualitylens.config.json] [--force]
 qmlqualitylens catalog [--config qmlqualitylens.config.json]
-qmlqualitylens analyze [--config qmlqualitylens.config.json] [--format summary|json|markdown]
+qmlqualitylens analyze [--config qmlqualitylens.config.json] [--format summary|json|markdown|sarif]
 qmlqualitylens measure [all|task-id] [--config qmlqualitylens.config.json]
-qmlqualitylens audit [--config qmlqualitylens.config.json] [--baseline file] [--save-baseline file] [--base git-ref] [--format json|markdown]
+qmlqualitylens audit [--config qmlqualitylens.config.json] [--baseline file] [--save-baseline file] [--base git-ref] [--fail-on block|warn|review] [--incomplete fail|warn|pass] [--format json|markdown|sarif]
 ```
 
 ## Next build steps
@@ -104,5 +137,7 @@ qmlqualitylens audit [--config qmlqualitylens.config.json] [--baseline file] [--
 - Expand parser recovery for malformed JavaScript blocks and uncommon QML grammar edges.
 - Add moved-finding attribution in audit mode.
 - Add style-literal clone groups beyond normalized line-window and structural object clones.
-- Add accessibility/keyboard-navigation checks for visible interactive controls.
+- Deepen focus-chain, accessible-role propagation, and framework-specific keyboard checks.
+- Add calibrated adapters for native QML Profiler export formats beyond the normalized JSON/Chrome-trace interchange.
 - Deepen Quickshell-specific rules for IPC, shell surfaces, popups, and layer-shell configuration.
+- Continue manual rule labeling against the pinned Qt, Kirigami, QGroundControl, and Quickshell corpus.

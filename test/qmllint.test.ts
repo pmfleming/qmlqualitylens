@@ -31,6 +31,18 @@ test("parses qmllint JSON and text output", () => {
   assert.equal(prefixed?.rule, "import");
 });
 
+test("parses revision 4 nested qmllint JSON and accepts clean file reports", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-qmllint-v4-"));
+  const config = configWithRoot(root);
+  const nested = { files: [{ filename: path.join(root, "Main.qml"), success: false, warnings: [{ line: 2, column: 3, type: "warning", id: "import", message: "Item was not found" }] }], revision: 4 };
+  assert.deepEqual(parseQmllintOutput(JSON.stringify(nested), config), [{ file: "Main.qml", line: 2, column: 3, severity: "warning", message: "Item was not found", rule: "import" }]);
+
+  fs.writeFileSync(path.join(root, "qmllint.json"), JSON.stringify({ files: [{ filename: path.join(root, "Main.qml"), success: true, warnings: [] }], revision: 4 }));
+  const clean = loadQmllintResult(config);
+  assert.equal(clean.status, "complete");
+  assert.equal(clean.findings.length, 0);
+});
+
 test("runs qmllint_command when no report exists", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-qmllint-command-"));
   fs.writeFileSync(path.join(root, "qmlqualitylens.config.json"), JSON.stringify({ project_name: "lint", project_root: ".", source_roots: ["."], output_dir: "target", qmllint_command: "printf 'Main.qml:4:2: error: command diagnostic\\n'" }));

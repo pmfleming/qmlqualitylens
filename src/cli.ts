@@ -4,19 +4,22 @@ import { analyzeProject, createAnalysisContext } from "./analyzer.js";
 import { auditMarkdown, runAudit } from "./audit.js";
 import { loadConfig, starterConfig } from "./config.js";
 import { markdownReport, summaryReport } from "./report.js";
+import { sarifForFindings } from "./sarif.js";
 import { catalogForConfig, findTask, MEASURE_ORDER, TASKS } from "./tasks.js";
 import type { Config } from "./types.js";
 
 type ParsedArgs = {
   command: string | null;
   config: string | null;
-  format: "json" | "summary" | "markdown";
+  format: "json" | "summary" | "markdown" | "sarif";
   force: boolean;
   help: boolean;
   positionals: string[];
   baseline: string | null;
   saveBaseline: string | null;
   base: string | null;
+  failOn: "block" | "warn" | "review" | null;
+  incomplete: "fail" | "warn" | "pass" | null;
 };
 
 type FlagHandler = (parsed: ParsedArgs, args: string[], flag: string) => void;
@@ -27,10 +30,12 @@ const FLAG_HANDLERS: Record<string, FlagHandler> = {
   "--force": (parsed) => { parsed.force = true; },
   "--config": (parsed, args, flag) => { parsed.config = requireValue(flag, args); },
   "-c": (parsed, args, flag) => { parsed.config = requireValue(flag, args); },
-  "--format": (parsed, args, flag) => { parsed.format = oneOf(flag, requireValue(flag, args), ["json", "summary", "markdown"]); },
+  "--format": (parsed, args, flag) => { parsed.format = oneOf(flag, requireValue(flag, args), ["json", "summary", "markdown", "sarif"]); },
   "--baseline": (parsed, args, flag) => { parsed.baseline = requireValue(flag, args); },
   "--save-baseline": (parsed, args, flag) => { parsed.saveBaseline = requireValue(flag, args); },
   "--base": (parsed, args, flag) => { parsed.base = requireValue(flag, args); },
+  "--fail-on": (parsed, args, flag) => { parsed.failOn = oneOf(flag, requireValue(flag, args), ["block", "warn", "review"] as const); },
+  "--incomplete": (parsed, args, flag) => { parsed.incomplete = oneOf(flag, requireValue(flag, args), ["fail", "warn", "pass"] as const); },
 };
 
 export async function runCli(argv: string[]): Promise<void> {
@@ -48,6 +53,8 @@ export async function runCli(argv: string[]): Promise<void> {
   }
 
   const config = loadConfig(args.config);
+  if (args.failOn) config.policy.failOn = args.failOn === "block" ? ["block"] : args.failOn === "warn" ? ["block", "warn"] : ["block", "warn", "review"];
+  if (args.incomplete) config.policy.incomplete = args.incomplete;
   if (args.command === "catalog") {
     console.log(JSON.stringify(catalogForConfig(config), null, 2));
     return;
@@ -66,6 +73,7 @@ export async function runCli(argv: string[]): Promise<void> {
   if (args.command === "audit") {
     const artifact = runAudit(config, `qmlqualitylens audit --config ${config.configPath}`, { baseline: args.baseline, saveBaseline: args.saveBaseline, base: args.base });
     if (args.format === "markdown") console.log(auditMarkdown(artifact));
+    else if (args.format === "sarif") console.log(JSON.stringify(sarifForFindings(artifact.findings), null, 2));
     else console.log(JSON.stringify(artifact, null, 2));
     if (artifact.summary.verdict === "fail") process.exitCode = 1;
     return;
@@ -77,7 +85,7 @@ type TaskResult = { summary?: unknown };
 
 export function runMeasure(config: Config, taskId: string, command: string): unknown[] {
   const context = createAnalysisContext(config);
-  const taskIds = taskId === "all" ? MEASURE_ORDER : taskIdsWithDependencies(taskId);
+  const taskIds = taskId === "all" ? taskIdsWithDependencies(...MEASURE_ORDER) : taskIdsWithDependencies(taskId);
   const results = [];
   for (const id of taskIds) {
     const task = findTask(id);
@@ -88,7 +96,7 @@ export function runMeasure(config: Config, taskId: string, command: string): unk
   return results;
 }
 
-function taskIdsWithDependencies(taskId: string): string[] {
+function taskIdsWithDependencies(...taskIds: string[]): string[] {
   const ordered = new Set<string>();
   const visiting = new Set<string>();
   const visit = (id: string): void => {
@@ -101,19 +109,20 @@ function taskIdsWithDependencies(taskId: string): string[] {
     visiting.delete(id);
     ordered.add(id);
   };
-  visit(taskId);
+  for (const taskId of taskIds) visit(taskId);
   return [...ordered];
 }
 
 function printArtifact(artifact: any, format: ParsedArgs["format"]): void {
   if (format === "json") console.log(JSON.stringify(artifact, null, 2));
   else if (format === "markdown") console.log(markdownReport(artifact));
+  else if (format === "sarif") console.log(JSON.stringify(sarifForFindings(artifact.findings), null, 2));
   else console.log(summaryReport(artifact));
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
   const args = [...argv];
-  const parsed: ParsedArgs = { command: null, config: null, format: "summary", force: false, help: false, positionals: [], baseline: null, saveBaseline: null, base: null };
+  const parsed: ParsedArgs = { command: null, config: null, format: "summary", force: false, help: false, positionals: [], baseline: null, saveBaseline: null, base: null, failOn: null, incomplete: null };
   if (args[0] === "--help" || args[0] === "-h") {
     parsed.help = true;
     return parsed;
@@ -136,7 +145,7 @@ function requireValue(flag: string, args: string[]): string {
   return value;
 }
 
-function oneOf<T extends string>(flag: string, value: string, allowed: T[]): T {
+function oneOf<T extends string>(flag: string, value: string, allowed: readonly T[]): T {
   if (!allowed.includes(value as T)) throw new Error(`${flag} must be one of: ${allowed.join(", ")}`);
   return value as T;
 }
@@ -147,9 +156,9 @@ function printHelp(): void {
 Usage:
   qmlqualitylens init [--config qmlqualitylens.config.json] [--force]
   qmlqualitylens catalog [--config qmlqualitylens.config.json]
-  qmlqualitylens analyze [--config qmlqualitylens.config.json] [--format summary|json|markdown]
+  qmlqualitylens analyze [--config qmlqualitylens.config.json] [--format summary|json|markdown|sarif]
   qmlqualitylens measure [all|task-id] [--config qmlqualitylens.config.json]
-  qmlqualitylens audit [--config qmlqualitylens.config.json] [--baseline file] [--save-baseline file] [--base git-ref] [--format json|markdown]
+  qmlqualitylens audit [--config qmlqualitylens.config.json] [--baseline file] [--save-baseline file] [--base git-ref] [--fail-on block|warn|review] [--incomplete fail|warn|pass] [--format json|markdown|sarif]
 
 Important task ids:
   ${TASKS.map((task) => task.id).join("\n  ")}

@@ -110,15 +110,18 @@ class Parser {
     }
   }
 
-  private readImport(line: number): { module: string; version: string | null; alias: string | null; line: number } | null {
+  private readImport(line: number): Omit<ImportRecord, "file"> | null {
     const moduleToken = this.tokens[this.index + 1];
     if (!moduleToken) return null;
-    if (moduleToken.kind === "string") return { module: unquoteString(moduleToken.value), version: null, alias: this.importAlias(this.index + 2, line), line };
+    if (moduleToken.kind === "string") {
+      const module = unquoteString(moduleToken.value);
+      return { module, version: null, alias: this.importAlias(this.index + 2, line), line, classification: module.endsWith(".js") || module.endsWith(".mjs") ? "javascript" : "local" };
+    }
     const modulePath = this.readPath(this.index + 1);
     if (!modulePath) return null;
     const version = this.tokens[modulePath.endIndex]?.kind === "number" ? this.tokens[modulePath.endIndex]?.value ?? null : null;
     const aliasStart = version ? modulePath.endIndex + 1 : modulePath.endIndex;
-    return { module: modulePath.path, version, alias: this.importAlias(aliasStart, line), line };
+    return { module: modulePath.path, version, alias: this.importAlias(aliasStart, line), line, classification: classifyImport(modulePath.path) };
   }
 
   private importAlias(start: number, line: number): string | null {
@@ -148,6 +151,7 @@ class Parser {
       bindings: [],
       properties: [],
       signals: [],
+      members: [],
       functions: [],
       handlers: [],
       references: [],
@@ -185,15 +189,23 @@ class Parser {
 
   private parseMember(object: QmlObjectNode, prefix: string | null, childDepth: number): boolean {
     if (this.skipSeparator()) return true;
+    const token = this.tokens[this.index];
+    if (!token) return false;
     if (this.isFunctionDeclaration(this.index)) return this.parseAndContinue(() => this.parseFunction(object));
     if (this.isSignalDeclaration(this.index)) return this.parseAndContinue(() => this.parseSignal(object));
     if (this.isPropertyDeclaration(this.index)) return this.parseAndContinue(() => this.parseProperty(object, prefix));
     const group = this.groupScopeAt(this.index);
-    if (group) return this.parseAndContinue(() => this.parseGroupScope(object, joinPath(prefix, group.path), group.braceIndex));
+    if (group) return this.parseAndContinue(() => {
+      object.members.push({ kind: "group", name: joinPath(prefix, group.path), line: token.line });
+      this.parseGroupScope(object, joinPath(prefix, group.path), group.braceIndex);
+    });
     if (this.isHandlerBinding(this.index)) return this.parseAndContinue(() => this.parseBinding(object, true, prefix));
     if (this.isBindingStart(this.index)) return this.parseAndContinue(() => this.parseBinding(object, false, prefix));
     const objectStart = this.findObjectStartAt(this.index);
-    if (objectStart !== null) return this.parseAndContinue(() => this.parseObject(objectStart, object, childDepth));
+    if (objectStart !== null) return this.parseAndContinue(() => {
+      object.members.push({ kind: "object", name: this.readPath(objectStart)?.path ?? "object", line: token.line });
+      this.parseObject(objectStart, object, childDepth);
+    });
     return false;
   }
 
@@ -213,19 +225,42 @@ class Parser {
     let colon = this.findTopLevelSymbol(start, ":", this.lineLimit(start));
     const semicolon = this.findTopLevelSymbol(start, ";", this.lineLimit(start));
     if (colon !== null && semicolon !== null && semicolon < colon) colon = null;
+    const declarationEnd = colon ?? this.lineLimit(start);
     const name = colon === null ? this.propertyNameWithoutInitializer(start) : this.lastIdentifierBetween(start, colon);
-    const alias = this.tokens.slice(start, colon ?? this.lineLimit(start)).some((token) => token.value === "alias");
+    const declarationTokens = this.tokens.slice(start, declarationEnd);
+    const alias = declarationTokens.some((token) => token.value === "alias");
+    const propertyIndex = declarationTokens.findIndex((token) => token.value === "property");
+    const nameIndex = name ? declarationTokens.map((token) => token.value).lastIndexOf(name) : -1;
+    const typeTokens = propertyIndex >= 0 && nameIndex > propertyIndex ? declarationTokens.slice(propertyIndex + 1, nameIndex) : [];
+    const typeName = alias ? "alias" : typeTokens.map((token) => token.value).join("").trim() || null;
     const propertyName = prefix && name ? `${prefix}.${name}` : name;
-    if (propertyName) object.properties.push({ name: propertyName, line: this.tokens[start]?.line ?? object.line, alias });
-    if (colon !== null) this.parseBindingFromColon(object, propertyName ?? `${prefix ? `${prefix}.` : ""}property`, colon);
+    let binding: QmlBindingNode | null = null;
+    if (colon !== null) binding = this.parseBindingFromColon(object, propertyName ?? `${prefix ? `${prefix}.` : ""}property`, colon);
     else this.skipLineOrStatement(start);
+    if (propertyName) {
+      object.properties.push({
+        name: propertyName,
+        line: this.tokens[start]?.line ?? object.line,
+        alias,
+        aliasTarget: alias ? binding?.expression ?? null : null,
+        typeName,
+        required: declarationTokens.some((token) => token.value === "required"),
+        readonly: declarationTokens.some((token) => token.value === "readonly"),
+        isDefault: declarationTokens.some((token) => token.value === "default"),
+        expression: binding?.expression ?? null,
+      });
+      object.members.push({ kind: "property", name: propertyName, line: this.tokens[start]?.line ?? object.line });
+    }
   }
 
   private parseSignal(object: QmlObjectNode): void {
-    const token = this.tokens[this.index];
-    const name = this.tokens[this.index + 1]?.value ?? "signal";
-    object.signals.push({ name, line: token?.line ?? object.line });
-    this.skipLineOrStatement(this.index);
+    const start = this.index;
+    const token = this.tokens[start];
+    const name = this.tokens[start + 1]?.value ?? "signal";
+    const end = this.lineLimit(start);
+    object.signals.push({ name, line: token?.line ?? object.line, parameters: this.parametersBetween(start + 2, end) });
+    object.members.push({ kind: "signal", name, line: token?.line ?? object.line });
+    this.skipLineOrStatement(start);
   }
 
   private parseFunction(object: QmlObjectNode): void {
@@ -239,15 +274,19 @@ class Parser {
     }
     const end = this.findMatchingBrace(brace);
     this.collectReferences(object, brace + 1, end ?? this.tokens.length, this.localNamesForFunction(this.index, brace, end ?? this.tokens.length));
-    object.functions.push(this.executableNode(name, token?.line ?? object.line, brace, end));
+    object.functions.push(this.executableNode(name, token?.line ?? object.line, this.index, brace, end));
+    object.members.push({ kind: "function", name, line: token?.line ?? object.line });
     if (end === null) this.addDiagnostic(token?.line ?? object.line, `Function ${name} has an unclosed body`);
     this.index = end === null ? this.tokens.length : end + 1;
   }
 
-  private executableNode(name: string, line: number, startIndex: number, endIndex: number | null): QmlExecutableNode {
+  private executableNode(name: string, line: number, declarationStart: number, startIndex: number, endIndex: number | null): QmlExecutableNode {
     const start = this.tokens[startIndex]?.offset ?? 0;
     const end = endIndex === null ? this.text.length : this.tokens[endIndex]?.endOffset ?? this.text.length;
-    return { name, line, startOffset: start, endOffset: end, body: this.text.slice(start, end) };
+    const closeParen = this.findTokenBefore(declarationStart, startIndex, ")");
+    const returnColon = closeParen === null ? null : this.tokens.findIndex((token, index) => index > closeParen && index < startIndex && token.value === ":");
+    const returnType = returnColon !== null && returnColon >= 0 ? this.tokens.slice(returnColon + 1, startIndex).map((token) => token.value).join("").trim() || null : null;
+    return { name, line, startOffset: start, endOffset: end, body: this.text.slice(start, end), parameters: this.parametersBetween(declarationStart + 2, startIndex), returnType };
   }
 
   private parseBinding(object: QmlObjectNode, handler: boolean, prefix: string | null): void {
@@ -258,7 +297,8 @@ class Parser {
     }
     const propertyPath = prefix ? `${prefix}.${path.path}` : path.path;
     const binding = this.parseBindingFromColon(object, propertyPath, path.colonIndex);
-    if (handler) object.handlers.push({ name: propertyPath, line: binding.line, startOffset: binding.startOffset, endOffset: binding.endOffset, body: binding.expression });
+    object.members.push({ kind: propertyPath === "id" ? "id" : "binding", name: propertyPath, line: binding.line });
+    if (handler) object.handlers.push({ name: propertyPath, line: binding.line, startOffset: binding.startOffset, endOffset: binding.endOffset, body: binding.expression, parameters: [], returnType: null });
   }
 
   private parseBindingFromColon(object: QmlObjectNode, propertyPath: string, colon: number): QmlBindingNode {
@@ -328,6 +368,39 @@ class Parser {
 
   private collectReferences(object: QmlObjectNode, start: number, end: number, ignored = new Set<string>()): void {
     for (let cursor = start; cursor < end; cursor += 1) if (!ignored.has(this.tokens[cursor]?.value ?? "")) this.maybeAddIdentifierReference(object, cursor);
+  }
+
+  private parametersBetween(start: number, end: number): Array<{ name: string; typeName: string | null }> {
+    const open = this.tokens.findIndex((token, index) => index >= start && index < end && token.value === "(");
+    if (open < 0) return [];
+    const close = this.tokens.findIndex((token, index) => index > open && index < end && token.value === ")");
+    const limit = close < 0 ? end : close;
+    const segments: QmlToken[][] = [];
+    let current: QmlToken[] = [];
+    for (let cursor = open + 1; cursor < limit; cursor += 1) {
+      const token = this.tokens[cursor];
+      if (!token) continue;
+      if (token.value === ",") { if (current.length) segments.push(current); current = []; }
+      else current.push(token);
+    }
+    if (current.length) segments.push(current);
+    return segments.flatMap((segment) => {
+      const colon = segment.findIndex((token) => token.value === ":");
+      if (colon >= 0) {
+        const name = segment.slice(0, colon).find((token) => token.kind === "identifier")?.value;
+        const typeName = segment.slice(colon + 1).map((token) => token.value).join("").trim() || null;
+        return name ? [{ name, typeName }] : [];
+      }
+      const identifiers = segment.filter((token) => token.kind === "identifier");
+      const name = identifiers.at(-1)?.value;
+      const typeName = identifiers.length > 1 ? segment.slice(0, segment.lastIndexOf(identifiers.at(-1) as QmlToken)).map((token) => token.value).join("").trim() || null : null;
+      return name ? [{ name, typeName }] : [];
+    });
+  }
+
+  private findTokenBefore(start: number, end: number, value: string): number | null {
+    for (let cursor = end - 1; cursor >= start; cursor -= 1) if (this.tokens[cursor]?.value === value) return cursor;
+    return null;
   }
 
   private localNamesForFunction(declarationStart: number, brace: number, end: number): Set<string> {
@@ -538,6 +611,14 @@ function isStringQuote(char: string): boolean {
 
 function startsWithUppercase(value: string): boolean {
   return /^[A-Z]/.test(value);
+}
+
+function classifyImport(module: string): ImportRecord["classification"] {
+  if (module === "." || module === ".." || module.startsWith("./") || module.startsWith("../")) return "local";
+  if (module === "Qt" || module.startsWith("Qt")) return "qt";
+  if (module === "Quickshell" || module.startsWith("Quickshell.")) return "quickshell";
+  if (module.startsWith("org.kde") || /Kirigami/i.test(module)) return "kirigami";
+  return "external";
 }
 
 function joinPath(prefix: string | null, path: string): string {

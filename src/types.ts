@@ -1,6 +1,48 @@
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 
+export type EvidenceClass = "tool" | "semantic" | "heuristic";
+export type Enforcement = "block" | "warn" | "review";
+export type FindingCategory = "correctness" | "architecture" | "performance" | "testing" | "accessibility" | "i18n" | "style" | "security";
+export type ConfidenceLevel = "low" | "medium" | "high";
+export type ProjectProfile = "generic" | "qtquick" | "kirigami" | "quickshell" | "custom";
+
+export type PolicyConfig = {
+  requireQmllint: boolean;
+  newCodeOnly: boolean;
+  failOn: Enforcement[];
+  incomplete: "fail" | "warn" | "pass";
+};
+
+export type RuleOverride = {
+  enabled?: boolean;
+  enforcement?: Enforcement;
+};
+
+export type TypeRolesConfig = {
+  interactiveTypes: string[];
+  layoutTypes: string[];
+  delegateOwnerTypes: string[];
+};
+
+export type ToolsConfig = {
+  qmlformatCommand: string | null;
+  qmlformatCheck: boolean;
+};
+
+export type RuntimeBudget = {
+  scenario: string;
+  platform?: string;
+  frameP95Ms?: number;
+  maxEventMs?: number;
+};
+
+export type ReportsConfig = {
+  tests: string | null;
+  runtimeWarnings: string | null;
+  qmlProfiler: string | null;
+};
+
 export type RawConfig = {
   $schema?: string;
   project_name?: string;
@@ -8,11 +50,38 @@ export type RawConfig = {
   source_roots?: string[];
   output_dir?: string;
   exclude?: string[];
+  profile?: ProjectProfile;
   qmllint_report?: string;
   qmllint_command?: string;
   external_modules?: string[];
   external_types?: string[];
   process_boundary?: Partial<ProcessBoundaryConfig>;
+  policy?: {
+    require_qmllint?: boolean;
+    new_code_only?: boolean;
+    fail_on?: Enforcement[];
+    incomplete?: "fail" | "warn" | "pass";
+  };
+  tools?: {
+    qmlformat?: { command?: string; check?: boolean };
+  };
+  type_roles?: {
+    interactive_types?: string[];
+    layout_types?: string[];
+    delegate_owner_types?: string[];
+  };
+  reports?: {
+    tests?: string;
+    runtime_warnings?: string;
+    qml_profiler?: string;
+  };
+  performance_budgets?: Array<{
+    scenario: string;
+    platform?: string;
+    frame_p95_ms?: number;
+    max_event_ms?: number;
+  }>;
+  rules?: Record<string, RuleOverride>;
   suppressions?: Suppression[];
   thresholds?: Partial<Thresholds>;
 };
@@ -48,11 +117,18 @@ export type Config = {
   sourceRoots: string[];
   outputDir: string;
   exclude: string[];
+  profile: ProjectProfile;
   qmllintReport: string | null;
   qmllintCommand: string | null;
   externalModules: string[];
   externalTypes: string[];
   processBoundary: ProcessBoundaryConfig;
+  policy: PolicyConfig;
+  tools: ToolsConfig;
+  typeRoles: TypeRolesConfig;
+  reports: ReportsConfig;
+  performanceBudgets: RuntimeBudget[];
+  rules: Record<string, RuleOverride>;
   suppressions: Suppression[];
   thresholds: Thresholds;
   raw: RawConfig;
@@ -81,6 +157,7 @@ export type ImportRecord = {
   version: string | null;
   alias: string | null;
   line: number;
+  classification: "qt" | "quickshell" | "kirigami" | "local" | "javascript" | "external";
 };
 
 export type BindingRecord = {
@@ -176,6 +253,13 @@ export type QmllintFinding = {
   rule: string | null;
 };
 
+export type FindingAuthority = {
+  kind: "qt" | "project" | "tool" | "lens";
+  name: string;
+  url?: string;
+  rule?: string;
+};
+
 export type Finding = {
   id: string;
   kind: string;
@@ -186,6 +270,12 @@ export type Finding = {
   metric?: number;
   threshold?: number;
   actions: string[];
+  confidence?: ConfidenceLevel;
+  evidence?: EvidenceClass;
+  enforcement?: Enforcement;
+  category?: FindingCategory;
+  authority?: FindingAuthority;
+  fingerprint?: string;
   suppressed?: boolean;
   suppression_reason?: string;
 };
@@ -204,7 +294,7 @@ export type ScoreBreakdown = {
 };
 
 export type AnalysisArtifact = {
-  schema_version: "0.1.0";
+  schema_version: "0.2.0";
   task_id: "quality.qml";
   project: {
     name: string;

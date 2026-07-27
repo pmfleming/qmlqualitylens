@@ -33,10 +33,21 @@ export type QmlBindingNode = {
   endOffset: number;
 };
 
+export type QmlParameterNode = {
+  name: string;
+  typeName: string | null;
+};
+
 export type QmlPropertyNode = {
   name: string;
   line: number;
   alias: boolean;
+  aliasTarget: string | null;
+  typeName: string | null;
+  required: boolean;
+  readonly: boolean;
+  isDefault: boolean;
+  expression: string | null;
 };
 
 export type QmlExecutableNode = {
@@ -45,6 +56,8 @@ export type QmlExecutableNode = {
   startOffset: number;
   endOffset: number;
   body: string;
+  parameters: QmlParameterNode[];
+  returnType: string | null;
 };
 
 export type QmlObjectNode = {
@@ -58,7 +71,8 @@ export type QmlObjectNode = {
   children: QmlObjectNode[];
   bindings: QmlBindingNode[];
   properties: QmlPropertyNode[];
-  signals: Array<{ name: string; line: number }>;
+  signals: Array<{ name: string; line: number; parameters: QmlParameterNode[] }>;
+  members: Array<{ kind: "id" | "property" | "signal" | "function" | "binding" | "object" | "group"; name: string; line: number }>;
   functions: QmlExecutableNode[];
   handlers: QmlExecutableNode[];
   references: QmlIdReference[];

@@ -1,0 +1,33 @@
+{
+  "schema_version": "0.1.0",
+  "projects": [
+    {
+      "name": "qtdeclarative-examples",
+      "repository": "https://github.com/qt/qtdeclarative.git",
+      "revision": "6dc17c57f04020e2d84610914c1713f59d36a429",
+      "source_roots": ["examples/quick"],
+      "profile": "qtquick"
+    },
+    {
+      "name": "kirigami",
+      "repository": "https://github.com/KDE/kirigami.git",
+      "revision": "31730f895562fda5cc681330dbd42d58f99182ca",
+      "source_roots": ["src", "examples"],
+      "profile": "kirigami"
+    },
+    {
+      "name": "qgroundcontrol",
+      "repository": "https://github.com/mavlink/qgroundcontrol.git",
+      "revision": "c35b58ab67b7d18ed77d345a5c9a8368cef2cde8",
+      "source_roots": ["src"],
+      "profile": "qtquick"
+    },
+    {
+      "name": "quickshell",
+      "repository": "https://github.com/quickshell-mirror/quickshell.git",
+      "revision": "10b439fc6e3fd65c15fe1c486271b31da05ed023",
+      "source_roots": ["src"],
+      "profile": "quickshell"
+    }
+  ]
+}

@@ -3,7 +3,7 @@ import type { AnalysisArtifact, Finding } from "./types.js";
 export function summaryReport(artifact: AnalysisArtifact): string {
   const lines = [
     `QML Quality Lens: ${artifact.project.name}`,
-    `Score: ${artifact.summary.score}/100`,
+    `Heuristic maintainability score: ${artifact.summary.score}/100`,
     `Files: ${artifact.summary.files} (${artifact.summary.qmlFiles} QML, ${artifact.summary.jsFiles} JS)` ,
     `Source lines: ${artifact.summary.sourceLines}`,
     `Components: ${artifact.summary.components}`,
@@ -13,7 +13,7 @@ export function summaryReport(artifact: AnalysisArtifact): string {
     `Parser diagnostics: ${artifact.summary.parserDiagnostics}`,
     `Findings: ${artifact.summary.findings}`,
     "",
-    "Scores:",
+    "Heuristic dimensions (not compliance gates):",
     ...Object.entries(artifact.scores).map(([key, value]) => `  ${key}: ${value}`),
   ];
   const top = sortedActiveFindings(artifact.findings).slice(0, 8);
@@ -28,7 +28,7 @@ export function markdownReport(artifact: AnalysisArtifact): string {
   const lines = [
     `# QML Quality Lens: ${artifact.project.name}`,
     "",
-    `**Score:** ${artifact.summary.score}/100`,
+    `**Heuristic maintainability score:** ${artifact.summary.score}/100`,
     "",
     "## Summary",
     "",
@@ -45,7 +45,7 @@ export function markdownReport(artifact: AnalysisArtifact): string {
     `| Parser diagnostics | ${artifact.summary.parserDiagnostics} |`,
     `| Findings | ${artifact.summary.findings} |`,
     "",
-    "## Scores",
+    "## Heuristic dimensions (not compliance gates)",
     "",
     "| Area | Score |",
     "| --- | ---: |",

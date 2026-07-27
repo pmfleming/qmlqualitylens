@@ -3,19 +3,20 @@ import { isProcessBoundaryFile } from "../config.js";
 import { stripCommentsAndStrings } from "../metrics.js";
 import { matchesAnyConfiguredTypeName } from "../qml-model.js";
 import { qmlSemanticFindings } from "../qml-rules.js";
+import { deduplicateToolFindings, enrichFindings } from "../rules.js";
 import { applySuppressions } from "../suppressions.js";
 import type { Config, Finding } from "../types.js";
 import { qmllintFinding } from "./qmllint.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 
 export function measureQmlHealth(config: Config, command: string, context: AnalysisContext): unknown {
-  const findings: Finding[] = applySuppressions([
+  const findings: Finding[] = applySuppressions(deduplicateToolFindings(enrichFindings([
     ...context.components.flatMap(componentHealthFindings),
     ...context.bindings.flatMap(sideEffectBindingFinding),
     ...context.qmlDocuments.flatMap((entry) => processPlacementFinding(entry, config)),
     ...qmlSemanticFindings(context),
     ...context.qmllintFindings.map(qmllintFinding),
-  ], config);
+  ], config)), config);
   const artifact = {
     ...baseArtifact(context, "quality.qml_health", command),
     summary: { ...findingSummary(findings), components: context.components.length, qmllint_findings: context.qmllintFindings.length },

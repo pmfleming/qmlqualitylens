@@ -25,12 +25,14 @@ test("config comments are stripped without touching string values", () => {
 test("config validation rejects invalid thresholds, regexes, and unknown properties", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-invalid-config-"));
   const configPath = path.join(root, "qmlqualitylens.config.json");
-  fs.writeFileSync(configPath, JSON.stringify({ unknown: true, thresholds: { cloneWindow: 1 }, process_boundary: { allowedFilePatterns: ["["] } }));
+  fs.writeFileSync(configPath, JSON.stringify({ unknown: true, thresholds: { cloneWindow: 1 }, process_boundary: { allowedFilePatterns: ["["] }, policy: { fail_on: ["invalid"] }, performance_budgets: [{ scenario: "", frame_p95_ms: -1 }] }));
 
   assert.throws(() => loadConfig(configPath), (error: unknown) => {
     assert.match(String(error), /unknown property 'unknown'/);
     assert.match(String(error), /cloneWindow must be an integer of at least 2/);
     assert.match(String(error), /not a valid regular expression/);
+    assert.match(String(error), /policy.fail_on/);
+    assert.match(String(error), /performance_budgets\[0\]\.scenario/);
     return true;
   });
 });

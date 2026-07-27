@@ -1,14 +1,19 @@
 import type { AnalysisContext } from "./analyzer.js";
+import { RULES } from "./rules.js";
 import type { Config } from "./types.js";
 import { measureArchitectureMap } from "./measures/architecture.js";
+import { measureBuildEvidence } from "./measures/build.js";
 import { measureCleanup } from "./measures/cleanup.js";
 import { measureClones } from "./measures/clones.js";
+import { measureQualityContract } from "./measures/contract.js";
 import { measureCorrectnessCatalog } from "./measures/correctness.js";
+import { measureFormat } from "./measures/format.js";
 import { measureHotspots } from "./measures/hotspots.js";
 import { measureLeverage, measureLocality, measureQuality } from "./measures/quality.js";
 import { measureQmlHealth } from "./measures/qml-health.js";
 import { measureQmllint } from "./measures/qmllint.js";
 import { measureResolution } from "./measures/resolution.js";
+import { measureRuntimePerformance, measureRuntimeWarnings } from "./measures/runtime.js";
 import { measureSemanticRules } from "./measures/semantic.js";
 
 export type TaskDefinition = {
@@ -63,6 +68,22 @@ export const TASKS: TaskDefinition[] = [
     handler: measureQmllint,
   },
   {
+    id: "quality.build_evidence",
+    category: "quality",
+    title: "CMake QML module evidence",
+    artifact: "build_evidence.json",
+    description: "Discovers CMake qt_add_qml_module declarations and QML lint integration signals.",
+    handler: measureBuildEvidence,
+  },
+  {
+    id: "quality.format",
+    category: "quality",
+    title: "QML formatting evidence",
+    artifact: "formatting.json",
+    description: "Optionally compares QML/JavaScript sources with the configured qmlformat output.",
+    handler: measureFormat,
+  },
+  {
     id: "quality.semantic_rules",
     category: "quality",
     title: "QML semantic rules",
@@ -112,6 +133,31 @@ export const TASKS: TaskDefinition[] = [
     handler: measureCorrectnessCatalog,
   },
   {
+    id: "correctness.runtime_warnings",
+    category: "correctness",
+    title: "Runtime QML warnings",
+    artifact: "runtime_warnings.json",
+    description: "Optionally ingests runtime QML warning logs without executing the application.",
+    handler: measureRuntimeWarnings,
+  },
+  {
+    id: "performance.runtime",
+    category: "performance",
+    title: "Runtime QML performance",
+    artifact: "runtime_performance.json",
+    description: "Optionally imports provenance-bearing QML performance scenarios and frame/event metrics.",
+    handler: measureRuntimePerformance,
+  },
+  {
+    id: "quality.contract",
+    category: "quality",
+    title: "QML quality contract",
+    artifact: "quality_contract.json",
+    description: "Primary CI contract separating verified, semantic, heuristic, and incomplete evidence.",
+    dependsOn: ["quality.qmllint", "quality.build_evidence", "quality.format", "quality.semantic_rules", "correctness.catalog", "correctness.runtime_warnings", "performance.runtime"],
+    handler: measureQualityContract,
+  },
+  {
     id: "map.architecture",
     category: "map",
     title: "QML architecture map",
@@ -130,12 +176,15 @@ export function findTask(id: string): TaskDefinition | undefined {
 
 export function catalogForConfig(config: Config): unknown {
   return {
-    schema_version: "0.1.0",
+    schema_version: "0.2.0",
     lens: "qmlqualitylens",
     project_name: config.projectName,
     project_root: config.projectRoot,
     output_dir: config.outputDir,
     generated_at: new Date().toISOString(),
+    profile: config.profile,
+    type_roles: config.typeRoles,
+    rules: RULES,
     tasks: TASKS.map((task) => ({
       id: task.id,
       title: task.title,

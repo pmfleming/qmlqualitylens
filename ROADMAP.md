@@ -1,5 +1,7 @@
 # QML Quality Lens Roadmap
 
+The implemented v0.2 research plan is in [`docs/qml-quality-improvement-plan.md`](docs/qml-quality-improvement-plan.md). It introduced evidence classification, correct `qmllint` gating, incomplete-check reporting, policy-based audit verdicts, report ingestion, UX/performance checks, profiles, SARIF, and calibration. This checklist remains the historical feature roadmap and identifies areas for deeper calibration.
+
 ## Phase 1: MVP static artifact
 
 - [x] Discover `.qml`, `.js`, and `qmldir` files.
@@ -27,14 +29,15 @@
 - [x] Parse attached property scopes and attached signal handlers.
 - [x] Parse qualified object type paths.
 - [x] Surface parser diagnostics in artifacts and findings.
-- Classify imports as Qt, Quickshell, local module, or JavaScript helper.
+- [x] Classify imports as Qt, Quickshell, Kirigami, local module, external module, or JavaScript helper.
 
 ## Phase 3: Rule depth
 
-- Accessibility: keyboard focus, labels, interactive affordances, escape behavior.
-- Performance: heavy delegates, repeated object creation, expensive bindings, image/source churn.
-- Theming: semantic token coverage, palette use, hardcoded visual literals, duplicated style groups.
-- Boundary hygiene: Process placement, protocol parsing, secret handling, command construction.
+- [x] Initial accessibility checks for icon-only controls and pointer-only custom interaction.
+- [x] Recalibrated Loader/Image/delegate performance smells plus provenance-bearing runtime performance import.
+- [x] Initial theming/i18n checks for semantic colors and untranslated user-facing strings.
+- [x] Boundary hygiene for side effects, Process placement, and configurable boundary types/patterns.
+- Deepen focus traps, Escape behavior, semantic token coverage, protocol parsing, secret handling, and command construction.
 
 ## Phase 4: Adoption workflow
 
@@ -49,7 +52,8 @@
 
 ## Phase 5: Ecosystem support
 
-- Quickshell-specific checks.
-- Kirigami/Qt Controls conventions.
+- [x] QtQuick, Kirigami, Quickshell, generic, and custom profile scaffolding.
+- [x] Initial Quickshell-specific Process/service checks.
+- [x] Initial Kirigami/Qt Controls import and convention support.
 - Optional tree-sitter-QML integration if a suitable grammar is available.
 - Dashboard/project-management-board catalog compatibility.

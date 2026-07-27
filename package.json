@@ -1,6 +1,6 @@
 {
   "name": "qmlqualitylens",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Static quality lens for QML/Qt Quick and Quickshell projects.",
   "type": "module",
   "main": "./dist/src/cli.js",
@@ -16,6 +16,7 @@
     "oracle:qmllint:nix": "nix-shell --run 'npm run oracle:qmllint'",
     "analyze:shelllist": "npm run build && node dist/bin/qmlqualitylens.js analyze --config examples/shelllist.config.json --format summary",
     "measure:shelllist": "npm run build && node dist/bin/qmlqualitylens.js measure all --config examples/shelllist.config.json",
+    "calibrate": "node scripts/calibrate.mjs",
     "prepack": "npm run build"
   },
   "engines": {
@@ -29,6 +30,8 @@
     "README.md",
     "ROADMAP.md",
     "docs/",
+    "benchmarks/",
+    "scripts/",
     "test/fixtures/",
     "test/oracle-qmllint.oracle.ts",
     "shell.nix",

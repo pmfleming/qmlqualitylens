@@ -8,7 +8,8 @@ import { baseTypeName, matchesAnyConfiguredTypeName } from "./qml-model.js";
 import { parseQmlDocument, type QmlDocument, type QmlExecutableNode } from "./qml-parser.js";
 import { buildProjectResolution, type ProjectResolution } from "./qml-resolution.js";
 import { qmlSemanticFindings } from "./qml-rules.js";
-import { loadQmllintResult, type QmllintResult } from "./qmllint.js";
+import { findingForQmllint, loadQmllintResult, type QmllintResult } from "./qmllint.js";
+import { deduplicateToolFindings, enrichFindings } from "./rules.js";
 import { applySuppressions, staleSuppressionFindings } from "./suppressions.js";
 import type {
   AnalysisArtifact,
@@ -58,8 +59,13 @@ export function createAnalysisContext(config: Config): AnalysisContext {
   const qmllintFindings = qmllint.findings;
   const clones = detectClones(sources, config.thresholds.cloneWindow);
   const baseContext: AnalysisContext = { config, sources, qmlDocuments, resolution, files, components, functions, bindings, parserDiagnostics, qmllint, qmllintFindings, clones, findings: [], scores: emptyScores() };
-  const rawFindings = [...inputFindings(config, sources), ...deriveFindings(config, files, components, functions, bindings, clones, resolution), ...qmlSemanticFindings(baseContext)];
-  const findings = [...applySuppressions(rawFindings, config), ...staleSuppressionFindings(rawFindings, config)];
+  const rawFindings = deduplicateToolFindings(enrichFindings([
+    ...inputFindings(config, sources),
+    ...deriveFindings(config, files, components, functions, bindings, clones, resolution),
+    ...qmlSemanticFindings(baseContext),
+    ...qmllintFindings.map(findingForQmllint),
+  ], config));
+  const findings = [...applySuppressions(rawFindings, config), ...enrichFindings(staleSuppressionFindings(rawFindings, config), config)];
   const scores = scoreProject(config, files, components, functions, clones, findings);
   return { ...baseContext, findings, scores };
 }
@@ -74,7 +80,7 @@ export function analyzeProject(config: Config): AnalysisArtifact {
 export function legacyQualityArtifact(context: AnalysisContext): AnalysisArtifact {
   const { config, files, components, functions, bindings, parserDiagnostics, clones, findings, scores } = context;
   return {
-    schema_version: "0.1.0",
+    schema_version: "0.2.0",
     task_id: "quality.qml",
     project: { name: config.projectName, root: config.projectRoot },
     generated_at: new Date().toISOString(),
