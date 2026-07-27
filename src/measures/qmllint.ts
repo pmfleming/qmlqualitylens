@@ -1,12 +1,9 @@
-import type { AnalysisContext } from "../analyzer.js";
 import { findingForQmllint } from "../qmllint.js";
-import { enrichFindings } from "../rules.js";
-import { applySuppressions } from "../suppressions.js";
-import type { Config, Finding } from "../types.js";
+import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext } from "./foundation.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 
 export function measureQmllint(config: Config, command: string, context: AnalysisContext): unknown {
-  const findings = applySuppressions(enrichFindings(context.qmllintFindings.map(findingForQmllint), config), config);
+  const findings = support.applySuppressions(support.enrichFindings(context.qmllintFindings.map(findingForQmllint), config), config);
   const summary = findingSummary(findings);
   const artifact = {
     ...baseArtifact(context, "quality.qmllint", command),
@@ -32,8 +29,4 @@ export function measureQmllint(config: Config, command: string, context: Analysi
   };
   writeArtifact(config, "qmllint.json", artifact);
   return artifact;
-}
-
-export function qmllintFinding(item: AnalysisContext["qmllintFindings"][number]): Finding {
-  return findingForQmllint(item);
 }

@@ -1,12 +1,9 @@
-import type { AnalysisContext } from "../analyzer.js";
 import { qmlSemanticFindings } from "../qml-rules.js";
-import { enrichFindings } from "../rules.js";
-import { applySuppressions } from "../suppressions.js";
-import type { Config } from "../types.js";
+import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext } from "./foundation.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 
 export function measureSemanticRules(config: Config, command: string, context: AnalysisContext): unknown {
-  const findings = applySuppressions(enrichFindings(qmlSemanticFindings(context), config), config);
+  const findings = support.applySuppressions(support.enrichFindings(qmlSemanticFindings(context), config), config);
   const artifact = {
     ...baseArtifact(context, "quality.semantic_rules", command),
     summary: findingSummary(findings),

@@ -1,5 +1,4 @@
-import type { AnalysisContext } from "../analyzer.js";
-import type { CloneGroup, Config } from "../types.js";
+import type { MeasureCloneGroup as CloneGroup, MeasureConfig as Config, MeasureContext as AnalysisContext } from "./foundation.js";
 import { baseArtifact, writeArtifact } from "./shared.js";
 
 export function measureClones(config: Config, command: string, context: AnalysisContext): unknown {

@@ -16,32 +16,33 @@ export function discoverSourceFiles(config: Config): SourceFile[] {
 }
 
 function walk(current: string, config: Config, seen: Set<string>, visitedDirectories: Set<string>, files: SourceFile[]): void {
-  if (!fs.existsSync(current)) return;
-  let stat: fs.Stats;
-  try { stat = fs.statSync(current); } catch { return; }
-  if (stat.isDirectory()) {
-    if (isExcluded(current, config)) return;
-    const realDirectory = fs.realpathSync(current);
-    if (visitedDirectories.has(realDirectory)) return;
-    visitedDirectories.add(realDirectory);
-    for (const entry of fs.readdirSync(current)) walk(path.join(current, entry), config, seen, visitedDirectories, files);
-    return;
-  }
-  if (!stat.isFile()) return;
+  const stat = safeStat(current);
+  if (!stat) return;
+  if (stat.isDirectory()) walkDirectory(current, config, seen, visitedDirectories, files);
+  else if (stat.isFile()) addSourceFile(current, config, seen, files);
+}
+
+function walkDirectory(current: string, config: Config, seen: Set<string>, visited: Set<string>, files: SourceFile[]): void {
+  if (isExcluded(current, config)) return;
+  const realDirectory = fs.realpathSync(current);
+  if (visited.has(realDirectory)) return;
+  visited.add(realDirectory);
+  for (const entry of fs.readdirSync(current)) walk(path.join(current, entry), config, seen, visited, files);
+}
+
+function addSourceFile(current: string, config: Config, seen: Set<string>, files: SourceFile[]): void {
   const kind = sourceKind(current);
   if (!kind || isExcluded(current, config)) return;
-  const absolute = path.resolve(current);
-  const realFile = fs.realpathSync(absolute);
+  const absolute = path.resolve(current), realFile = fs.realpathSync(absolute);
   if (seen.has(realFile)) return;
   seen.add(realFile);
   const text = fs.readFileSync(absolute, "utf8");
-  files.push({
-    path: absolute,
-    relativePath: path.relative(config.projectRoot, absolute).split(path.sep).join("/"),
-    kind,
-    text,
-    lines: text.split(/\r?\n/),
-  });
+  files.push({ path: absolute, relativePath: path.relative(config.projectRoot, absolute).split(path.sep).join("/"), kind, text, lines: text.split(/\r?\n/) });
+}
+
+function safeStat(file: string): fs.Stats | null {
+  if (!fs.existsSync(file)) return null;
+  try { return fs.statSync(file); } catch { return null; }
 }
 
 function sourceKind(file: string): SourceKind | null {

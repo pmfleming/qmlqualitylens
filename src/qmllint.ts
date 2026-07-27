@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { Config, Finding, QmllintFinding, QmllintSource } from "./types.js";
+import { isRecord, numberValue, stringValue } from "./value-utils.js";
 
 export type QmllintResult = {
   source: QmllintSource;
@@ -26,10 +27,6 @@ export function loadQmllintResult(config: Config): QmllintResult {
   }
   if (config.qmllintCommand) return runQmllintCommand(config);
   return { source: "none", status: "not_run", command: null, report: config.qmllintReport, exitCode: null, version: null, ...qmllintSettings(config), error: null, findings: [] };
-}
-
-export function loadQmllintFindings(config: Config): QmllintFinding[] {
-  return loadQmllintResult(config).findings;
 }
 
 export function findingForQmllint(item: QmllintFinding): Finding {
@@ -81,7 +78,7 @@ function safeParseQmllintOutput(text: string, config: Config): { findings: Qmlli
 function isStructuredQmllintJson(text: string): boolean {
   if (!text.startsWith("{") && !text.startsWith("[")) return false;
   try {
-    const value = JSON.parse(text) as unknown;
+    const value: unknown = JSON.parse(text);
     return Array.isArray(value) || (isRecord(value) && ["diagnostics", "messages", "issues", "files"].some((key) => Array.isArray(value[key]))) || (isRecord(value) && Object.keys(value).length === 0);
   } catch {
     return false;
@@ -96,7 +93,8 @@ export function parseQmllintOutput(text: string, config: Config): QmllintFinding
 }
 
 function parseJsonQmllint(text: string, config: Config): QmllintFinding[] {
-  return walkJsonDiagnostics(JSON.parse(text) as unknown, config, null);
+  const value: unknown = JSON.parse(text);
+  return walkJsonDiagnostics(value, config, null);
 }
 
 function walkJsonDiagnostics(value: unknown, config: Config, inheritedFile: string | null): QmllintFinding[] {
@@ -118,7 +116,7 @@ function normalizeJsonFinding(item: Record<string, unknown>, file: string | null
     column: numberValue(item.column) ?? numberValue(item.col) ?? numberValue(location.column) ?? numberValue(location.startColumn) ?? null,
     severity: severityFor(stringValue(item.severity) ?? stringValue(item.type) ?? stringValue(item.level)),
     message,
-    rule: stringValue(item.rule) ?? stringValue(item.code) ?? stringValue(item.id) ?? stringValue(item.category),
+    rule: stringValue(item.rule) ?? stringValue(item.code) ?? stringValue(item.id) ?? stringValue(item.category) ?? null,
   }];
 }
 
@@ -156,18 +154,6 @@ function relativeFile(file: string, config: Config): string {
   return path.relative(config.projectRoot, absolute).split(path.sep).join("/");
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function stringValue(value: unknown): string | null {
-  return typeof value === "string" ? value : null;
-}
-
-function numberValue(value: unknown): number | null {
-  return typeof value === "number" ? value : typeof value === "string" && /^\d+$/.test(value) ? Number(value) : null;
-}
-
 function severityFor(value: string | null | undefined): QmllintFinding["severity"] {
   const normalized = value?.toLowerCase();
   if (normalized === "error" || normalized === "fatal") return "error";
@@ -200,9 +186,9 @@ function qmllintSettings(config: Config, command: string | null = null): { setti
 
 function versionFromReport(text: string): string | null {
   try {
-    const value = JSON.parse(text) as unknown;
+    const value: unknown = JSON.parse(text);
     if (!isRecord(value)) return null;
-    return stringValue(value.version) ?? stringValue(value.qtVersion) ?? stringValue(value.toolVersion);
+    return stringValue(value.version) ?? stringValue(value.qtVersion) ?? stringValue(value.toolVersion) ?? null;
   } catch {
     return null;
   }

@@ -1,4 +1,4 @@
-export type JsonPrimitive = string | number | boolean | null;
+type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 
 export type EvidenceClass = "tool" | "semantic" | "heuristic";
@@ -7,41 +7,12 @@ export type FindingCategory = "correctness" | "architecture" | "performance" | "
 export type ConfidenceLevel = "low" | "medium" | "high";
 export type ProjectProfile = "generic" | "qtquick" | "kirigami" | "quickshell" | "custom";
 
-export type PolicyConfig = {
-  requireQmllint: boolean;
-  newCodeOnly: boolean;
-  failOn: Enforcement[];
-  incomplete: "fail" | "warn" | "pass";
-};
-
-export type RuleOverride = {
-  enabled?: boolean;
-  enforcement?: Enforcement;
-};
-
-export type TypeRolesConfig = {
-  interactiveTypes: string[];
-  layoutTypes: string[];
-  delegateOwnerTypes: string[];
-};
-
-export type ToolsConfig = {
-  qmlformatCommand: string | null;
-  qmlformatCheck: boolean;
-};
-
-export type RuntimeBudget = {
-  scenario: string;
-  platform?: string;
-  frameP95Ms?: number;
-  maxEventMs?: number;
-};
-
-export type ReportsConfig = {
-  tests: string | null;
-  runtimeWarnings: string | null;
-  qmlProfiler: string | null;
-};
+export type PolicyConfig = { requireQmllint: boolean; newCodeOnly: boolean; failOn: Enforcement[]; incomplete: "fail" | "warn" | "pass" };
+type RuleOverride = { enabled?: boolean; enforcement?: Enforcement };
+type TypeRolesConfig = { interactiveTypes: string[]; layoutTypes: string[]; delegateOwnerTypes: string[] };
+type ToolsConfig = { qmlformatCommand: string | null; qmlformatCheck: boolean };
+type RuntimeBudget = { scenario: string; platform?: string; frameP95Ms?: number; maxEventMs?: number };
+type ReportsConfig = { tests: string | null; runtimeWarnings: string | null; qmlProfiler: string | null };
 
 export type RawConfig = {
   $schema?: string;
@@ -56,48 +27,18 @@ export type RawConfig = {
   external_modules?: string[];
   external_types?: string[];
   process_boundary?: Partial<ProcessBoundaryConfig>;
-  policy?: {
-    require_qmllint?: boolean;
-    new_code_only?: boolean;
-    fail_on?: Enforcement[];
-    incomplete?: "fail" | "warn" | "pass";
-  };
-  tools?: {
-    qmlformat?: { command?: string; check?: boolean };
-  };
-  type_roles?: {
-    interactive_types?: string[];
-    layout_types?: string[];
-    delegate_owner_types?: string[];
-  };
-  reports?: {
-    tests?: string;
-    runtime_warnings?: string;
-    qml_profiler?: string;
-  };
-  performance_budgets?: Array<{
-    scenario: string;
-    platform?: string;
-    frame_p95_ms?: number;
-    max_event_ms?: number;
-  }>;
+  policy?: { require_qmllint?: boolean; new_code_only?: boolean; fail_on?: Enforcement[]; incomplete?: "fail" | "warn" | "pass" };
+  tools?: { qmlformat?: { command?: string; check?: boolean } };
+  type_roles?: { interactive_types?: string[]; layout_types?: string[]; delegate_owner_types?: string[] };
+  reports?: { tests?: string; runtime_warnings?: string; qml_profiler?: string };
+  performance_budgets?: Array<{ scenario: string; platform?: string; frame_p95_ms?: number; max_event_ms?: number }>;
   rules?: Record<string, RuleOverride>;
   suppressions?: Suppression[];
   thresholds?: Partial<Thresholds>;
 };
 
-export type Suppression = {
-  id?: string;
-  kind?: string;
-  file?: string;
-  reason?: string;
-};
-
-export type ProcessBoundaryConfig = {
-  objectTypes: string[];
-  textPatterns: string[];
-  allowedFilePatterns: string[];
-};
+export type Suppression = { id?: string; kind?: string; file?: string; reason?: string };
+export type ProcessBoundaryConfig = { objectTypes: string[]; textPatterns: string[]; allowedFilePatterns: string[] };
 
 export type Thresholds = {
   fileSlocHigh: number;
@@ -144,12 +85,7 @@ export type SourceFile = {
   lines: string[];
 };
 
-export type LocMetrics = {
-  physical: number;
-  source: number;
-  blank: number;
-  comment: number;
-};
+export type LocMetrics = { physical: number; source: number; blank: number; comment: number };
 
 export type ImportRecord = {
   file: string;
@@ -211,11 +147,7 @@ export type ComponentRecord = {
   effort: number;
 };
 
-export type ParserDiagnosticRecord = {
-  file: string;
-  line: number;
-  message: string;
-};
+type ParserDiagnosticRecord = { file: string; line: number; message: string };
 
 export type FileRecord = {
   path: string;
@@ -228,11 +160,7 @@ export type FileRecord = {
   parserDiagnostics: ParserDiagnosticRecord[];
 };
 
-export type CloneInstance = {
-  file: string;
-  startLine: number;
-  endLine: number;
-};
+type CloneInstance = { file: string; startLine: number; endLine: number };
 
 export type CloneGroup = {
   id: string;
@@ -253,12 +181,7 @@ export type QmllintFinding = {
   rule: string | null;
 };
 
-export type FindingAuthority = {
-  kind: "qt" | "project" | "tool" | "lens";
-  name: string;
-  url?: string;
-  rule?: string;
-};
+export type FindingAuthority = { kind: "qt" | "project" | "tool" | "lens"; name: string; url?: string; rule?: string };
 
 export type Finding = {
   id: string;
@@ -280,18 +203,7 @@ export type Finding = {
   suppression_reason?: string;
 };
 
-export type ScoreBreakdown = {
-  overall: number;
-  complexity: number;
-  cognitive: number;
-  effort: number;
-  locality: number;
-  leverage: number;
-  duplication: number;
-  size: number;
-  styling: number;
-  boundary: number;
-};
+export type ScoreBreakdown = { overall: number; complexity: number; cognitive: number; effort: number; locality: number; leverage: number; duplication: number; size: number; styling: number; boundary: number };
 
 export type AnalysisArtifact = {
   schema_version: "0.2.0";

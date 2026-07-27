@@ -6,7 +6,8 @@ import { loadConfig, starterConfig } from "./config.js";
 import { markdownReport, summaryReport } from "./report.js";
 import { sarifForFindings } from "./sarif.js";
 import { catalogForConfig, findTask, MEASURE_ORDER, TASKS } from "./tasks.js";
-import type { Config } from "./types.js";
+import type { AnalysisArtifact, Config } from "./types.js";
+import { isRecord } from "./value-utils.js";
 
 type ParsedArgs = {
   command: string | null;
@@ -24,6 +25,9 @@ type ParsedArgs = {
 
 type FlagHandler = (parsed: ParsedArgs, args: string[], flag: string) => void;
 
+const FAIL_ON_VALUES: readonly NonNullable<ParsedArgs["failOn"]>[] = ["block", "warn", "review"];
+const INCOMPLETE_VALUES: readonly NonNullable<ParsedArgs["incomplete"]>[] = ["fail", "warn", "pass"];
+
 const FLAG_HANDLERS: Record<string, FlagHandler> = {
   "--help": (parsed) => { parsed.help = true; },
   "-h": (parsed) => { parsed.help = true; },
@@ -34,54 +38,56 @@ const FLAG_HANDLERS: Record<string, FlagHandler> = {
   "--baseline": (parsed, args, flag) => { parsed.baseline = requireValue(flag, args); },
   "--save-baseline": (parsed, args, flag) => { parsed.saveBaseline = requireValue(flag, args); },
   "--base": (parsed, args, flag) => { parsed.base = requireValue(flag, args); },
-  "--fail-on": (parsed, args, flag) => { parsed.failOn = oneOf(flag, requireValue(flag, args), ["block", "warn", "review"] as const); },
-  "--incomplete": (parsed, args, flag) => { parsed.incomplete = oneOf(flag, requireValue(flag, args), ["fail", "warn", "pass"] as const); },
+  "--fail-on": (parsed, args, flag) => { parsed.failOn = oneOf(flag, requireValue(flag, args), FAIL_ON_VALUES); },
+  "--incomplete": (parsed, args, flag) => { parsed.incomplete = oneOf(flag, requireValue(flag, args), INCOMPLETE_VALUES); },
+};
+
+type CommandHandler = (args: ParsedArgs) => void;
+
+const COMMANDS: Record<string, CommandHandler> = {
+  init: runInit,
+  catalog: (args) => console.log(JSON.stringify(catalogForConfig(configFor(args)), null, 2)),
+  analyze: (args) => printArtifact(analyzeProject(configFor(args)), args.format),
+  measure: runMeasureCommand,
+  audit: runAuditCommand,
 };
 
 export async function runCli(argv: string[]): Promise<void> {
   const args = parseArgs(argv);
-  if (args.help || !args.command) {
-    printHelp();
-    return;
-  }
-  if (args.command === "init") {
-    const configPath = path.resolve(args.config ?? "qmlqualitylens.config.json");
-    if (fs.existsSync(configPath) && !args.force) throw new Error(`${configPath} already exists; pass --force to overwrite`);
-    fs.writeFileSync(configPath, `${JSON.stringify(starterConfig(), null, 2)}\n`);
-    console.log(JSON.stringify({ created: configPath }, null, 2));
-    return;
-  }
+  if (args.help || !args.command) return printHelp();
+  const handler = COMMANDS[args.command];
+  if (!handler) throw new Error(`Unknown command: ${args.command}`);
+  handler(args);
+}
 
+function runInit(args: ParsedArgs): void {
+  const configPath = path.resolve(args.config ?? "qmlqualitylens.config.json");
+  if (fs.existsSync(configPath) && !args.force) throw new Error(`${configPath} already exists; pass --force to overwrite`);
+  fs.writeFileSync(configPath, `${JSON.stringify(starterConfig(), null, 2)}\n`);
+  console.log(JSON.stringify({ created: configPath }, null, 2));
+}
+
+function configFor(args: ParsedArgs): Config {
   const config = loadConfig(args.config);
   if (args.failOn) config.policy.failOn = args.failOn === "block" ? ["block"] : args.failOn === "warn" ? ["block", "warn"] : ["block", "warn", "review"];
   if (args.incomplete) config.policy.incomplete = args.incomplete;
-  if (args.command === "catalog") {
-    console.log(JSON.stringify(catalogForConfig(config), null, 2));
-    return;
-  }
-  if (args.command === "analyze") {
-    const artifact = analyzeProject(config);
-    printArtifact(artifact, args.format);
-    return;
-  }
-  if (args.command === "measure") {
-    const taskId = args.positionals[0] ?? "all";
-    const measured = runMeasure(config, taskId, `qmlqualitylens measure ${taskId} --config ${config.configPath}`);
-    console.log(JSON.stringify({ project_name: config.projectName, output_dir: config.outputDir, measured }, null, 2));
-    return;
-  }
-  if (args.command === "audit") {
-    const artifact = runAudit(config, `qmlqualitylens audit --config ${config.configPath}`, { baseline: args.baseline, saveBaseline: args.saveBaseline, base: args.base });
-    if (args.format === "markdown") console.log(auditMarkdown(artifact));
-    else if (args.format === "sarif") console.log(JSON.stringify(sarifForFindings(artifact.findings), null, 2));
-    else console.log(JSON.stringify(artifact, null, 2));
-    if (artifact.summary.verdict === "fail") process.exitCode = 1;
-    return;
-  }
-  throw new Error(`Unknown command: ${args.command}`);
+  return config;
 }
 
-type TaskResult = { summary?: unknown };
+function runMeasureCommand(args: ParsedArgs): void {
+  const config = configFor(args), taskId = args.positionals[0] ?? "all";
+  const measured = runMeasure(config, taskId, `qmlqualitylens measure ${taskId} --config ${config.configPath}`);
+  console.log(JSON.stringify({ project_name: config.projectName, output_dir: config.outputDir, measured }, null, 2));
+}
+
+function runAuditCommand(args: ParsedArgs): void {
+  const config = configFor(args);
+  const artifact = runAudit(config, `qmlqualitylens audit --config ${config.configPath}`, { baseline: args.baseline, saveBaseline: args.saveBaseline, base: args.base });
+  if (args.format === "markdown") console.log(auditMarkdown(artifact));
+  else if (args.format === "sarif") console.log(JSON.stringify(sarifForFindings(artifact.findings), null, 2));
+  else console.log(JSON.stringify(artifact, null, 2));
+  if (artifact.summary.verdict === "fail") process.exitCode = 1;
+}
 
 export function runMeasure(config: Config, taskId: string, command: string): unknown[] {
   const context = createAnalysisContext(config);
@@ -90,8 +96,8 @@ export function runMeasure(config: Config, taskId: string, command: string): unk
   for (const id of taskIds) {
     const task = findTask(id);
     if (!task) throw new Error(`Unknown task id: ${id}. Available task ids: all, ${TASKS.map((item) => item.id).join(", ")}`);
-    const artifact = task.handler(config, command, context) as TaskResult;
-    results.push({ task_id: id, artifact: task.artifact, summary: artifact.summary ?? null });
+    const artifact = task.handler(config, command, context);
+    results.push({ task_id: id, artifact: task.artifact, summary: isRecord(artifact) ? artifact.summary ?? null : null });
   }
   return results;
 }
@@ -113,7 +119,7 @@ function taskIdsWithDependencies(...taskIds: string[]): string[] {
   return [...ordered];
 }
 
-function printArtifact(artifact: any, format: ParsedArgs["format"]): void {
+function printArtifact(artifact: AnalysisArtifact, format: ParsedArgs["format"]): void {
   if (format === "json") console.log(JSON.stringify(artifact, null, 2));
   else if (format === "markdown") console.log(markdownReport(artifact));
   else if (format === "sarif") console.log(JSON.stringify(sarifForFindings(artifact.findings), null, 2));
@@ -146,8 +152,9 @@ function requireValue(flag: string, args: string[]): string {
 }
 
 function oneOf<T extends string>(flag: string, value: string, allowed: readonly T[]): T {
-  if (!allowed.includes(value as T)) throw new Error(`${flag} must be one of: ${allowed.join(", ")}`);
-  return value as T;
+  const selected = allowed.find((item) => item === value);
+  if (selected === undefined) throw new Error(`${flag} must be one of: ${allowed.join(", ")}`);
+  return selected;
 }
 
 function printHelp(): void {

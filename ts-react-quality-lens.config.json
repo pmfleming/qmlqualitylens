@@ -1,0 +1,21 @@
+{
+  "project_name": "qmlqualitylens",
+  "project_root": ".",
+  "source_roots": ["src", "bin", "scripts"],
+  "test_roots": ["test"],
+  "output_dir": "target/ts-react-quality-lens",
+  "tsconfig": "tsconfig.json",
+  "framework": "auto",
+  "test_runner": "node",
+  "test_command": "npm test",
+  "exclude": ["node_modules", "dist", "target", ".direnv"],
+  "public_api": {
+    "entry": ["bin/qmlqualitylens.ts", "src/cli.ts"],
+    "exports": [{ "file": "src/qmllint.ts", "names": ["parseQmllintOutput"] }]
+  },
+  "cache": { "enabled": true },
+  "audit": {
+    "base": "HEAD~1",
+    "gate": "new-only"
+  }
+}

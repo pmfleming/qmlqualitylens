@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import type { Config, ConfidenceLevel, Enforcement, EvidenceClass, Finding, FindingAuthority, FindingCategory } from "./types.js";
+import { isRecord } from "./value-utils.js";
 
-export type RuleDefinition = {
+type RuleDefinition = {
   id: string;
   title: string;
   category: FindingCategory;
@@ -76,11 +77,15 @@ export const RULES: RuleDefinition[] = [
 
 const RULE_BY_ID = new Map(RULES.map((rule) => [rule.id, rule]));
 
+export function isFindingRecord(value: unknown): value is Finding {
+  return isRecord(value) && typeof value.id === "string" && typeof value.kind === "string" && Array.isArray(value.actions);
+}
+
 export function ruleFor(kind: string): RuleDefinition {
   return RULE_BY_ID.get(kind) ?? lens(kind, kind, "architecture", "heuristic", "low", "review");
 }
 
-export function enrichFinding(finding: Finding, config: Config): Finding | null {
+function enrichFinding(finding: Finding, config: Config): Finding | null {
   const rule = ruleFor(finding.kind);
   const override = config.rules[finding.kind];
   if (override?.enabled === false) return null;
@@ -119,7 +124,7 @@ function diagnosticOverlap(kind: string, message: string): boolean {
   return false;
 }
 
-export function fingerprintFor(finding: Finding): string {
+function fingerprintFor(finding: Finding): string {
   const stableMessage = finding.message.replace(/\b\d+\b/g, "#");
   return createHash("sha256").update([finding.kind, finding.file ?? "", String(finding.line ?? 0), stableMessage].join("\u0000")).digest("hex").slice(0, 24);
 }

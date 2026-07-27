@@ -9,7 +9,9 @@ import { measureFormat } from "./measures/format.js";
 import { measureRuntimePerformance, measureRuntimeWarnings } from "./measures/runtime.js";
 import { findingSummary } from "./measures/shared.js";
 import { confidence, provenance } from "./provenance.js";
+import { isFindingRecord } from "./rules.js";
 import type { Config, Finding } from "./types.js";
+import { isRecord } from "./value-utils.js";
 
 type AuditOptions = {
   baseline: string | null;
@@ -40,7 +42,7 @@ type BaseSnapshot = {
   reason?: string;
 };
 
-export type AuditArtifact = {
+type AuditArtifact = {
   schema_version: "0.2.0";
   task_id: "audit";
   project: { name: string; root: string };
@@ -99,12 +101,12 @@ export function runAudit(config: Config, command: string, options: AuditOptions)
     summary: {
       verdict,
       base: options.base,
-      findings: summary.findings as number,
-      active: summary.active as number,
-      suppressed: summary.suppressed as number,
-      high: summary.high as number,
-      medium: summary.medium as number,
-      low: summary.low as number,
+      findings: summary.findings,
+      active: summary.active,
+      suppressed: summary.suppressed,
+      high: summary.high,
+      medium: summary.medium,
+      low: summary.low,
       changed_files: diff.files.size,
       changed_hunks: diff.hunks,
       introduced: options.base ? findings.filter((finding) => finding.introduced).length : 0,
@@ -147,26 +149,31 @@ export function auditMarkdown(artifact: AuditArtifact): string {
 }
 
 function findingsFromArtifact(value: unknown): Finding[] {
-  return typeof value === "object" && value !== null && Array.isArray((value as { findings?: unknown }).findings) ? (value as { findings: Finding[] }).findings : [];
+  if (!isRecord(value) || !Array.isArray(value.findings)) return [];
+  return value.findings.filter(isFindingRecord);
 }
 
 function requiredCheckFailures(config: Config, context: ReturnType<typeof createAnalysisContext>): string[] {
-  const failures: string[] = [];
-  if (config.policy.requireQmllint) {
-    if (context.qmllint.source === "none") failures.push("qmllint did not run and no report was available");
-    else if (context.qmllint.error) failures.push(`qmllint evidence is unusable: ${context.qmllint.error}`);
-  }
-  for (const [name, report] of [["test report", config.reports.tests], ["runtime warning report", config.reports.runtimeWarnings], ["runtime performance report", config.reports.qmlProfiler]] as const) {
-    if (report && !fs.existsSync(report)) failures.push(`${name} is configured but missing: ${report}`);
-  }
-  if (config.tools.qmlformatCheck) {
-    const artifact = path.join(config.outputDir, "formatting.json");
-    try {
-      const parsed = JSON.parse(fs.readFileSync(artifact, "utf8")) as { summary?: { status?: string } };
-      if (parsed.summary?.status === "incomplete") failures.push("qmlformat check was incomplete");
-    } catch { failures.push("qmlformat check did not produce usable evidence"); }
-  }
-  return failures;
+  return [...qmllintFailures(config, context), ...missingReportFailures(config), ...formatCheckFailures(config)];
+}
+
+function qmllintFailures(config: Config, context: ReturnType<typeof createAnalysisContext>): string[] {
+  if (!config.policy.requireQmllint) return [];
+  if (context.qmllint.source === "none") return ["qmllint did not run and no report was available"];
+  return context.qmllint.error ? [`qmllint evidence is unusable: ${context.qmllint.error}`] : [];
+}
+
+function missingReportFailures(config: Config): string[] {
+  const reports: Array<[string, string | null]> = [["test report", config.reports.tests], ["runtime warning report", config.reports.runtimeWarnings], ["runtime performance report", config.reports.qmlProfiler]];
+  return reports.flatMap(([name, report]) => report && !fs.existsSync(report) ? [`${name} is configured but missing: ${report}`] : []);
+}
+
+function formatCheckFailures(config: Config): string[] {
+  if (!config.tools.qmlformatCheck) return [];
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(path.join(config.outputDir, "formatting.json"), "utf8"));
+    return isRecord(parsed) && isRecord(parsed.summary) && parsed.summary.status === "incomplete" ? ["qmlformat check was incomplete"] : [];
+  } catch { return ["qmlformat check did not produce usable evidence"]; }
 }
 
 function auditVerdict(config: Config, findings: Finding[], incomplete: string[]): AuditArtifact["summary"]["verdict"] {
@@ -262,8 +269,10 @@ function configForWorktree(config: Config, worktree: string, temp: string): Conf
 
 function readBaseline(file: string | null): Set<string> {
   if (!file || !fs.existsSync(file)) return new Set();
-  const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as { findings?: Array<{ id?: string; fingerprint?: string }> };
-  return new Set((parsed.findings ?? []).flatMap((finding) => [finding.fingerprint, finding.id]).filter(Boolean) as string[]);
+  const parsed: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
+  if (!isRecord(parsed) || !Array.isArray(parsed.findings)) return new Set();
+  const keys = parsed.findings.flatMap((finding) => isRecord(finding) ? [finding.fingerprint, finding.id] : []).filter((key): key is string => typeof key === "string");
+  return new Set(keys);
 }
 
 function writeBaseline(file: string, findings: Finding[]): void {

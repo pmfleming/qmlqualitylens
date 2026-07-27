@@ -1,9 +1,6 @@
-import { lexQml } from "./qml-lexer.js";
+import { isStringQuote, lexQml } from "./qml-lexer.js";
 import type { QmlBindingNode, QmlDocument, QmlExecutableNode, QmlIdReference, QmlObjectNode, QmlParserDiagnostic, QmlToken } from "./qml-parser-types.js";
 import type { ImportRecord } from "./types.js";
-export { lexQml } from "./qml-lexer.js";
-export type { QmlBindingNode, QmlDocument, QmlExecutableNode, QmlIdReference, QmlObjectNode, QmlParserDiagnostic, QmlPropertyNode, QmlToken } from "./qml-parser-types.js";
-
 type PathRead = {
   path: string;
   segments: string[];
@@ -392,8 +389,9 @@ class Parser {
         return name ? [{ name, typeName }] : [];
       }
       const identifiers = segment.filter((token) => token.kind === "identifier");
-      const name = identifiers.at(-1)?.value;
-      const typeName = identifiers.length > 1 ? segment.slice(0, segment.lastIndexOf(identifiers.at(-1) as QmlToken)).map((token) => token.value).join("").trim() || null : null;
+      const lastIdentifier = identifiers.at(-1);
+      const name = lastIdentifier?.value;
+      const typeName = lastIdentifier && identifiers.length > 1 ? segment.slice(0, segment.lastIndexOf(lastIdentifier)).map((token) => token.value).join("").trim() || null : null;
       return name ? [{ name, typeName }] : [];
     });
   }
@@ -602,11 +600,6 @@ function unquoteString(value: string): string {
   if (value.length < 2) return value;
   const quote = value[0];
   return isStringQuote(quote ?? "") && value.at(-1) === quote ? value.slice(1, -1) : value;
-}
-
-
-function isStringQuote(char: string): boolean {
-  return char === '"' || char === "'" || char === "`";
 }
 
 function startsWithUppercase(value: string): boolean {

@@ -1,10 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { AnalysisContext } from "../analyzer.js";
-import { confidence, provenance } from "../provenance.js";
-import type { Config, Finding, JsonValue } from "../types.js";
+import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding, type MeasureJsonValue as JsonValue } from "./foundation.js";
 
-export type MeasureArtifact = Record<string, JsonValue>;
+type MeasureArtifact = Record<string, JsonValue>;
 
 export function baseArtifact(context: AnalysisContext, taskId: string, command: string): MeasureArtifact {
   return {
@@ -14,8 +12,8 @@ export function baseArtifact(context: AnalysisContext, taskId: string, command: 
       name: context.config.projectName,
       root: context.config.projectRoot,
     },
-    provenance: provenance(context.config, command),
-    confidence: confidence(context),
+    provenance: support.provenance(context.config, command),
+    confidence: support.confidence(context),
   };
 }
 
@@ -24,7 +22,7 @@ export function writeArtifact(config: Config, filename: string, artifact: unknow
   fs.writeFileSync(path.join(config.outputDir, filename), `${JSON.stringify(artifact, null, 2)}\n`);
 }
 
-export function findingSummary(findings: Finding[]): Record<string, JsonValue> {
+export function findingSummary(findings: Finding[]) {
   const active = findings.filter((finding) => !finding.suppressed);
   const byKind = active.reduce<Record<string, number>>((counts, finding) => {
     counts[finding.kind] = (counts[finding.kind] ?? 0) + 1;

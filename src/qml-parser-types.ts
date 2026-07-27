@@ -1,27 +1,8 @@
 import type { ImportRecord } from "./types.js";
 
-export type QmlToken = {
-  kind: "identifier" | "number" | "string" | "symbol";
-  value: string;
-  line: number;
-  column: number;
-  offset: number;
-  endOffset: number;
-};
-
-export type QmlParserDiagnostic = {
-  file: string;
-  line: number;
-  message: string;
-};
-
-export type QmlIdReference = {
-  name: string;
-  line: number;
-  ownerObjectId: number;
-  targetObjectId: number | null;
-  external: boolean;
-};
+export type QmlToken = { kind: "identifier" | "number" | "string" | "symbol"; value: string; line: number; column: number; offset: number; endOffset: number };
+export type QmlParserDiagnostic = { file: string; line: number; message: string };
+export type QmlIdReference = { name: string; line: number; ownerObjectId: number; targetObjectId: number | null; external: boolean };
 
 export type QmlBindingNode = {
   ownerObjectId: number;
@@ -33,12 +14,9 @@ export type QmlBindingNode = {
   endOffset: number;
 };
 
-export type QmlParameterNode = {
-  name: string;
-  typeName: string | null;
-};
+type QmlParameterNode = { name: string; typeName: string | null };
 
-export type QmlPropertyNode = {
+type QmlPropertyNode = {
   name: string;
   line: number;
   alias: boolean;
@@ -50,15 +28,7 @@ export type QmlPropertyNode = {
   expression: string | null;
 };
 
-export type QmlExecutableNode = {
-  name: string;
-  line: number;
-  startOffset: number;
-  endOffset: number;
-  body: string;
-  parameters: QmlParameterNode[];
-  returnType: string | null;
-};
+export type QmlExecutableNode = { name: string; line: number; startOffset: number; endOffset: number; body: string; parameters: QmlParameterNode[]; returnType: string | null };
 
 export type QmlObjectNode = {
   objectId: number;
@@ -78,12 +48,4 @@ export type QmlObjectNode = {
   references: QmlIdReference[];
 };
 
-export type QmlDocument = {
-  file: string;
-  root: QmlObjectNode | null;
-  imports: ImportRecord[];
-  objects: QmlObjectNode[];
-  bindings: QmlBindingNode[];
-  idReferences: QmlIdReference[];
-  diagnostics: QmlParserDiagnostic[];
-};
+export type QmlDocument = { file: string; root: QmlObjectNode | null; imports: ImportRecord[]; objects: QmlObjectNode[]; bindings: QmlBindingNode[]; idReferences: QmlIdReference[]; diagnostics: QmlParserDiagnostic[] };

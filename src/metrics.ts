@@ -54,33 +54,55 @@ export function complexityForCode(code: string): { cyclomatic: number; cognitive
   return { cyclomatic, cognitive, maxNesting };
 }
 
+type StripState = { mode: "code" | "line_comment" | "block_comment" | "string"; quote: string; escaped: boolean };
+type StripToken = { text: string; skip: number };
+
 export function stripComments(text: string, stripStrings = false): string {
+  const state: StripState = { mode: "code", quote: "", escaped: false };
   let result = "";
-  let state: "code" | "line_comment" | "block_comment" | "string" = "code";
-  let quote = "";
-  let escaped = false;
   for (let index = 0; index < text.length; index += 1) {
-    const char = text[index] ?? "";
-    const next = text[index + 1] ?? "";
-    if (state === "line_comment") {
-      if (char === "\n") { state = "code"; result += "\n"; } else result += " ";
-    } else if (state === "block_comment") {
-      if (char === "*" && next === "/") { result += "  "; index += 1; state = "code"; }
-      else result += char === "\n" ? "\n" : " ";
-    } else if (state === "string") {
-      result += stripStrings && char !== "\n" ? " " : char;
-      if (escaped) escaped = false;
-      else if (char === "\\") escaped = true;
-      else if (char === quote) state = "code";
-    } else if (char === "/" && next === "/") {
-      result += "  "; index += 1; state = "line_comment";
-    } else if (char === "/" && next === "*") {
-      result += "  "; index += 1; state = "block_comment";
-    } else if (char === '"' || char === "'" || char === "`") {
-      quote = char; state = "string"; result += stripStrings ? " " : char;
-    } else result += char;
+    const token = state.mode === "code" ? consumeCode(state, text[index] ?? "", text[index + 1] ?? "", stripStrings) : consumeNonCode(state, text[index] ?? "", text[index + 1] ?? "", stripStrings);
+    result += token.text;
+    index += token.skip;
   }
   return result;
+}
+
+function consumeCode(state: StripState, char: string, next: string, stripStrings: boolean): StripToken {
+  if (char === "/" && (next === "/" || next === "*")) {
+    state.mode = next === "/" ? "line_comment" : "block_comment";
+    return { text: "  ", skip: 1 };
+  }
+  if (char === '"' || char === "'" || char === "`") {
+    state.mode = "string"; state.quote = char;
+    return { text: stripStrings ? " " : char, skip: 0 };
+  }
+  return { text: char, skip: 0 };
+}
+
+function consumeNonCode(state: StripState, char: string, next: string, stripStrings: boolean): StripToken {
+  if (state.mode === "line_comment") return consumeLineComment(state, char);
+  if (state.mode === "block_comment") return consumeBlockComment(state, char, next);
+  return consumeString(state, char, stripStrings);
+}
+
+function consumeLineComment(state: StripState, char: string): StripToken {
+  if (char === "\n") state.mode = "code";
+  return { text: char === "\n" ? "\n" : " ", skip: 0 };
+}
+
+function consumeBlockComment(state: StripState, char: string, next: string): StripToken {
+  if (char !== "*" || next !== "/") return { text: char === "\n" ? "\n" : " ", skip: 0 };
+  state.mode = "code";
+  return { text: "  ", skip: 1 };
+}
+
+function consumeString(state: StripState, char: string, stripStrings: boolean): StripToken {
+  const text = stripStrings && char !== "\n" ? " " : char;
+  if (state.escaped) state.escaped = false;
+  else if (char === "\\") state.escaped = true;
+  else if (char === state.quote) state.mode = "code";
+  return { text, skip: 0 };
 }
 
 export function stripCommentsAndStrings(text: string): string {
@@ -89,8 +111,4 @@ export function stripCommentsAndStrings(text: string): string {
 
 export function boundedScore(value: number): number {
   return Math.max(0, Math.min(100, Math.round(value)));
-}
-
-export function percentilePenalty(count: number, weight: number, cap = 100): number {
-  return Math.min(cap, count * weight);
 }

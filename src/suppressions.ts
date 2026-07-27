@@ -12,10 +12,10 @@ export function activeFindings<T extends Finding>(findings: T[]): T[] {
 }
 
 export function staleSuppressionFindings(findings: Finding[], config: Config): Finding[] {
-  return config.suppressions.flatMap((suppression, index) => findings.some((finding) => matchesSuppression(finding, suppression)) ? [] : [{
+  return config.suppressions.flatMap((suppression, index): Finding[] => findings.some((finding) => matchesSuppression(finding, suppression)) ? [] : [{
     id: `suppression.stale.${index}`,
     kind: "suppression.stale",
-    severity: "low" as const,
+    severity: "low",
     file: suppression.file,
     message: `Configured suppression ${suppressionDescription(suppression)} does not match any current finding`,
     actions: ["Remove the suppression or update it to match the intended finding."],

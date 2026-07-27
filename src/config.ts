@@ -1,14 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Config, Enforcement, PolicyConfig, ProcessBoundaryConfig, ProjectProfile, RawConfig, Thresholds } from "./types.js";
+import { isRecord } from "./value-utils.js";
 
-export const DEFAULT_PROCESS_BOUNDARY: ProcessBoundaryConfig = {
+const DEFAULT_PROCESS_BOUNDARY: ProcessBoundaryConfig = {
   objectTypes: ["Process", "ShellCommand"],
   textPatterns: ["\\b(?:nm-api|quickshell\\s+ipc|openUrlExternally)\\b"],
   allowedFilePatterns: ["(^|/)shell\\.qml$", "(^|/)(?:service|api|process)(?:[._/-]|$)"],
 };
 
-export const DEFAULT_THRESHOLDS: Thresholds = {
+const DEFAULT_THRESHOLDS: Thresholds = {
   fileSlocHigh: 250,
   componentObjectCountHigh: 45,
   functionCyclomaticHigh: 10,
@@ -18,7 +19,7 @@ export const DEFAULT_THRESHOLDS: Thresholds = {
   cloneWindow: 6,
 };
 
-export const DEFAULT_POLICY: PolicyConfig = {
+const DEFAULT_POLICY: PolicyConfig = {
   requireQmllint: false,
   newCodeOnly: true,
   failOn: ["block"],
@@ -107,7 +108,7 @@ export function isProcessBoundaryFile(file: string, config: Config): boolean {
   return config.processBoundary.allowedFilePatterns.some((pattern) => matchesConfiguredPattern(file, pattern));
 }
 
-export function matchesConfiguredPattern(value: string, pattern: string): boolean {
+function matchesConfiguredPattern(value: string, pattern: string): boolean {
   try {
     return new RegExp(pattern, "i").test(value);
   } catch {
@@ -120,39 +121,55 @@ const THRESHOLD_KEYS = new Set(Object.keys(DEFAULT_THRESHOLDS));
 const PROCESS_BOUNDARY_KEYS = new Set(Object.keys(DEFAULT_PROCESS_BOUNDARY));
 
 function validateRawConfig(value: unknown, file: string): RawConfig {
-  const errors: string[] = [];
   if (!isRecord(value)) throw new Error(`Invalid config ${file}: expected a JSON object`);
-  for (const key of Object.keys(value)) if (!CONFIG_KEYS.has(key)) errors.push(`unknown property '${key}'`);
-  for (const key of ["$schema", "project_name", "project_root", "output_dir", "qmllint_report", "qmllint_command"] as const) {
-    if (value[key] !== undefined && typeof value[key] !== "string") errors.push(`${key} must be a string`);
-  }
-  if (value.profile !== undefined && !isOneOf(value.profile, ["generic", "qtquick", "kirigami", "quickshell", "custom"] satisfies ProjectProfile[])) errors.push("profile must be one of: generic, qtquick, kirigami, quickshell, custom");
-  for (const key of ["source_roots", "exclude", "external_modules", "external_types"] as const) validateStringArray(value[key], key, errors);
-  if (Array.isArray(value.source_roots) && value.source_roots.length === 0) errors.push("source_roots must not be empty");
-  validateObjectKeys(value.process_boundary, "process_boundary", PROCESS_BOUNDARY_KEYS, errors);
-  if (isRecord(value.process_boundary)) {
-    for (const key of PROCESS_BOUNDARY_KEYS) validateStringArray(value.process_boundary[key], `process_boundary.${key}`, errors);
-    for (const key of ["textPatterns", "allowedFilePatterns"]) validateRegexArray(value.process_boundary[key], `process_boundary.${key}`, errors);
-  }
+  const errors = validateConfigSections(value);
+  if (errors.length) throw new Error(`Invalid config ${file}:\n- ${errors.join("\n- ")}`);
+  return value as RawConfig;
+}
+
+function validateConfigSections(value: Record<string, unknown>): string[] {
+  const errors: string[] = [];
+  validateCoreFields(value, errors);
+  validateProcessBoundary(value.process_boundary, errors);
   validatePolicy(value.policy, errors);
   validateTools(value.tools, errors);
   validateTypeRoles(value.type_roles, errors);
   validateReports(value.reports, errors);
   validatePerformanceBudgets(value.performance_budgets, errors);
   validateRules(value.rules, errors);
-  validateObjectKeys(value.thresholds, "thresholds", THRESHOLD_KEYS, errors);
-  if (isRecord(value.thresholds)) {
-    for (const [key, threshold] of Object.entries(value.thresholds)) {
-      if (typeof threshold !== "number" || !Number.isFinite(threshold) || threshold <= 0) errors.push(`thresholds.${key} must be a positive number`);
-      else if (key === "cloneWindow" && (!Number.isInteger(threshold) || threshold < 2)) errors.push("thresholds.cloneWindow must be an integer of at least 2");
-    }
+  validateThresholds(value.thresholds, errors);
+  validateSuppressions(value.suppressions, errors);
+  return errors;
+}
+
+function validateCoreFields(value: Record<string, unknown>, errors: string[]): void {
+  for (const key of Object.keys(value)) if (!CONFIG_KEYS.has(key)) errors.push(`unknown property '${key}'`);
+  for (const key of ["$schema", "project_name", "project_root", "output_dir", "qmllint_report", "qmllint_command"]) if (value[key] !== undefined && typeof value[key] !== "string") errors.push(`${key} must be a string`);
+  if (value.profile !== undefined && !isOneOf(value.profile, ["generic", "qtquick", "kirigami", "quickshell", "custom"] satisfies ProjectProfile[])) errors.push("profile must be one of: generic, qtquick, kirigami, quickshell, custom");
+  for (const key of ["source_roots", "exclude", "external_modules", "external_types"]) validateStringArray(value[key], key, errors);
+  if (Array.isArray(value.source_roots) && value.source_roots.length === 0) errors.push("source_roots must not be empty");
+}
+
+function validateProcessBoundary(value: unknown, errors: string[]): void {
+  validateObjectKeys(value, "process_boundary", PROCESS_BOUNDARY_KEYS, errors);
+  if (!isRecord(value)) return;
+  for (const key of PROCESS_BOUNDARY_KEYS) validateStringArray(value[key], `process_boundary.${key}`, errors);
+  for (const key of ["textPatterns", "allowedFilePatterns"]) validateRegexArray(value[key], `process_boundary.${key}`, errors);
+}
+
+function validateThresholds(value: unknown, errors: string[]): void {
+  validateObjectKeys(value, "thresholds", THRESHOLD_KEYS, errors);
+  if (!isRecord(value)) return;
+  for (const [key, threshold] of Object.entries(value)) {
+    if (typeof threshold !== "number" || !Number.isFinite(threshold) || threshold <= 0) errors.push(`thresholds.${key} must be a positive number`);
+    else if (key === "cloneWindow" && (!Number.isInteger(threshold) || threshold < 2)) errors.push("thresholds.cloneWindow must be an integer of at least 2");
   }
-  if (value.suppressions !== undefined) {
-    if (!Array.isArray(value.suppressions)) errors.push("suppressions must be an array");
-    else value.suppressions.forEach((item, index) => validateSuppression(item, index, errors));
-  }
-  if (errors.length) throw new Error(`Invalid config ${file}:\n- ${errors.join("\n- ")}`);
-  return value as RawConfig;
+}
+
+function validateSuppressions(value: unknown, errors: string[]): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value)) errors.push("suppressions must be an array");
+  else value.forEach((item, index) => validateSuppression(item, index, errors));
 }
 
 function validateStringArray(value: unknown, name: string, errors: string[]): void {
@@ -209,24 +226,33 @@ function validateReports(value: unknown, errors: string[]): void {
 function validatePerformanceBudgets(value: unknown, errors: string[]): void {
   if (value === undefined) return;
   if (!Array.isArray(value)) { errors.push("performance_budgets must be an array"); return; }
-  value.forEach((budget, index) => {
-    validateObjectKeys(budget, `performance_budgets[${index}]`, new Set(["scenario", "platform", "frame_p95_ms", "max_event_ms"]), errors);
-    if (!isRecord(budget)) return;
-    if (typeof budget.scenario !== "string" || !budget.scenario) errors.push(`performance_budgets[${index}].scenario must be a non-empty string`);
-    if (budget.platform !== undefined && typeof budget.platform !== "string") errors.push(`performance_budgets[${index}].platform must be a string`);
-    for (const key of ["frame_p95_ms", "max_event_ms"]) if (budget[key] !== undefined && (typeof budget[key] !== "number" || !Number.isFinite(budget[key]) || budget[key] <= 0)) errors.push(`performance_budgets[${index}].${key} must be a positive number`);
-  });
+  value.forEach((budget, index) => validatePerformanceBudget(budget, index, errors));
+}
+
+function validatePerformanceBudget(value: unknown, index: number, errors: string[]): void {
+  const name = `performance_budgets[${index}]`;
+  validateObjectKeys(value, name, new Set(["scenario", "platform", "frame_p95_ms", "max_event_ms"]), errors);
+  if (!isRecord(value)) return;
+  if (typeof value.scenario !== "string" || !value.scenario) errors.push(`${name}.scenario must be a non-empty string`);
+  if (value.platform !== undefined && typeof value.platform !== "string") errors.push(`${name}.platform must be a string`);
+  for (const key of ["frame_p95_ms", "max_event_ms"]) validatePositiveNumber(value[key], `${name}.${key}`, errors);
+}
+
+function validatePositiveNumber(value: unknown, name: string, errors: string[]): void {
+  if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value) || value <= 0)) errors.push(`${name} must be a positive number`);
 }
 
 function validateRules(value: unknown, errors: string[]): void {
   if (value === undefined) return;
   if (!isRecord(value)) { errors.push("rules must be an object"); return; }
-  for (const [rule, override] of Object.entries(value)) {
-    validateObjectKeys(override, `rules.${rule}`, new Set(["enabled", "enforcement"]), errors);
-    if (!isRecord(override)) continue;
-    if (override.enabled !== undefined && typeof override.enabled !== "boolean") errors.push(`rules.${rule}.enabled must be a boolean`);
-    if (override.enforcement !== undefined && !isOneOf(override.enforcement, ["block", "warn", "review"] satisfies Enforcement[])) errors.push(`rules.${rule}.enforcement must be block, warn, or review`);
-  }
+  for (const [rule, override] of Object.entries(value)) validateRule(rule, override, errors);
+}
+
+function validateRule(rule: string, value: unknown, errors: string[]): void {
+  validateObjectKeys(value, `rules.${rule}`, new Set(["enabled", "enforcement"]), errors);
+  if (!isRecord(value)) return;
+  if (value.enabled !== undefined && typeof value.enabled !== "boolean") errors.push(`rules.${rule}.enabled must be a boolean`);
+  if (value.enforcement !== undefined && !isOneOf(value.enforcement, ["block", "warn", "review"] satisfies Enforcement[])) errors.push(`rules.${rule}.enforcement must be block, warn, or review`);
 }
 
 function validateSuppression(value: unknown, index: number, errors: string[]): void {
@@ -246,12 +272,8 @@ function typeRolesForProfile(profile: ProjectProfile): Config["typeRoles"] {
   return { interactiveTypes, layoutTypes: ["RowLayout", "ColumnLayout", "GridLayout", "StackLayout"], delegateOwnerTypes: ["ListView", "GridView", "TableView", "PathView", "Repeater", "Instantiator"] };
 }
 
-function isOneOf<T>(value: unknown, allowed: readonly T[]): value is T {
-  return allowed.includes(value as T);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+function isOneOf<T>(value: unknown, allowed: readonly T[]): boolean {
+  return allowed.some((item) => item === value);
 }
 
 function resolveFrom(base: string, value: string): string {

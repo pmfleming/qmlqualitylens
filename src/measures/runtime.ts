@@ -1,10 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { AnalysisContext } from "../analyzer.js";
-import { enrichFindings } from "../rules.js";
-import { applySuppressions } from "../suppressions.js";
-import type { Config, Finding } from "../types.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
+import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding } from "./foundation.js";
 
 export function measureRuntimeWarnings(config: Config, command: string, context: AnalysisContext): unknown {
   const report = config.reports.runtimeWarnings;
@@ -17,7 +14,7 @@ export function measureRuntimeWarnings(config: Config, command: string, context:
       raw = parseRuntimeWarnings(fs.readFileSync(report, "utf8"), config);
     }
   }
-  const findings = applySuppressions(enrichFindings(raw, config), config);
+  const findings = support.applySuppressions(support.enrichFindings(raw, config), config);
   const artifact = {
     ...baseArtifact(context, "correctness.runtime_warnings", command),
     summary: { status, report, ...findingSummary(findings) },
@@ -37,7 +34,7 @@ export function measureRuntimePerformance(config: Config, command: string, conte
   let parsed: unknown;
   try { parsed = JSON.parse(fs.readFileSync(report, "utf8")); } catch { parsed = null; }
   const normalized = normalizePerformanceReport(parsed);
-  const findings = applySuppressions(enrichFindings(performanceBudgetFindings(normalized.scenarios, config), config), config);
+  const findings = support.applySuppressions(support.enrichFindings(performanceBudgetFindings(normalized.scenarios, config), config), config);
   const artifact = {
     ...baseArtifact(context, "performance.runtime", command),
     summary: { status: normalized.complete ? "complete" : "incomplete", report, reason: normalized.reason, scenarios: normalized.scenarios.length, ...findingSummary(findings) },
@@ -56,7 +53,8 @@ function parseRuntimeWarnings(text: string, config: Config): Finding[] {
     const rawFile = location?.[1]?.replace(/^file:\/\//, "").replace(/^qrc:\//, "") ?? undefined;
     const file = rawFile ? path.isAbsolute(rawFile) ? path.relative(config.projectRoot, rawFile).split(path.sep).join("/") : rawFile : undefined;
     const lineNumber = location?.[2] ? Number(location[2]) : undefined;
-    return [{ id: `runtime.qml_warning.${index + 1}.${line}`, kind: "runtime.qml_warning", severity: /binding loop|failed to create|is not a type|module .* not installed/i.test(line) ? "high" as const : "medium" as const, file, line: lineNumber, message: line.trim(), actions: ["Reproduce the runtime path and fix the QML warning; retain the scenario/log as test evidence."] }];
+    const severity: Finding["severity"] = /binding loop|failed to create|is not a type|module .* not installed/i.test(line) ? "high" : "medium";
+    return [{ id: `runtime.qml_warning.${index + 1}.${line}`, kind: "runtime.qml_warning", severity, file, line: lineNumber, message: line.trim(), actions: ["Reproduce the runtime path and fix the QML warning; retain the scenario/log as test evidence."] }];
   });
 }
 
@@ -70,51 +68,67 @@ type RuntimeScenario = {
 };
 
 function normalizePerformanceReport(value: unknown): { complete: boolean; reason: string | null; scenarios: RuntimeScenario[] } {
-  const roots = Array.isArray(value) ? value : isRecord(value) && Array.isArray(value.scenarios) ? value.scenarios : value ? [value] : [];
+  const roots = Array.isArray(value) ? value : support.isRecord(value) && Array.isArray(value.scenarios) ? value.scenarios : value ? [value] : [];
   const scenarios = roots.flatMap((item) => normalizeScenario(item));
   if (!scenarios.length) return { complete: false, reason: "No supported scenario with scenario/environment provenance was found.", scenarios: [] };
   return { complete: true, reason: null, scenarios };
 }
 
 function normalizeScenario(value: unknown): RuntimeScenario[] {
-  if (!isRecord(value) || typeof value.scenario !== "string" || !isRecord(value.environment)) return [];
+  if (!support.isRecord(value) || typeof value.scenario !== "string" || !support.isRecord(value.environment)) return [];
   const traceEvents = Array.isArray(value.traceEvents) ? value.traceEvents : [];
-  const frames = Array.isArray(value.frames)
-    ? value.frames.map((frame) => typeof frame === "number" ? frame : isRecord(frame) && typeof frame.duration_ms === "number" ? frame.duration_ms : NaN).filter(Number.isFinite)
-    : traceEvents.filter((event) => isRecord(event) && /frame/i.test(String(event.name ?? event.cat ?? ""))).map((event) => isRecord(event) && typeof event.dur === "number" ? event.dur / 1000 : NaN).filter(Number.isFinite);
+  const frames = frameDurations(value.frames, traceEvents).sort((a, b) => a - b);
+  return [{ scenario: value.scenario, environment: value.environment, frame_count: frames.length, frame_time_ms: { p50: percentile(frames, 0.5), p95: percentile(frames, 0.95), p99: percentile(frames, 0.99), max: frames.at(-1) ?? null }, dropped_frames: frames.filter((duration) => duration > 16.67).length, events: eventSummaries(Array.isArray(value.events) ? value.events : traceEvents) }];
+}
+
+function frameDurations(frames: unknown, traceEvents: unknown[]): number[] {
+  const input = Array.isArray(frames) ? frames : traceEvents.filter((event) => support.isRecord(event) && /frame/i.test(String(event.name ?? event.cat ?? "")));
+  return input.map((frame) => typeof frame === "number" ? frame : durationMs(frame)).filter((duration): duration is number => duration !== null);
+}
+
+function eventSummaries(input: unknown[]): RuntimeScenario["events"] {
   const events = new Map<string, number[]>();
-  const eventInput = Array.isArray(value.events) ? value.events : traceEvents;
-  for (const event of eventInput) {
-    if (!isRecord(event)) continue;
-    const category = typeof event.category === "string" ? event.category : typeof event.cat === "string" ? event.cat : typeof event.name === "string" ? event.name : null;
-    const duration = typeof event.duration_ms === "number" ? event.duration_ms : typeof event.dur === "number" ? event.dur / 1000 : null;
+  for (const event of input) {
+    const category = eventCategory(event);
+    const duration = durationMs(event);
     if (!category || duration === null) continue;
-    const values = events.get(category) ?? [];
-    values.push(duration);
-    events.set(category, values);
+    events.set(category, [...(events.get(category) ?? []), duration]);
   }
-  const sorted = [...frames].sort((a, b) => a - b);
-  return [{
-    scenario: value.scenario,
-    environment: value.environment,
-    frame_count: sorted.length,
-    frame_time_ms: { p50: percentile(sorted, 0.5), p95: percentile(sorted, 0.95), p99: percentile(sorted, 0.99), max: sorted.at(-1) ?? null },
-    dropped_frames: sorted.filter((duration) => duration > 16.67).length,
-    events: Object.fromEntries([...events].map(([category, durations]) => [category, { count: durations.length, total_ms: round(durations.reduce((sum, duration) => sum + duration, 0)), max_ms: round(Math.max(...durations)) }])),
-  }];
+  return Object.fromEntries([...events].map(([category, durations]) => [category, { count: durations.length, total_ms: round(durations.reduce((sum, duration) => sum + duration, 0)), max_ms: round(Math.max(...durations)) }]));
+}
+
+function eventCategory(value: unknown): string | null {
+  if (!support.isRecord(value)) return null;
+  for (const key of ["category", "cat", "name"]) if (typeof value[key] === "string") return value[key];
+  return null;
+}
+
+function durationMs(value: unknown): number | null {
+  if (!support.isRecord(value)) return null;
+  if (typeof value.duration_ms === "number") return value.duration_ms;
+  return typeof value.dur === "number" ? value.dur / 1000 : null;
 }
 
 function performanceBudgetFindings(scenarios: RuntimeScenario[], config: Config): Finding[] {
-  return scenarios.flatMap((scenario) => config.performanceBudgets.flatMap((budget) => {
-    if (budget.scenario !== scenario.scenario) return [];
-    const platform = typeof scenario.environment.platform === "string" ? scenario.environment.platform : undefined;
-    if (budget.platform && budget.platform !== platform) return [];
-    const findings: Finding[] = [];
-    if (budget.frameP95Ms !== undefined && scenario.frame_time_ms.p95 !== null && scenario.frame_time_ms.p95 > budget.frameP95Ms) findings.push({ id: `runtime.performance_budget.frame.${scenario.scenario}.${platform ?? "any"}`, kind: "runtime.performance_budget", severity: "high", message: `${scenario.scenario} frame p95 ${scenario.frame_time_ms.p95} ms exceeds budget ${budget.frameP95Ms} ms${platform ? ` on ${platform}` : ""}`, metric: scenario.frame_time_ms.p95, threshold: budget.frameP95Ms, actions: ["Profile the scenario on representative hardware and reduce measured frame work or adjust the documented product-specific budget with evidence."] });
-    const maxEvent = Math.max(0, ...Object.values(scenario.events).map((event) => event.max_ms));
-    if (budget.maxEventMs !== undefined && maxEvent > budget.maxEventMs) findings.push({ id: `runtime.performance_budget.event.${scenario.scenario}.${platform ?? "any"}`, kind: "runtime.performance_budget", severity: "medium", message: `${scenario.scenario} maximum event ${maxEvent} ms exceeds budget ${budget.maxEventMs} ms${platform ? ` on ${platform}` : ""}`, metric: maxEvent, threshold: budget.maxEventMs, actions: ["Inspect the longest binding/handler/JavaScript event and optimize the measured source path."] });
-    return findings;
-  }));
+  return scenarios.flatMap((scenario) => config.performanceBudgets.flatMap((budget) => budgetFindings(scenario, budget)));
+}
+
+function budgetFindings(scenario: RuntimeScenario, budget: Config["performanceBudgets"][number]): Finding[] {
+  const platform = typeof scenario.environment.platform === "string" ? scenario.environment.platform : undefined;
+  if (budget.scenario !== scenario.scenario || (budget.platform && budget.platform !== platform)) return [];
+  return [frameBudgetFinding(scenario, budget, platform), eventBudgetFinding(scenario, budget, platform)].filter((finding): finding is Finding => finding !== null);
+}
+
+function frameBudgetFinding(scenario: RuntimeScenario, budget: Config["performanceBudgets"][number], platform?: string): Finding | null {
+  const p95 = scenario.frame_time_ms.p95;
+  if (budget.frameP95Ms === undefined || p95 === null || p95 <= budget.frameP95Ms) return null;
+  return { id: `runtime.performance_budget.frame.${scenario.scenario}.${platform ?? "any"}`, kind: "runtime.performance_budget", severity: "high", message: `${scenario.scenario} frame p95 ${p95} ms exceeds budget ${budget.frameP95Ms} ms${platform ? ` on ${platform}` : ""}`, metric: p95, threshold: budget.frameP95Ms, actions: ["Profile the scenario on representative hardware and reduce measured frame work or adjust the documented product-specific budget with evidence."] };
+}
+
+function eventBudgetFinding(scenario: RuntimeScenario, budget: Config["performanceBudgets"][number], platform?: string): Finding | null {
+  const maxEvent = Math.max(0, ...Object.values(scenario.events).map((event) => event.max_ms));
+  if (budget.maxEventMs === undefined || maxEvent <= budget.maxEventMs) return null;
+  return { id: `runtime.performance_budget.event.${scenario.scenario}.${platform ?? "any"}`, kind: "runtime.performance_budget", severity: "medium", message: `${scenario.scenario} maximum event ${maxEvent} ms exceeds budget ${budget.maxEventMs} ms${platform ? ` on ${platform}` : ""}`, metric: maxEvent, threshold: budget.maxEventMs, actions: ["Inspect the longest binding/handler/JavaScript event and optimize the measured source path."] };
 }
 
 function percentile(values: number[], quantile: number): number | null {
@@ -124,8 +138,4 @@ function percentile(values: number[], quantile: number): number | null {
 
 function round(value: number): number {
   return Math.round(value * 1000) / 1000;
-}
-
-function isRecord(value: unknown): value is Record<string, any> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

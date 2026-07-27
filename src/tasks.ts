@@ -10,13 +10,13 @@ import { measureCorrectnessCatalog } from "./measures/correctness.js";
 import { measureFormat } from "./measures/format.js";
 import { measureHotspots } from "./measures/hotspots.js";
 import { measureLeverage, measureLocality, measureQuality } from "./measures/quality.js";
-import { measureQmlHealth } from "./measures/qml-health.js";
+import { measureQmlHealth } from "./qml-health-measure.js";
 import { measureQmllint } from "./measures/qmllint.js";
 import { measureResolution } from "./measures/resolution.js";
 import { measureRuntimePerformance, measureRuntimeWarnings } from "./measures/runtime.js";
 import { measureSemanticRules } from "./measures/semantic.js";
 
-export type TaskDefinition = {
+type TaskDefinition = {
   id: string;
   category: string;
   title: string;

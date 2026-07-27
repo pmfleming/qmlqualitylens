@@ -96,6 +96,6 @@ function isIdentifierPart(char: string): boolean {
   return /[A-Za-z0-9_$]/.test(char);
 }
 
-function isStringQuote(char: string): boolean {
+export function isStringQuote(char: string): boolean {
   return char === '"' || char === "'" || char === "`";
 }

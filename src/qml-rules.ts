@@ -1,5 +1,5 @@
 import type { AnalysisContext } from "./analyzer.js";
-import { stripCommentsAndStrings } from "./metrics.js";
+import { lineNumberAt, stripCommentsAndStrings } from "./metrics.js";
 import { baseTypeName } from "./qml-model.js";
 import type { Finding } from "./types.js";
 
@@ -216,36 +216,34 @@ function connectionMismatchFindings(entry: AnalysisContext["qmlDocuments"][numbe
 
 function delegateStateFindings(entry: AnalysisContext["qmlDocuments"][number], context: AnalysisContext): Finding[] {
   const source = context.sources.find((item) => item.relativePath === entry.file)?.text ?? "";
-  const findings: Finding[] = [];
-  for (const owner of entry.document.objects) {
-    if (!context.config.typeRoles.delegateOwnerTypes.some((type) => baseTypeName(type) === baseTypeName(owner.typeName))) continue;
-    for (const binding of owner.bindings.filter((item) => leafName(item.propertyPath) === "delegate")) {
-      const endLine = lineAtOffset(source, binding.endOffset);
-      const roots = owner.children.filter((child) => child.line >= binding.line && child.line <= endLine);
-      for (const root of roots) {
-        const objects = descendantObjects(root);
-        const handlers = objects.flatMap((object) => [...object.handlers, ...object.functions.filter((fn) => /^on[A-Z]/.test(fn.name))]);
-        for (const object of objects) {
-          for (const property of object.properties.filter((item) => !item.readonly && !item.alias && item.name !== "index")) {
-            const assigned = handlers.some((handler) => new RegExp(`(?:^|[^A-Za-z0-9_.])${escapeRegex(property.name)}\\s*=(?!=|>)`).test(stripCommentsAndStrings(handler.body)));
-            if (!assigned) continue;
-            findings.push(finding(`qml.delegate_state.${entry.file}.${property.line}.${property.name}`, "qml.delegate_state", "medium", entry.file, property.line, `Mutable delegate property '${property.name}' is changed inside a disposable delegate`, "Store durable state in the model/backend; keep only derived or transient visual state in the delegate."));
-          }
-        }
-      }
-    }
-  }
-  return findings;
+  const ownerTypes = new Set(context.config.typeRoles.delegateOwnerTypes.map(baseTypeName));
+  return entry.document.objects
+    .filter((owner) => ownerTypes.has(baseTypeName(owner.typeName)))
+    .flatMap((owner) => owner.bindings.filter((binding) => leafName(binding.propertyPath) === "delegate").flatMap((binding) => delegateBindingFindings(entry.file, source, owner, binding)));
+}
+
+function delegateBindingFindings(file: string, source: string, owner: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number], binding: AnalysisContext["qmlDocuments"][number]["document"]["bindings"][number]): Finding[] {
+  const endLine = lineNumberAt(source, binding.endOffset);
+  return owner.children.filter((child) => child.line >= binding.line && child.line <= endLine).flatMap((root) => mutableDelegateFindings(file, descendantObjects(root)));
+}
+
+function mutableDelegateFindings(file: string, objects: AnalysisContext["qmlDocuments"][number]["document"]["objects"]): Finding[] {
+  const handlers = objects.flatMap((object) => [...object.handlers, ...object.functions.filter((fn) => /^on[A-Z]/.test(fn.name))]);
+  return objects.flatMap((object) => object.properties.filter(isMutableDelegateProperty).flatMap((property) => handlers.some((handler) => assignsProperty(handler.body, property.name))
+    ? [finding(`qml.delegate_state.${file}.${property.line}.${property.name}`, "qml.delegate_state", "medium", file, property.line, `Mutable delegate property '${property.name}' is changed inside a disposable delegate`, "Store durable state in the model/backend; keep only derived or transient visual state in the delegate.")]
+    : []));
+}
+
+function isMutableDelegateProperty(property: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number]["properties"][number]): boolean {
+  return !property.readonly && !property.alias && property.name !== "index";
+}
+
+function assignsProperty(body: string, property: string): boolean {
+  return new RegExp(`(?:^|[^A-Za-z0-9_.])${escapeRegex(property)}\\s*=(?!=|>)`).test(stripCommentsAndStrings(body));
 }
 
 function descendantObjects(root: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number]): AnalysisContext["qmlDocuments"][number]["document"]["objects"] {
   return [root, ...root.children.flatMap(descendantObjects)];
-}
-
-function lineAtOffset(text: string, offset: number): number {
-  let line = 1;
-  for (let index = 0; index < offset && index < text.length; index += 1) if (text.charCodeAt(index) === 10) line += 1;
-  return line;
 }
 
 function typedPropertyFindings({ file, document }: AnalysisContext["qmlDocuments"][number]): Finding[] {
@@ -309,23 +307,33 @@ function internationalizationFindings({ file, document }: AnalysisContext["qmlDo
 }
 
 function accessibilityFindings({ file, document }: AnalysisContext["qmlDocuments"][number], context: AnalysisContext): Finding[] {
-  const objectById = new Map(document.objects.map((object) => [object.objectId, object]));
-  return document.objects.flatMap((object) => {
-    const names = new Set(object.bindings.map((binding) => binding.propertyPath));
-    const type = baseTypeName(object.typeName);
-    const interactive = context.config.typeRoles.interactiveTypes.some((candidate) => baseTypeName(candidate) === type);
-    const iconOnly = interactive && (names.has("icon.source") || names.has("icon.name")) && !hasMeaningfulText(object) && !names.has("Accessible.name") && !names.has("Accessible.description");
-    const parent = object.parentObjectId ? objectById.get(object.parentObjectId) : null;
-    const parentInteractive = parent && context.config.typeRoles.interactiveTypes.some((candidate) => baseTypeName(candidate) === baseTypeName(parent.typeName));
-    const pointerOnly = type === "MouseArea" && object.handlers.some((handler) => /onClicked|onPressed|onReleased/.test(handler.name)) && parent && !parentInteractive && !parent.bindings.some((binding) => /^(?:Keys\.on|activeFocusOnTab|focus)/.test(binding.propertyPath));
-    const closePolicy = object.bindings.find((binding) => binding.propertyPath === "closePolicy")?.expression ?? "";
-    const trappedPopup = /(?:Popup|Dialog)$/.test(type) && /NoAutoClose/.test(closePolicy) && !object.bindings.some((binding) => /Keys\.onEscape/.test(binding.propertyPath)) && !object.handlers.some((handler) => /onRejected|onClosed/.test(handler.name));
-    return [
-      iconOnly ? finding(`qml.accessibility.icon_only.${file}.${object.line}`, "qml.accessibility.icon_only_control", "low", file, object.line, `${object.typeName} appears to be icon-only without an accessible name`, "Set Accessible.name or meaningful text so screen-reader users can identify the control.") : null,
-      pointerOnly ? finding(`qml.accessibility.pointer_keyboard.${file}.${object.line}`, "qml.accessibility.pointer_without_keyboard", "low", file, object.line, "Custom pointer interaction has no apparent keyboard activation on its parent", "Use a Qt Quick Control or add focus/tab behavior and Enter/Space key activation; verify manually with keyboard and assistive technology.") : null,
-      trappedPopup ? finding(`qml.accessibility.popup_escape.${file}.${object.line}`, "qml.accessibility.popup_without_escape", "low", file, object.line, `${object.typeName} disables automatic closing with no apparent Escape/reject path`, "Provide an Escape/reject action and verify that keyboard users can leave the popup; suppress if another explicit close path is guaranteed.") : null,
-    ].filter(isFinding);
-  });
+  const objects = new Map(document.objects.map((object) => [object.objectId, object]));
+  const interactive = new Set(context.config.typeRoles.interactiveTypes.map(baseTypeName));
+  return document.objects.flatMap((object) => accessibilityForObject(file, object, object.parentObjectId ? objects.get(object.parentObjectId) : null, interactive));
+}
+
+function accessibilityForObject(file: string, object: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number], parent: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number] | null | undefined, interactive: Set<string>): Finding[] {
+  return [iconOnlyFinding(file, object, interactive), pointerOnlyFinding(file, object, parent, interactive), popupEscapeFinding(file, object)].filter(isFinding);
+}
+
+function iconOnlyFinding(file: string, object: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number], interactive: Set<string>): Finding | null {
+  const names = new Set(object.bindings.map((binding) => binding.propertyPath));
+  if (!interactive.has(baseTypeName(object.typeName)) || (!names.has("icon.source") && !names.has("icon.name")) || hasMeaningfulText(object) || names.has("Accessible.name") || names.has("Accessible.description")) return null;
+  return finding(`qml.accessibility.icon_only.${file}.${object.line}`, "qml.accessibility.icon_only_control", "low", file, object.line, `${object.typeName} appears to be icon-only without an accessible name`, "Set Accessible.name or meaningful text so screen-reader users can identify the control.");
+}
+
+function pointerOnlyFinding(file: string, object: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number], parent: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number] | null | undefined, interactive: Set<string>): Finding | null {
+  const pointerHandler = object.handlers.some((handler) => /onClicked|onPressed|onReleased/.test(handler.name));
+  const keyboardSupport = parent?.bindings.some((binding) => /^(?:Keys\.on|activeFocusOnTab|focus)/.test(binding.propertyPath));
+  if (baseTypeName(object.typeName) !== "MouseArea" || !pointerHandler || !parent || interactive.has(baseTypeName(parent.typeName)) || keyboardSupport) return null;
+  return finding(`qml.accessibility.pointer_keyboard.${file}.${object.line}`, "qml.accessibility.pointer_without_keyboard", "low", file, object.line, "Custom pointer interaction has no apparent keyboard activation on its parent", "Use a Qt Quick Control or add focus/tab behavior and Enter/Space key activation; verify manually with keyboard and assistive technology.");
+}
+
+function popupEscapeFinding(file: string, object: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number]): Finding | null {
+  const noAutoClose = /NoAutoClose/.test(object.bindings.find((binding) => binding.propertyPath === "closePolicy")?.expression ?? "");
+  const escapePath = object.bindings.some((binding) => /Keys\.onEscape/.test(binding.propertyPath)) || object.handlers.some((handler) => /onRejected|onClosed/.test(handler.name));
+  if (!/(?:Popup|Dialog)$/.test(baseTypeName(object.typeName)) || !noAutoClose || escapePath) return null;
+  return finding(`qml.accessibility.popup_escape.${file}.${object.line}`, "qml.accessibility.popup_without_escape", "low", file, object.line, `${object.typeName} disables automatic closing with no apparent Escape/reject path`, "Provide an Escape/reject action and verify that keyboard users can leave the popup; suppress if another explicit close path is guaranteed.");
 }
 
 function hasMeaningfulText(object: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number]): boolean {

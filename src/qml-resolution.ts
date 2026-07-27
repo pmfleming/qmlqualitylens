@@ -1,11 +1,11 @@
 import path from "node:path";
-import type { QmlDocument } from "./qml-parser.js";
+import type { QmlDocument } from "./qml-parser-types.js";
 import { baseTypeName, isShellEntrypoint } from "./qml-model.js";
 import type { ComponentRecord, Config, ImportRecord, SourceFile } from "./types.js";
 
-export type QmlDocumentEntry = { file: string; document: QmlDocument };
+type QmlDocumentEntry = { file: string; document: QmlDocument };
 
-export type QmldirComponent = {
+type QmldirComponent = {
   name: string;
   file: string;
   qmldir: string;
@@ -14,13 +14,13 @@ export type QmldirComponent = {
   singleton: boolean;
 };
 
-export type QmldirModule = {
+type QmldirModule = {
   file: string;
   module: string | null;
   components: QmldirComponent[];
 };
 
-export type ImportResolution = {
+type ImportResolution = {
   from: string;
   module: string;
   alias: string | null;
@@ -29,7 +29,7 @@ export type ImportResolution = {
   target: string | null;
 };
 
-export type ComponentUseResolution = {
+type ComponentUseResolution = {
   from: string;
   typeName: string;
   line: number;

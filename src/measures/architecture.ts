@@ -1,7 +1,6 @@
 import path from "node:path";
-import type { AnalysisContext } from "../analyzer.js";
 import { isShellEntrypoint } from "../qml-model.js";
-import type { Config } from "../types.js";
+import type { MeasureConfig as Config, MeasureContext as AnalysisContext } from "./foundation.js";
 import { baseArtifact, writeArtifact } from "./shared.js";
 
 export function measureArchitectureMap(config: Config, command: string, context: AnalysisContext): unknown {

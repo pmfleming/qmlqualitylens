@@ -2,7 +2,7 @@ export function baseTypeName(typeName: string): string {
   return typeName.split(".").at(-1) ?? typeName;
 }
 
-export function matchesConfiguredTypeName(typeName: string, configuredType: string): boolean {
+function matchesConfiguredTypeName(typeName: string, configuredType: string): boolean {
   return typeName === configuredType || baseTypeName(typeName) === configuredType;
 }
 

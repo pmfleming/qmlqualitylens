@@ -1,8 +1,5 @@
 import fs from "node:fs";
-import type { AnalysisContext } from "../analyzer.js";
-import { enrichFindings } from "../rules.js";
-import { applySuppressions } from "../suppressions.js";
-import type { Config, Finding } from "../types.js";
+import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding } from "./foundation.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 
 export function measureCorrectnessCatalog(config: Config, command: string, context: AnalysisContext): unknown {
@@ -18,10 +15,10 @@ export function measureCorrectnessCatalog(config: Config, command: string, conte
     }));
   const execution = loadTestEvidence(config.reports.tests);
   const rawFindings: Finding[] = [
-    ...(tests.length ? [] : [{ id: "correctness.no_qml_tests", kind: "correctness.no_qml_tests", severity: "medium" as const, message: "No QML test files or Qt Quick Test cases were discovered", actions: ["Add Qt Quick Test, smoke tests, or fixture-driven UI contract tests for important QML components."] }]),
-    ...execution.failures.map((failure, index) => ({ id: `tests.failure.${index}.${failure.name}`, kind: "tests.failure", severity: "high" as const, file: failure.file, line: failure.line, message: `Test '${failure.name}' failed${failure.message ? `: ${failure.message}` : ""}`, actions: ["Reproduce and fix the failing test, or update the expectation only when the behavior change is intentional."] })),
+    ...(tests.length ? [] : [noTestsFinding()]),
+    ...execution.failures.map((failure, index): Finding => ({ id: `tests.failure.${index}.${failure.name}`, kind: "tests.failure", severity: "high", file: failure.file, line: failure.line, message: `Test '${failure.name}' failed${failure.message ? `: ${failure.message}` : ""}`, actions: ["Reproduce and fix the failing test, or update the expectation only when the behavior change is intentional."] })),
   ];
-  const findings = applySuppressions(enrichFindings(rawFindings, config), config);
+  const findings = support.applySuppressions(support.enrichFindings(rawFindings, config), config);
   const artifact = {
     ...baseArtifact(context, "correctness.catalog", command),
     summary: {
@@ -43,6 +40,10 @@ export function measureCorrectnessCatalog(config: Config, command: string, conte
   return artifact;
 }
 
+function noTestsFinding(): Finding {
+  return { id: "correctness.no_qml_tests", kind: "correctness.no_qml_tests", severity: "medium", message: "No QML test files or Qt Quick Test cases were discovered", actions: ["Add Qt Quick Test, smoke tests, or fixture-driven UI contract tests for important QML components."] };
+}
+
 function loadTestEvidence(file: string | null): { status: "not_configured" | "missing" | "complete" | "failed" | "incomplete"; report: string | null; format: string | null; tests: number; duration: number | null; failures: Array<{ name: string; file?: string; line?: number; message?: string }> } {
   if (!file) return { status: "not_configured", report: null, format: null, tests: 0, duration: null, failures: [] };
   if (!fs.existsSync(file)) return { status: "missing", report: file, format: null, tests: 0, duration: null, failures: [] };
@@ -56,11 +57,11 @@ function loadTestEvidence(file: string | null): { status: "not_configured" | "mi
 }
 
 function parseJsonTestEvidence(text: string, report: string): ReturnType<typeof loadTestEvidence> {
-  const value = JSON.parse(text) as unknown;
-  const root = isRecord(value) ? value : {};
+  const value: unknown = JSON.parse(text);
+  const root = support.isRecord(value) ? value : {};
   const cases = Array.isArray(value) ? value : Array.isArray(root.tests) ? root.tests : Array.isArray(root.testCases) ? root.testCases : [];
-  const failures = cases.flatMap((item, index) => isRecord(item) && ["failed", "failure", "error"].includes(String(item.status ?? "").toLowerCase()) ? [{ name: String(item.name ?? `test-${index + 1}`), file: stringValue(item.file), line: numberValue(item.line) ?? undefined, message: stringValue(item.message) }] : []);
-  return { status: failures.length ? "failed" : "complete", report, format: "json", tests: cases.length, duration: numberValue(root.duration), failures };
+  const failures = cases.flatMap((item, index) => support.isRecord(item) && ["failed", "failure", "error"].includes(String(item.status ?? "").toLowerCase()) ? [{ name: String(item.name ?? `test-${index + 1}`), file: support.stringValue(item.file), line: support.numberValue(item.line) ?? undefined, message: support.stringValue(item.message) }] : []);
+  return { status: failures.length ? "failed" : "complete", report, format: "json", tests: cases.length, duration: support.numberValue(root.duration), failures };
 }
 
 function parseJunitEvidence(text: string, report: string): ReturnType<typeof loadTestEvidence> {
@@ -97,16 +98,4 @@ function isTestFile(file: string, text: string): boolean {
 
 function lineOf(text: string, offset: number): number {
   return text.slice(0, offset).split(/\r?\n/).length;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function stringValue(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
-
-function numberValue(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }

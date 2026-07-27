@@ -1,9 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { AnalysisContext } from "../analyzer.js";
-import { enrichFindings } from "../rules.js";
-import { applySuppressions } from "../suppressions.js";
-import type { Config, Finding } from "../types.js";
+import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding } from "./foundation.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 
 export function measureBuildEvidence(config: Config, command: string, context: AnalysisContext): unknown {
@@ -15,7 +12,7 @@ export function measureBuildEvidence(config: Config, command: string, context: A
   const cmakeProject = cmakeFiles.length > 0;
   const raw: Finding[] = [];
   if (cmakeProject && modules.length === 0 && context.sources.some((source) => source.kind === "qml")) raw.push({ id: "build.qml_module_missing", kind: "build.qml_module_missing", severity: "low", message: "CMake files were found, but no qt_add_qml_module() declaration was discovered", actions: ["Use qt_add_qml_module() for application QML modules where appropriate so tooling receives type/import information and QML can be compiled ahead of time."] });
-  const findings = applySuppressions(enrichFindings(raw, config), config);
+  const findings = support.applySuppressions(support.enrichFindings(raw, config), config);
   const artifact = {
     ...baseArtifact(context, "quality.build_evidence", command),
     summary: { status: cmakeProject ? "observed" : "not_applicable", cmake_files: cmakeFiles.length, qml_modules: modules.length, no_lint_modules: modules.filter((module) => module.no_lint).length, ...findingSummary(findings) },

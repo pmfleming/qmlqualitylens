@@ -1,15 +1,13 @@
 import path from "node:path";
-import type { AnalysisContext } from "../analyzer.js";
-import { activeFindings, applySuppressions } from "../suppressions.js";
-import type { Config, Finding } from "../types.js";
+import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding } from "./foundation.js";
 import { baseArtifact, writeArtifact } from "./shared.js";
 
 export function measureCleanup(config: Config, command: string, context: AnalysisContext): unknown {
-  const findings: Finding[] = applySuppressions([
+  const findings: Finding[] = support.applySuppressions([
     ...context.components.flatMap((component) => unusedComponentFinding(component, context.resolution.referencedFiles, context.resolution.publicFiles)),
     ...context.qmlDocuments.flatMap(unusedIdFindings),
   ], config);
-  const active = activeFindings(findings);
+  const active = support.activeFindings(findings);
   const artifact = {
     ...baseArtifact(context, "quality.cleanup", command),
     summary: {
