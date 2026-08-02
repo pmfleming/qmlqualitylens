@@ -89,7 +89,6 @@ export function starterConfig(): RawConfig {
     output_dir: "target/qmlqualitylens",
     profile: "qtquick",
     qmllint_report: "target/qmllint.json",
-    qmllint_command: "qmllint .",
     policy: { require_qmllint: false, new_code_only: true, fail_on: ["block"], incomplete: "warn" },
     tools: { qmlformat: { command: "qmlformat", check: false } },
     type_roles: { interactive_types: [], layout_types: [], delegate_owner_types: [] },
