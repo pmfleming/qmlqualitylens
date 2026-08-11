@@ -1,0 +1,58 @@
+{
+  "$schema": "../../../../qmlqualitylens.schema.json",
+  "project_name": "qmlqualitylens-qt-integration",
+  "project_root": ".",
+  "source_roots": ["."],
+  "output_dir": "target/qmlqualitylens",
+  "profile": "qtquick",
+  "policy": {
+    "require_qmllint": false,
+    "new_code_only": false,
+    "fail_on": ["block"],
+    "incomplete": "fail"
+  },
+  "tools": {
+    "cmake": {
+      "command": "cmake",
+      "check": true,
+      "build_dir": "build",
+      "configure": true,
+      "configure_arguments": ["-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release"],
+      "build_targets": ["all_qmllint", "qmlqualitylens_fixture"],
+      "build_arguments": ["--parallel"]
+    },
+    "qmllint": { "check": false },
+    "qmlformat": { "command": "qmlformat", "check": true },
+    "qmltestrunner": {
+      "command": "qmltestrunner",
+      "check": true,
+      "arguments": ["-input", "tests", "-import", "build"],
+      "timeout_ms": 120000
+    },
+    "runtime": {
+      "command": "scripts/runtime-smoke.sh",
+      "check": true,
+      "arguments": [],
+      "timeout_ms": 60000
+    },
+    "qml_profiler": {
+      "command": "node",
+      "check": true,
+      "arguments": [
+        "../../../../scripts/normalize-qml-profile.mjs",
+        "--input", "profile/chrome-trace.json",
+        "--scenario", "fixture-smoke",
+        "--qt", "6.5+",
+        "--platform", "offscreen",
+        "--renderer", "software",
+        "--build-type", "release"
+      ],
+      "timeout_ms": 60000
+    }
+  },
+  "performance_budgets": [
+    { "scenario": "fixture-smoke", "platform": "offscreen", "frame_p95_ms": 20, "max_event_ms": 5 }
+  ],
+  "external_types": ["TestCase"],
+  "exclude": ["build", "target"]
+}

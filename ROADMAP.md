@@ -1,6 +1,6 @@
 # QML Quality Lens Roadmap
 
-The implemented v0.2 research plan is in [`docs/qml-quality-improvement-plan.md`](docs/qml-quality-improvement-plan.md). It introduced evidence classification, correct `qmllint` gating, incomplete-check reporting, policy-based audit verdicts, report ingestion, UX/performance checks, profiles, SARIF, and calibration. This checklist remains the historical feature roadmap and identifies areas for deeper calibration.
+The implemented v0.2 research plan is in [`docs/qml-quality-improvement-plan.md`](docs/qml-quality-improvement-plan.md). Version 0.3 adds opt-in CMake builds, Qt Quick Test and runtime-smoke execution, hardened process controls, Chrome-trace normalization, a real Qt integration fixture, and a documented Shelllist trial. It introduced evidence classification, correct `qmllint` gating, incomplete-check reporting, policy-based audit verdicts, report ingestion, UX/performance checks, profiles, SARIF, and calibration. This checklist remains the historical feature roadmap and identifies areas for deeper calibration.
 
 ## Phase 1: MVP static artifact
 
@@ -16,8 +16,10 @@ The implemented v0.2 research plan is in [`docs/qml-quality-improvement-plan.md`
 - [x] Add provenance/confidence to split artifacts.
 - [x] Add initial audit/baseline mode.
 - [x] Add QML structural clone detection.
+- [x] Add optional CMake configure/build evidence with normalized diagnostics.
 - [x] Add QML/Quickshell health rules.
 - [x] Add correctness catalog discovery.
+- [x] Add managed `qmltestrunner` execution and runtime-smoke warning capture.
 - [x] Add cleanup/dead-component detection.
 
 ## Phase 2: QML precision
@@ -35,6 +37,7 @@ The implemented v0.2 research plan is in [`docs/qml-quality-improvement-plan.md`
 
 - [x] Initial accessibility checks for icon-only controls and pointer-only custom interaction.
 - [x] Recalibrated Loader/Image/delegate performance smells plus provenance-bearing runtime performance import.
+- [x] Add a provenance-requiring Chrome trace normalization adapter and source-located runtime hotspots.
 - [x] Initial theming/i18n checks for semantic colors and untranslated user-facing strings.
 - [x] Boundary hygiene for side effects, Process placement, and configurable boundary types/patterns.
 - Deepen focus traps, Escape behavior, semantic token coverage, protocol parsing, secret handling, and command construction.

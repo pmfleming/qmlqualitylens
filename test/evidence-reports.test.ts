@@ -41,6 +41,7 @@ test("ingests runtime QML warnings and provenance-bearing performance scenarios"
   assert.equal(performance.summary.status, "complete");
   assert.equal(performance.scenarios[0].frame_time_ms.p95, 30);
   assert.equal(performance.scenarios[0].events.Binding.count, 2);
+  assert.equal(performance.scenarios[0].hotspots[0].duration_ms, 3);
   assert.equal(performance.findings.filter((finding: any) => finding.kind === "runtime.performance_budget").length, 2);
 });
 

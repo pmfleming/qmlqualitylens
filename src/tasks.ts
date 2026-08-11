@@ -179,7 +179,7 @@ export function findTask(id: string): TaskDefinition | undefined {
 
 export function catalogForConfig(config: Config): unknown {
   return {
-    schema_version: "0.2.0",
+    schema_version: "0.3.0",
     lens: "qmlqualitylens",
     project_name: config.projectName,
     project_root: config.projectRoot,

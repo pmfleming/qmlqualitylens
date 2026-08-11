@@ -32,7 +32,7 @@ export function measureCorrectnessCatalog(config: Config, command: string, conte
       execution_status: toolExecution?.status === "incomplete" ? "incomplete" : toolExecution?.status === "failed" && execution.failures.length === 0 ? "failed" : execution.status,
       execution_reason: toolExecution?.error ?? execution.reason,
       tool_status: toolExecution?.status ?? "not_configured",
-      tool_version: config.tools.qmltestrunnerCheck ? toolVersion(config.tools.qmltestrunnerCommand, config.projectRoot) : null,
+      tool_version: config.tools.qmltestrunnerCheck ? toolVersion(config.tools.qmltestrunnerCommand, config.tools.qmltestrunnerWorkingDirectory) : null,
       executed: execution.tests,
       failures: execution.failures.length,
       ...findingSummary(findings),
@@ -42,7 +42,7 @@ export function measureCorrectnessCatalog(config: Config, command: string, conte
     findings,
   };
   writeArtifact(config, "correctness_review.json", artifact);
-  writeArtifact(config, "test_catalog.json", { schema_version: "0.2.0", project: { name: config.projectName, root: config.projectRoot }, tests });
+  writeArtifact(config, "test_catalog.json", { schema_version: "0.3.0", project: { name: config.projectName, root: config.projectRoot }, tests });
   writeArtifact(config, "test_evidence.json", { ...baseArtifact(context, "correctness.test_evidence", command), summary: artifact.summary, execution: artifact.execution, findings: findings.filter((finding) => finding.kind === "tests.failure" || finding.kind === "tests.execution_failed") });
   return artifact;
 }
@@ -56,9 +56,10 @@ function runQmlTests(config: Config): ToolExecution | null {
   return executeTool(
     config.tools.qmltestrunnerCommand,
     [...config.tools.qmltestrunnerArguments, "-o", `${report},junitxml`],
-    config.projectRoot,
+    config.tools.qmltestrunnerWorkingDirectory,
     config.tools.qmltestrunnerTimeoutMs,
-    { ...process.env, QMLQUALITYLENS_REPORT: report },
+    { ...process.env, ...config.tools.qmltestrunnerEnvironment, QMLQUALITYLENS_REPORT: report },
+    config.tools.qmltestrunnerRedactPatterns,
   );
 }
 

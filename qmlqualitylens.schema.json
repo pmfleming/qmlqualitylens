@@ -40,7 +40,11 @@
             "configure": { "type": "boolean" },
             "configure_arguments": { "type": "array", "items": { "type": "string", "minLength": 1 } },
             "build_targets": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
-            "build_arguments": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+            "build_arguments": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "timeout_ms": { "type": "integer", "exclusiveMinimum": 0 },
+            "working_directory": { "type": "string", "minLength": 1 },
+            "environment": { "type": "object", "additionalProperties": { "type": "string" } },
+            "redact_patterns": { "type": "array", "items": { "type": "string", "minLength": 1 } }
           }
         },
         "qmllint": {
@@ -73,7 +77,10 @@
             "command": { "type": "string", "minLength": 1 },
             "check": { "type": "boolean" },
             "arguments": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-            "timeout_ms": { "type": "integer", "exclusiveMinimum": 0 }
+            "timeout_ms": { "type": "integer", "exclusiveMinimum": 0 },
+            "working_directory": { "type": "string", "minLength": 1 },
+            "environment": { "type": "object", "additionalProperties": { "type": "string" } },
+            "redact_patterns": { "type": "array", "items": { "type": "string", "minLength": 1 } }
           }
         },
         "runtime": {
@@ -83,7 +90,10 @@
             "command": { "type": "string", "minLength": 1 },
             "check": { "type": "boolean" },
             "arguments": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-            "timeout_ms": { "type": "integer", "exclusiveMinimum": 0 }
+            "timeout_ms": { "type": "integer", "exclusiveMinimum": 0 },
+            "working_directory": { "type": "string", "minLength": 1 },
+            "environment": { "type": "object", "additionalProperties": { "type": "string" } },
+            "redact_patterns": { "type": "array", "items": { "type": "string", "minLength": 1 } }
           }
         },
         "qml_profiler": {
@@ -93,7 +103,10 @@
             "command": { "type": "string", "minLength": 1 },
             "check": { "type": "boolean" },
             "arguments": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-            "timeout_ms": { "type": "integer", "exclusiveMinimum": 0 }
+            "timeout_ms": { "type": "integer", "exclusiveMinimum": 0 },
+            "working_directory": { "type": "string", "minLength": 1 },
+            "environment": { "type": "object", "additionalProperties": { "type": "string" } },
+            "redact_patterns": { "type": "array", "items": { "type": "string", "minLength": 1 } }
           }
         }
       }

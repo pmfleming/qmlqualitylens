@@ -1,7 +1,25 @@
 {
+  "$schema": "../qmlqualitylens.schema.json",
   "project_name": "shelllist",
   "project_root": "../../shelllist",
-  "source_roots": ["wifi"],
+  "source_roots": ["wifi", "bluetooth", "clipboard", "launcher", "qml", "tests/qml"],
   "output_dir": "target/qmlqualitylens",
-  "exclude": []
+  "profile": "quickshell",
+  "policy": {
+    "require_qmllint": false,
+    "new_code_only": true,
+    "fail_on": ["block"],
+    "incomplete": "warn"
+  },
+  "external_modules": ["QtTest"],
+  "external_types": ["GlobalShortcut", "IpcHandler", "PanelWindow", "Region", "Shortcut", "SignalSpy", "TestCase"],
+  "tools": {
+    "cmake": { "check": false },
+    "qmllint": { "check": false },
+    "qmlformat": { "check": false },
+    "qmltestrunner": { "check": false },
+    "runtime": { "check": false },
+    "qml_profiler": { "check": false }
+  },
+  "exclude": ["target", ".direnv"]
 }

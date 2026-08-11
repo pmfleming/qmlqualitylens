@@ -9,7 +9,7 @@ export function provenance(config: Config, command: string): Record<string, Json
     config_path: config.configPath,
     project_root: config.projectRoot,
     lens: "qmlqualitylens",
-    lens_version: "0.2.0",
+    lens_version: "0.3.0",
   };
 }
 

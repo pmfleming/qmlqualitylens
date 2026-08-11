@@ -3,6 +3,9 @@
 pkgs.mkShell {
   packages = [
     pkgs.nodejs
+    pkgs.cmake
+    pkgs.ninja
+    pkgs.qt6.qtbase
     pkgs.qt6.qtdeclarative
   ];
 

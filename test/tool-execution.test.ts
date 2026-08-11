@@ -9,6 +9,7 @@ import { loadConfig } from "../src/config.js";
 import { measureBuildEvidence } from "../src/measures/build.js";
 import { measureCorrectnessCatalog } from "../src/measures/correctness.js";
 import { measureRuntimePerformance, measureRuntimeWarnings } from "../src/measures/runtime.js";
+import { executeTool } from "../src/tool-execution.js";
 
 function executable(root: string, name: string, body: string): string {
   const file = path.join(root, name);
@@ -26,6 +27,23 @@ function fixture(raw: Record<string, unknown>) {
   const config = loadConfig(configFile);
   return { root, config, context: createAnalysisContext(config) };
 }
+
+test("tool execution applies redaction and terminates timed-out process groups", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-execution-safety-"));
+  const echo = executable(root, "echo-secret.sh", `echo "token=$2"`);
+  const redacted = executeTool(echo, ["--token", "sensitive-value"], root, 5_000, process.env, ["sensitive-value"]);
+  assert.equal(redacted.status, "pass");
+  assert.doesNotMatch(redacted.command, /sensitive-value/);
+  assert.doesNotMatch(redacted.stdout, /sensitive-value/);
+
+  const pidFile = path.join(root, "child.pid");
+  const sleeper = executable(root, "sleeper.sh", `sleep 30 &\necho $! > ${JSON.stringify(pidFile)}\nwait`);
+  const timedOut = executeTool(sleeper, [], root, 100);
+  assert.equal(timedOut.status, "incomplete");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  const childPid = Number(fs.readFileSync(pidFile, "utf8").trim());
+  assert.throws(() => process.kill(childPid, 0));
+});
 
 test("runs configured CMake configure/build steps and normalizes diagnostics", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-cmake-tool-"));

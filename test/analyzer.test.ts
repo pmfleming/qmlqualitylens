@@ -139,6 +139,20 @@ test("recognizes common Qt types and preserves ambiguous component names", () =>
   assert.equal(context.resolution.componentsByName.has("Card"), false);
 });
 
+test("resolves owning qmldir types and does not misclassify externally qualified types", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-module-scope-"));
+  fs.mkdirSync(path.join(root, "Module", "internal"), { recursive: true });
+  fs.writeFileSync(path.join(root, "Module", "qmldir"), "module Demo.Module\nNested 1.0 internal/Nested.qml\nOwner 1.0 Owner.qml\n");
+  fs.writeFileSync(path.join(root, "Module", "internal", "Nested.qml"), "import QtQuick\nItem {}\n");
+  fs.writeFileSync(path.join(root, "Module", "Owner.qml"), "import QtQuick\nimport QtQuick.Controls as Controls\nItem { Nested {}; Controls.ItemDelegate {} }\n");
+  fs.writeFileSync(path.join(root, "qmlqualitylens.config.json"), JSON.stringify({ project_root: ".", output_dir: "target" }));
+
+  const context = createAnalysisContext(loadConfig(path.join(root, "qmlqualitylens.config.json")));
+
+  assert.equal(context.resolution.unresolvedTypes.length, 0);
+  assert.ok(context.resolution.componentUses.some((use) => use.from === "Module/Owner.qml" && use.typeName === "Nested" && use.target === "Module/internal/Nested.qml"));
+});
+
 test("builds project-wide resolution from qmldir and component uses", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-resolution-"));
   fs.writeFileSync(path.join(root, "qmldir"), `module Demo\nWidget 1.0 Widget.qml\ninternal Private 1.0 Private.qml\n`);

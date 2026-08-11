@@ -18,6 +18,10 @@ type ToolsConfig = {
   cmakeConfigureArguments: string[];
   cmakeBuildTargets: string[];
   cmakeBuildArguments: string[];
+  cmakeTimeoutMs: number;
+  cmakeWorkingDirectory: string;
+  cmakeEnvironment: Record<string, string>;
+  cmakeRedactPatterns: string[];
   qmllintCommand: string;
   qmllintCheck: boolean;
   qmllintArguments: string[];
@@ -30,14 +34,23 @@ type ToolsConfig = {
   qmltestrunnerCheck: boolean;
   qmltestrunnerArguments: string[];
   qmltestrunnerTimeoutMs: number;
+  qmltestrunnerWorkingDirectory: string;
+  qmltestrunnerEnvironment: Record<string, string>;
+  qmltestrunnerRedactPatterns: string[];
   runtimeCommand: string | null;
   runtimeCheck: boolean;
   runtimeArguments: string[];
   runtimeTimeoutMs: number;
+  runtimeWorkingDirectory: string;
+  runtimeEnvironment: Record<string, string>;
+  runtimeRedactPatterns: string[];
   qmlProfilerCommand: string | null;
   qmlProfilerCheck: boolean;
   qmlProfilerArguments: string[];
   qmlProfilerTimeoutMs: number;
+  qmlProfilerWorkingDirectory: string;
+  qmlProfilerEnvironment: Record<string, string>;
+  qmlProfilerRedactPatterns: string[];
 };
 type RuntimeBudget = { scenario: string; platform?: string; frameP95Ms?: number; maxEventMs?: number };
 type ReportsConfig = { tests: string | null; runtimeWarnings: string | null; qmlProfiler: string | null };
@@ -57,12 +70,12 @@ export type RawConfig = {
   process_boundary?: Partial<ProcessBoundaryConfig>;
   policy?: { require_qmllint?: boolean; new_code_only?: boolean; fail_on?: Enforcement[]; incomplete?: "fail" | "warn" | "pass" };
   tools?: {
-    cmake?: { command?: string; check?: boolean; build_dir?: string; configure?: boolean; configure_arguments?: string[]; build_targets?: string[]; build_arguments?: string[] };
+    cmake?: { command?: string; check?: boolean; build_dir?: string; configure?: boolean; configure_arguments?: string[]; build_targets?: string[]; build_arguments?: string[]; timeout_ms?: number; working_directory?: string; environment?: Record<string, string>; redact_patterns?: string[] };
     qmllint?: { command?: string; check?: boolean; arguments?: string[]; import_paths?: string[]; qmltypes?: string[]; use_environment_imports?: boolean };
     qmlformat?: { command?: string; check?: boolean };
-    qmltestrunner?: { command?: string; check?: boolean; arguments?: string[]; timeout_ms?: number };
-    runtime?: { command?: string; check?: boolean; arguments?: string[]; timeout_ms?: number };
-    qml_profiler?: { command?: string; check?: boolean; arguments?: string[]; timeout_ms?: number };
+    qmltestrunner?: { command?: string; check?: boolean; arguments?: string[]; timeout_ms?: number; working_directory?: string; environment?: Record<string, string>; redact_patterns?: string[] };
+    runtime?: { command?: string; check?: boolean; arguments?: string[]; timeout_ms?: number; working_directory?: string; environment?: Record<string, string>; redact_patterns?: string[] };
+    qml_profiler?: { command?: string; check?: boolean; arguments?: string[]; timeout_ms?: number; working_directory?: string; environment?: Record<string, string>; redact_patterns?: string[] };
   };
   type_roles?: { interactive_types?: string[]; layout_types?: string[]; delegate_owner_types?: string[] };
   reports?: { tests?: string; runtime_warnings?: string; qml_profiler?: string };
@@ -242,7 +255,7 @@ export type Finding = {
 export type ScoreBreakdown = { overall: number; complexity: number; cognitive: number; effort: number; locality: number; leverage: number; duplication: number; size: number; styling: number; boundary: number };
 
 export type AnalysisArtifact = {
-  schema_version: "0.2.0";
+  schema_version: "0.3.0";
   task_id: "quality.qml";
   project: {
     name: string;

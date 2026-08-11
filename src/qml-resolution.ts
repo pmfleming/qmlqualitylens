@@ -107,6 +107,7 @@ const BUILTIN_TYPES = new Set([
   "ParentChange",
   "PauseAnimation",
   "MouseArea",
+  "MultiEffect",
   "PinchHandler",
   "PointHandler",
   "Popup",
@@ -255,7 +256,9 @@ function resolveComponentUses(
     const scope = componentScope(file, imports.filter((item) => item.from === file), components, componentByFile, modules);
     return document.objects.flatMap((object) => {
       const target = resolveTypeInScope(object.typeName, scope);
-      const unresolved = target === null && isProjectTypeCandidate(baseTypeName(object.typeName), config);
+      const qualifier = object.typeName.includes(".") ? object.typeName.split(".")[0] ?? "" : "";
+      const externallyQualified = Boolean(qualifier && scope.externalAliases.has(qualifier));
+      const unresolved = target === null && !externallyQualified && isProjectTypeCandidate(baseTypeName(object.typeName), config);
       return target || unresolved ? [{ from: file, typeName: object.typeName, line: object.line, target, unresolved }] : [];
     });
   });
@@ -264,12 +267,24 @@ function resolveComponentUses(
 type ComponentScope = {
   unqualified: Map<string, string>;
   aliases: Map<string, Map<string, string>>;
+  externalAliases: Set<string>;
 };
 
 function componentScope(file: string, imports: ImportResolution[], components: ComponentRecord[], componentByFile: Map<string, ComponentRecord>, modules: QmldirModule[]): ComponentScope {
-  const scope: ComponentScope = { unqualified: sameDirectoryComponents(file, components), aliases: new Map() };
-  for (const item of imports.filter((entry) => entry.kind !== "external" && entry.kind !== "unresolved")) addImportToScope(scope, item, componentByFile, modules);
+  const scope: ComponentScope = { unqualified: sameDirectoryComponents(file, components), aliases: new Map(), externalAliases: new Set() };
+  const owningModule = modules
+    .filter((module) => isWithinDirectory(file, path.posix.dirname(module.file)))
+    .sort((left, right) => path.posix.dirname(right.file).length - path.posix.dirname(left.file).length)[0];
+  if (owningModule) for (const component of owningModule.components) scope.unqualified.set(component.name, component.file);
+  for (const item of imports) {
+    if (item.kind === "external" && item.alias) scope.externalAliases.add(item.alias);
+    else if (item.kind !== "external" && item.kind !== "unresolved") addImportToScope(scope, item, componentByFile, modules);
+  }
   return scope;
+}
+
+function isWithinDirectory(file: string, directory: string): boolean {
+  return directory === "." || file === directory || file.startsWith(`${directory}/`);
 }
 
 function sameDirectoryComponents(file: string, components: ComponentRecord[]): Map<string, string> {

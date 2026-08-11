@@ -66,6 +66,10 @@ export function loadConfig(configPath: string | null): Config {
       cmakeConfigureArguments: raw.tools?.cmake?.configure_arguments ?? [],
       cmakeBuildTargets: raw.tools?.cmake?.build_targets ?? [],
       cmakeBuildArguments: raw.tools?.cmake?.build_arguments ?? [],
+      cmakeTimeoutMs: raw.tools?.cmake?.timeout_ms ?? 600_000,
+      cmakeWorkingDirectory: resolveFrom(projectRoot, raw.tools?.cmake?.working_directory ?? "."),
+      cmakeEnvironment: raw.tools?.cmake?.environment ?? {},
+      cmakeRedactPatterns: raw.tools?.cmake?.redact_patterns ?? [],
       qmllintCommand: raw.tools?.qmllint?.command ?? "qmllint",
       qmllintCheck: raw.tools?.qmllint?.check ?? false,
       qmllintArguments: raw.tools?.qmllint?.arguments ?? [],
@@ -78,14 +82,23 @@ export function loadConfig(configPath: string | null): Config {
       qmltestrunnerCheck: raw.tools?.qmltestrunner?.check ?? false,
       qmltestrunnerArguments: raw.tools?.qmltestrunner?.arguments ?? [],
       qmltestrunnerTimeoutMs: raw.tools?.qmltestrunner?.timeout_ms ?? 120_000,
+      qmltestrunnerWorkingDirectory: resolveFrom(projectRoot, raw.tools?.qmltestrunner?.working_directory ?? "."),
+      qmltestrunnerEnvironment: raw.tools?.qmltestrunner?.environment ?? {},
+      qmltestrunnerRedactPatterns: raw.tools?.qmltestrunner?.redact_patterns ?? [],
       runtimeCommand: raw.tools?.runtime?.command ?? null,
       runtimeCheck: raw.tools?.runtime?.check ?? false,
       runtimeArguments: raw.tools?.runtime?.arguments ?? [],
       runtimeTimeoutMs: raw.tools?.runtime?.timeout_ms ?? 60_000,
+      runtimeWorkingDirectory: resolveFrom(projectRoot, raw.tools?.runtime?.working_directory ?? "."),
+      runtimeEnvironment: raw.tools?.runtime?.environment ?? {},
+      runtimeRedactPatterns: raw.tools?.runtime?.redact_patterns ?? [],
       qmlProfilerCommand: raw.tools?.qml_profiler?.command ?? null,
       qmlProfilerCheck: raw.tools?.qml_profiler?.check ?? false,
       qmlProfilerArguments: raw.tools?.qml_profiler?.arguments ?? [],
       qmlProfilerTimeoutMs: raw.tools?.qml_profiler?.timeout_ms ?? 300_000,
+      qmlProfilerWorkingDirectory: resolveFrom(projectRoot, raw.tools?.qml_profiler?.working_directory ?? "."),
+      qmlProfilerEnvironment: raw.tools?.qml_profiler?.environment ?? {},
+      qmlProfilerRedactPatterns: raw.tools?.qml_profiler?.redact_patterns ?? [],
     },
     typeRoles: {
       interactiveTypes: [...new Set([...profileRoles.interactiveTypes, ...(raw.type_roles?.interactive_types ?? [])])],
@@ -116,12 +129,12 @@ export function starterConfig(): RawConfig {
     qmllint_report: "target/qmllint.json",
     policy: { require_qmllint: false, new_code_only: true, fail_on: ["block"], incomplete: "warn" },
     tools: {
-      cmake: { command: "cmake", check: false, build_dir: "build", configure: false, configure_arguments: [], build_targets: ["all_qmllint"], build_arguments: [] },
+      cmake: { command: "cmake", check: false, build_dir: "build", configure: false, configure_arguments: [], build_targets: ["all_qmllint"], build_arguments: [], timeout_ms: 600000, working_directory: ".", environment: {}, redact_patterns: [] },
       qmllint: { command: "qmllint", check: false, arguments: [], import_paths: [], qmltypes: [], use_environment_imports: false },
       qmlformat: { command: "qmlformat", check: false },
-      qmltestrunner: { command: "qmltestrunner", check: false, arguments: [], timeout_ms: 120000 },
-      runtime: { check: false, arguments: [], timeout_ms: 60000 },
-      qml_profiler: { check: false, arguments: [], timeout_ms: 300000 },
+      qmltestrunner: { command: "qmltestrunner", check: false, arguments: [], timeout_ms: 120000, working_directory: ".", environment: {}, redact_patterns: [] },
+      runtime: { check: false, arguments: [], timeout_ms: 60000, working_directory: ".", environment: {}, redact_patterns: [] },
+      qml_profiler: { check: false, arguments: [], timeout_ms: 300000, working_directory: ".", environment: {}, redact_patterns: [] },
     },
     type_roles: { interactive_types: [], layout_types: [], delegate_owner_types: [] },
     reports: {},
@@ -240,7 +253,7 @@ function validatePolicy(value: unknown, errors: string[]): void {
 function validateTools(value: unknown, errors: string[]): void {
   validateObjectKeys(value, "tools", new Set(["cmake", "qmllint", "qmlformat", "qmltestrunner", "runtime", "qml_profiler"]), errors);
   if (!isRecord(value)) return;
-  validateObjectKeys(value.cmake, "tools.cmake", new Set(["command", "check", "build_dir", "configure", "configure_arguments", "build_targets", "build_arguments"]), errors);
+  validateObjectKeys(value.cmake, "tools.cmake", new Set(["command", "check", "build_dir", "configure", "configure_arguments", "build_targets", "build_arguments", "timeout_ms", "working_directory", "environment", "redact_patterns"]), errors);
   if (isRecord(value.cmake)) {
     for (const key of ["command", "build_dir"]) if (value.cmake[key] !== undefined && (typeof value.cmake[key] !== "string" || !value.cmake[key].trim())) errors.push(`tools.cmake.${key} must be a non-empty string`);
     for (const key of ["check", "configure"]) if (value.cmake[key] !== undefined && typeof value.cmake[key] !== "boolean") errors.push(`tools.cmake.${key} must be a boolean`);
@@ -250,6 +263,7 @@ function validateTools(value: unknown, errors: string[]): void {
     }
     if (Array.isArray(value.cmake.configure_arguments) && value.cmake.configure_arguments.some((argument) => ["-S", "-B"].includes(argument) || argument.startsWith("--build"))) errors.push("tools.cmake.configure_arguments must not override managed -S/-B/build options");
     if (Array.isArray(value.cmake.build_arguments) && value.cmake.build_arguments.some((argument) => ["--build", "--target", "-t"].includes(argument))) errors.push("tools.cmake.build_arguments must not override managed build/target options");
+    validateExecutionControls(value.cmake, "tools.cmake", errors);
   }
   validateObjectKeys(value.qmllint, "tools.qmllint", new Set(["command", "check", "arguments", "import_paths", "qmltypes", "use_environment_imports"]), errors);
   if (isRecord(value.qmllint)) {
@@ -273,14 +287,23 @@ function validateTools(value: unknown, errors: string[]): void {
 }
 
 function validateExecutableTool(value: unknown, name: string, errors: string[], defaultCommand: boolean): void {
-  validateObjectKeys(value, name, new Set(["command", "check", "arguments", "timeout_ms"]), errors);
+  validateObjectKeys(value, name, new Set(["command", "check", "arguments", "timeout_ms", "working_directory", "environment", "redact_patterns"]), errors);
   if (!isRecord(value)) return;
   if (value.command !== undefined && (typeof value.command !== "string" || !value.command.trim())) errors.push(`${name}.command must be a non-empty string`);
   if (value.check !== undefined && typeof value.check !== "boolean") errors.push(`${name}.check must be a boolean`);
   validateStringArray(value.arguments, `${name}.arguments`, errors);
   validateNonEmptyStrings(value.arguments, `${name}.arguments`, errors);
-  if (value.timeout_ms !== undefined && (typeof value.timeout_ms !== "number" || !Number.isInteger(value.timeout_ms) || value.timeout_ms <= 0)) errors.push(`${name}.timeout_ms must be a positive integer`);
+  validateExecutionControls(value, name, errors);
   if (value.check === true && !defaultCommand && (typeof value.command !== "string" || !value.command.trim())) errors.push(`${name}.command is required when check is true`);
+}
+
+function validateExecutionControls(value: Record<string, unknown>, name: string, errors: string[]): void {
+  if (value.timeout_ms !== undefined && (typeof value.timeout_ms !== "number" || !Number.isInteger(value.timeout_ms) || value.timeout_ms <= 0)) errors.push(`${name}.timeout_ms must be a positive integer`);
+  if (value.working_directory !== undefined && (typeof value.working_directory !== "string" || !value.working_directory.trim())) errors.push(`${name}.working_directory must be a non-empty string`);
+  if (value.environment !== undefined && (!isRecord(value.environment) || Object.values(value.environment).some((item) => typeof item !== "string"))) errors.push(`${name}.environment must be an object of string values`);
+  validateStringArray(value.redact_patterns, `${name}.redact_patterns`, errors);
+  validateNonEmptyStrings(value.redact_patterns, `${name}.redact_patterns`, errors);
+  validateRegexArray(value.redact_patterns, `${name}.redact_patterns`, errors);
 }
 
 function validateTypeRoles(value: unknown, errors: string[]): void {

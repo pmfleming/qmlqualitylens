@@ -2,13 +2,13 @@
 
 Static quality lens for QML, Qt Quick, and Quickshell projects.
 
-See [`docs/qml-quality-research.md`](docs/qml-quality-research.md) for the official Qt recommendations and available tools, [`docs/qml-quality-improvement-plan.md`](docs/qml-quality-improvement-plan.md) for the implementation sequence, [`docs/evidence-model.md`](docs/evidence-model.md) for pass/incomplete semantics and CI usage, and [`docs/migration-0.2.md`](docs/migration-0.2.md) for upgrade guidance.
+See [`docs/qml-quality-research.md`](docs/qml-quality-research.md) for the official Qt recommendations and available tools, [`docs/shelllist-trial-0.3.md`](docs/shelllist-trial-0.3.md) for the production-project trial, [`docs/qml-quality-improvement-plan.md`](docs/qml-quality-improvement-plan.md) for the implementation sequence, [`docs/evidence-model.md`](docs/evidence-model.md) for pass/incomplete semantics and CI usage, and [`docs/migration-0.3.md`](docs/migration-0.3.md) for upgrade guidance.
 
 The lens is evidence-aware while retaining a static default with no runtime dependencies beyond Node.js. It separates authoritative tool/test/runtime evidence, high-confidence parsed semantics, and heuristic architecture review signals. Ordinary static analysis does not execute the target application.
 
-Optional `qmllint` and `qmlformat` commands are first-class analysis evidence when configured. Existing test, runtime-warning, and normalized performance reports can also be imported. These integrations are separate from the optional `qmllint` oracle suite used to calibrate the built-in rules.
+Optional `qmllint`, `qmlformat`, CMake, Qt Quick Test, runtime-smoke, and profiler-export commands are first-class evidence when configured. Existing test, runtime-warning, and normalized performance reports can also be imported. These integrations are separate from the optional `qmllint` oracle suite used to calibrate the built-in rules.
 
-The v0.2 analyzer includes a small QML lexer and parser implemented across `src/qml-lexer.ts`, `src/qml-parser.ts`, and `src/qml-parser-types.ts`. It understands imports, object scopes, nested object declarations, qualified type paths, grouped property scopes, attached property scopes/handlers, properties, aliases, signals, functions, multiline bindings, ids, and id references well enough to produce locality and component-shape metrics without relying on broad regular expressions. Parser diagnostics are surfaced in JSON artifacts and as findings when precision is reduced.
+The v0.3 analyzer retains a small QML lexer and parser implemented across `src/qml-lexer.ts`, `src/qml-parser.ts`, and `src/qml-parser-types.ts`. It understands imports, object scopes, nested object declarations, qualified type paths, grouped property scopes, attached property scopes/handlers, properties, aliases, signals, functions, multiline bindings, ids, and id references well enough to produce locality and component-shape metrics without relying on broad regular expressions. Parser diagnostics are surfaced in JSON artifacts and as findings when precision is reduced.
 
 ## Measurements and artifacts
 
@@ -52,6 +52,12 @@ node dist/bin/qmlqualitylens.js audit --config qmlqualitylens.config.json --form
 ```
 
 `npm test` builds the project and runs the complete test suite. Use `npm run parser:test` only for the targeted parser tests. After `npm link`, the shorter `qmlqualitylens ...` commands shown below are available locally.
+
+Run the real Qt/CMake integration fixture when Qt 6, CMake, and Ninja are installed:
+
+```sh
+npm run integration:qt
+```
 
 Optional oracle calibration (heuristic labels always run; Qt diagnostics skip when `qmllint` is not installed):
 
@@ -175,7 +181,16 @@ npm run analyze:shelllist
 
 `tools.qmltestrunner.check` executes Qt Quick Test and manages a JUnit output argument at `reports.tests` (or an output-directory default). `tools.runtime.check` executes an explicit smoke scenario and analyzes captured stdout/stderr for QML runtime warnings. `tools.qml_profiler.check` runs a configured profiler/export adapter which must write the documented normalized JSON format to `reports.qml_profiler`; the report path is provided through `QMLQUALITYLENS_REPORT`. Native QML Profiler formats are still not guessed.
 
-All execution is opt-in. CMake configure scripts, builds, tests, and applications can run arbitrary project code or cause external side effects; enable them only for trusted projects and controlled CI environments. The generated starter leaves every execution check disabled.
+All execution is opt-in. CMake configure scripts, builds, tests, and applications can run arbitrary project code or cause external side effects; enable them only for trusted projects and controlled CI environments. Execution adapters support project-relative `working_directory`, string-valued `environment`, positive `timeout_ms`, and regex `redact_patterns`. Output tails are bounded, sensitive-looking command arguments are redacted, and timed-out process groups are terminated. The generated starter leaves every execution check disabled.
+
+Chrome trace exports can be converted to the normalized interchange consumed by `runtime_performance.json`:
+
+```sh
+node scripts/normalize-qml-profile.mjs \
+  --input trace.json --output normalized.json \
+  --scenario startup --qt 6.8.2 --platform linux-x86_64 \
+  --renderer vulkan --build-type release
+```
 
 `policy` controls evidence-based audit gating. Missing, malformed, zero-test, partial-coverage, or otherwise unusable required evidence is handled according to `policy.incomplete`. This includes required `qmllint`, enabled `qmlformat`, and configured test/runtime reports. Profiles are `generic`, `qtquick`, `kirigami`, `quickshell`, and `custom`. Rule overrides can disable a rule or change its enforcement to `block`, `warn`, or `review`. `external_modules` accepts installed module prefixes outside the analyzed roots, while `external_types` accepts known QML type names. Suppressions can match findings by `id`, `kind`, and/or `file`; include a reason so the exception remains reviewable. Suppressed findings remain in artifacts but do not affect active counts or the heuristic maintainability score. Invalid configuration fails fast with actionable errors.
 

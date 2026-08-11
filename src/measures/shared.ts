@@ -6,7 +6,7 @@ type MeasureArtifact = Record<string, JsonValue>;
 
 export function baseArtifact(context: AnalysisContext, taskId: string, command: string): MeasureArtifact {
   return {
-    schema_version: "0.2.0",
+    schema_version: "0.3.0",
     task_id: taskId,
     project: {
       name: context.config.projectName,

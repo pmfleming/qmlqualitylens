@@ -1,4 +1,6 @@
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 
 export type ToolExecution = {
   status: "pass" | "failed" | "incomplete";
@@ -13,12 +15,14 @@ export type ToolExecution = {
   stderr_tail: string[];
 };
 
-export function executeTool(executable: string, args: string[], cwd: string, timeoutMs: number, environment: NodeJS.ProcessEnv = process.env): ToolExecution {
+export function executeTool(executable: string, args: string[], cwd: string, timeoutMs: number, environment: NodeJS.ProcessEnv = process.env, redactPatterns: string[] = []): ToolExecution {
   const started = Date.now();
-  const result = spawnSync(executable, args, { cwd, env: environment, timeout: timeoutMs, encoding: "utf8", maxBuffer: 20 * 1024 * 1024 });
-  const stdout = result.stdout ?? "";
-  const stderr = result.stderr ?? "";
-  const error = result.error?.message ?? (result.status === null ? `Tool did not return an exit code${result.signal ? ` (signal ${result.signal})` : ""}` : null);
+  const runner = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../bin/tool-process-runner.js");
+  const result = spawnSync(process.execPath, [runner, executable, ...args], { cwd, env: environment, timeout: timeoutMs, killSignal: "SIGTERM", encoding: "utf8", maxBuffer: 20 * 1024 * 1024 });
+  const stdout = redact(result.stdout ?? "", redactPatterns);
+  const stderr = redact(result.stderr ?? "", redactPatterns);
+  const runnerError = stderr.match(/^QMLQUALITYLENS_EXEC_ERROR:\s*(.*)$/m)?.[1] ?? null;
+  const error = result.error?.message ?? runnerError ?? (result.status === null ? `Tool did not return an exit code${result.signal ? ` (signal ${result.signal})` : ""}` : null);
   return {
     status: error ? "incomplete" : result.status === 0 ? "pass" : "failed",
     command: commandDisplay(executable, args),
@@ -46,5 +50,14 @@ function outputTail(output: string): string[] {
 }
 
 function commandDisplay(executable: string, args: string[]): string {
-  return [executable, ...args].map((value) => /\s/.test(value) ? JSON.stringify(value) : value).join(" ");
+  const sensitive = /(?:password|passwd|token|secret|credential|api[-_]?key)/i;
+  const displayArgs = args.map((value, index) => {
+    if (index > 0 && sensitive.test(args[index - 1] ?? "")) return "<redacted>";
+    return value.replace(/^([^=]*(?:password|passwd|token|secret|credential|api[-_]?key)[^=]*)=.*/i, "$1=<redacted>");
+  });
+  return [executable, ...displayArgs].map((value) => /\s/.test(value) ? JSON.stringify(value) : value).join(" ");
+}
+
+function redact(value: string, patterns: string[]): string {
+  return patterns.reduce((output, pattern) => output.replace(new RegExp(pattern, "g"), "<redacted>"), value);
 }

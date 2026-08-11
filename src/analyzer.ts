@@ -81,7 +81,7 @@ export function analyzeProject(config: Config): AnalysisArtifact {
 export function legacyQualityArtifact(context: AnalysisContext): AnalysisArtifact {
   const { config, files, components, functions, bindings, parserDiagnostics, clones, findings, scores } = context;
   return {
-    schema_version: "0.2.0",
+    schema_version: "0.3.0",
     task_id: "quality.qml",
     project: { name: config.projectName, root: config.projectRoot },
     generated_at: new Date().toISOString(),

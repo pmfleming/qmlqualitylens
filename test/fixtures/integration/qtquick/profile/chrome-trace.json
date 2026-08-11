@@ -1,0 +1,7 @@
+{
+  "traceEvents": [
+    { "name": "Frame", "cat": "Frame", "ph": "X", "ts": 0, "dur": 12000 },
+    { "name": "Frame", "cat": "Frame", "ph": "X", "ts": 17000, "dur": 14000 },
+    { "name": "Binding", "cat": "Binding", "ph": "X", "ts": 1000, "dur": 800, "args": { "file": "Main.qml", "line": 5 } }
+  ]
+}

@@ -52,7 +52,7 @@ The default remains static and side-effect free. Trusted projects can explicitly
 - `tools.runtime.check` to execute a smoke scenario and inspect captured QML warnings;
 - `tools.qml_profiler.check` to execute a project-specific adapter which exports normalized profiler evidence.
 
-Commands are invoked as executable/argument arrays without a shell, have configured timeouts, retain bounded output tails, and record exit status. They can still execute arbitrary project code, tests, applications, CMake scripts, or build hooks, so they must only be enabled for trusted repositories in controlled environments.
+Commands are invoked as executable/argument arrays without a shell, support controlled working directories/environments and redaction patterns, have configured timeouts, terminate timed-out process groups, retain bounded output tails, redact sensitive-looking arguments, and record exit status. They can still execute arbitrary project code, tests, applications, CMake scripts, or build hooks, so they must only be enabled for trusted repositories in controlled environments.
 
 ## Imported reports
 
@@ -89,7 +89,7 @@ Discovery, execution, and passing are represented separately. Malformed reports,
 }
 ```
 
-The importer requires a named scenario, Qt version, platform, and at least one measured frame or event. `tools.qml_profiler.check` may run an explicitly configured export adapter; it receives the target normalized report path in `QMLQUALITYLENS_REPORT`. It reports frame percentiles, frames over 16.67 ms, and event totals/maxima. Configured budgets are incomplete when their scenario or required measurement is absent. The 16.67 ms count is diagnostic context, not a universal budget. Native QML Profiler format adapters should normalize into this interchange format after format-specific calibration.
+The importer requires a named scenario, Qt version, platform, and at least one measured frame or event. `tools.qml_profiler.check` may run an explicitly configured export adapter; it receives the target normalized report path in `QMLQUALITYLENS_REPORT`. It reports frame percentiles, frames over 16.67 ms, and event totals/maxima. Configured budgets are incomplete when their scenario or required measurement is absent. The 16.67 ms count is diagnostic context, not a universal budget. Chrome trace JSON can be converted with `scripts/normalize-qml-profile.mjs`. Native binary QML Profiler formats should normalize into this interchange only after format-specific calibration.
 
 ## CI examples
 

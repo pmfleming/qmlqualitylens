@@ -43,7 +43,7 @@ type BaseSnapshot = {
 };
 
 type AuditArtifact = {
-  schema_version: "0.2.0";
+  schema_version: "0.3.0";
   task_id: "audit";
   project: { name: string; root: string };
   provenance: Record<string, unknown>;
@@ -94,7 +94,7 @@ export function runAudit(config: Config, command: string, options: AuditOptions)
   const verdict = auditVerdict(config, gateFindings, incompleteChecks);
   const summary = findingSummary(findings);
   const artifact: AuditArtifact = {
-    schema_version: "0.2.0",
+    schema_version: "0.3.0",
     task_id: "audit",
     project: { name: config.projectName, root: config.projectRoot },
     provenance: provenance(config, command),
@@ -290,7 +290,7 @@ function readBaseline(file: string | null): Set<string> {
 
 function writeBaseline(file: string, findings: Finding[]): void {
   fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
-  fs.writeFileSync(file, `${JSON.stringify({ schema_version: "0.2.0", generated_at: new Date().toISOString(), findings: findings.map((finding) => ({ id: finding.id, fingerprint: finding.fingerprint, kind: finding.kind, file: finding.file, line: finding.line })) }, null, 2)}\n`);
+  fs.writeFileSync(file, `${JSON.stringify({ schema_version: "0.3.0", generated_at: new Date().toISOString(), findings: findings.map((finding) => ({ id: finding.id, fingerprint: finding.fingerprint, kind: finding.kind, file: finding.file, line: finding.line })) }, null, 2)}\n`);
 }
 
 function findingKey(finding: Finding): string {

@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { executeTool } from "../tool-execution.js";
 import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding } from "./foundation.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 
@@ -36,7 +37,6 @@ type CmakeExecution = {
 };
 
 const CMAKE_HELP = "https://cmake.org/cmake/help/latest/manual/cmake.1.html";
-const MAX_OUTPUT_LINES = 200;
 
 export function measureBuildEvidence(config: Config, command: string, context: AnalysisContext): unknown {
   const cmakeFiles = discoverCmake(config);
@@ -93,26 +93,23 @@ function runCmake(config: Config): CmakeExecution {
 }
 
 function runCmakeStep(config: Config, phase: CmakeStep["phase"], args: string[]): CmakeStep {
-  const started = Date.now();
-  const result = spawnSync(config.tools.cmakeCommand, args, { cwd: config.projectRoot, encoding: "utf8", maxBuffer: 20 * 1024 * 1024 });
-  const stdout = result.stdout ?? "";
-  const stderr = result.stderr ?? "";
-  const diagnostics = parseCmakeDiagnostics(`${stdout}\n${stderr}`, phase, config);
-  const error = result.error?.message ?? (result.status === null ? `CMake ${phase} did not return an exit code${result.signal ? ` (signal ${result.signal})` : ""}` : null);
+  const result = executeTool(config.tools.cmakeCommand, args, config.tools.cmakeWorkingDirectory, config.tools.cmakeTimeoutMs, { ...process.env, ...config.tools.cmakeEnvironment }, config.tools.cmakeRedactPatterns);
+  const diagnostics = parseCmakeDiagnostics(`${result.stdout}\n${result.stderr}`, phase, config);
+  const error = result.error;
   const status = error ? "incomplete"
-    : result.status !== 0 || diagnostics.some((item) => item.severity === "error") ? "failed"
+    : result.exit_code !== 0 || diagnostics.some((item) => item.severity === "error") ? "failed"
       : diagnostics.some((item) => item.severity === "warning") ? "warn"
         : "pass";
   return {
     phase,
     status,
-    command: commandDisplay(config.tools.cmakeCommand, args),
-    exit_code: result.status,
+    command: result.command,
+    exit_code: result.exit_code,
     signal: result.signal,
-    duration_ms: Date.now() - started,
+    duration_ms: result.duration_ms,
     error,
-    stdout_tail: outputTail(stdout),
-    stderr_tail: outputTail(stderr),
+    stdout_tail: result.stdout_tail,
+    stderr_tail: result.stderr_tail,
     diagnostics,
   };
 }
@@ -185,20 +182,10 @@ function cmakeVersion(config: Config): string | null {
   return `${result.stdout ?? result.stderr ?? ""}`.split(/\r?\n/)[0]?.trim() || null;
 }
 
-function outputTail(output: string): string[] {
-  const lines = output.split(/\r?\n/);
-  if (lines.at(-1) === "") lines.pop();
-  return lines.slice(-MAX_OUTPUT_LINES);
-}
-
 function relativeFile(file: string, config: Config): string {
   const normalized = file.replace(/^file:\/\//, "");
   const absolute = path.isAbsolute(normalized) ? normalized : path.resolve(config.projectRoot, normalized);
   return path.relative(config.projectRoot, absolute).split(path.sep).join("/");
-}
-
-function commandDisplay(executable: string, args: string[]): string {
-  return [executable, ...args].map((value) => /\s/.test(value) ? JSON.stringify(value) : value).join(" ");
 }
 
 function discoverCmake(config: Config): Array<{ absolute: string; relative: string }> {

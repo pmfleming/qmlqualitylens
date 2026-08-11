@@ -58,14 +58,14 @@ export function measureRuntimePerformance(config: Config, command: string, conte
 
 function runRuntimeSmoke(config: Config): ToolExecution | null {
   if (!config.tools.runtimeCheck || !config.tools.runtimeCommand) return null;
-  return executeTool(config.tools.runtimeCommand, config.tools.runtimeArguments, config.projectRoot, config.tools.runtimeTimeoutMs);
+  return executeTool(config.tools.runtimeCommand, config.tools.runtimeArguments, config.tools.runtimeWorkingDirectory, config.tools.runtimeTimeoutMs, { ...process.env, ...config.tools.runtimeEnvironment }, config.tools.runtimeRedactPatterns);
 }
 
 function runProfilerProducer(config: Config, report: string | null): ToolExecution | null {
   if (!config.tools.qmlProfilerCheck || !config.tools.qmlProfilerCommand || !report) return null;
   fs.mkdirSync(path.dirname(report), { recursive: true });
   fs.rmSync(report, { force: true });
-  return executeTool(config.tools.qmlProfilerCommand, config.tools.qmlProfilerArguments, config.projectRoot, config.tools.qmlProfilerTimeoutMs, { ...process.env, QMLQUALITYLENS_REPORT: report });
+  return executeTool(config.tools.qmlProfilerCommand, config.tools.qmlProfilerArguments, config.tools.qmlProfilerWorkingDirectory, config.tools.qmlProfilerTimeoutMs, { ...process.env, ...config.tools.qmlProfilerEnvironment, QMLQUALITYLENS_REPORT: report }, config.tools.qmlProfilerRedactPatterns);
 }
 
 function publicExecution(execution: ToolExecution): Omit<ToolExecution, "stdout" | "stderr"> {
@@ -93,6 +93,7 @@ type RuntimeScenario = {
   frame_time_ms: { p50: number | null; p95: number | null; p99: number | null; max: number | null };
   dropped_frames: number;
   events: Record<string, { count: number; total_ms: number; max_ms: number }>;
+  hotspots: Array<{ category: string; duration_ms: number; file?: string; line?: number }>;
 };
 
 function normalizePerformanceReport(value: unknown): { complete: boolean; reason: string | null; scenarios: RuntimeScenario[] } {
@@ -109,9 +110,10 @@ function normalizeScenario(value: unknown): RuntimeScenario[] {
   if (typeof qt !== "string" || !qt.trim() || typeof value.environment.platform !== "string" || !value.environment.platform.trim()) return [];
   const traceEvents = Array.isArray(value.traceEvents) ? value.traceEvents : [];
   const frames = frameDurations(value.frames, traceEvents).sort((a, b) => a - b);
-  const events = eventSummaries(Array.isArray(value.events) ? value.events : traceEvents);
+  const measuredEvents = Array.isArray(value.events) ? value.events : traceEvents;
+  const events = eventSummaries(measuredEvents);
   if (!frames.length && !Object.keys(events).length) return [];
-  return [{ scenario: value.scenario, environment: value.environment, frame_count: frames.length, frame_time_ms: { p50: percentile(frames, 0.5), p95: percentile(frames, 0.95), p99: percentile(frames, 0.99), max: frames.at(-1) ?? null }, dropped_frames: frames.filter((duration) => duration > 16.67).length, events }];
+  return [{ scenario: value.scenario, environment: value.environment, frame_count: frames.length, frame_time_ms: { p50: percentile(frames, 0.5), p95: percentile(frames, 0.95), p99: percentile(frames, 0.99), max: frames.at(-1) ?? null }, dropped_frames: frames.filter((duration) => duration > 16.67).length, events, hotspots: eventHotspots(measuredEvents) }];
 }
 
 function frameDurations(frames: unknown, traceEvents: unknown[]): number[] {
@@ -128,6 +130,19 @@ function eventSummaries(input: unknown[]): RuntimeScenario["events"] {
     events.set(category, [...(events.get(category) ?? []), duration]);
   }
   return Object.fromEntries([...events].map(([category, durations]) => [category, { count: durations.length, total_ms: round(durations.reduce((sum, duration) => sum + duration, 0)), max_ms: round(Math.max(...durations)) }]));
+}
+
+function eventHotspots(input: unknown[]): RuntimeScenario["hotspots"] {
+  return input.flatMap((event) => {
+    const category = eventCategory(event);
+    const duration = durationMs(event);
+    if (!category || /frame/i.test(category) || duration === null || !Number.isFinite(duration) || duration < 0 || !support.isRecord(event)) return [];
+    const args = support.isRecord(event.args) ? event.args : {};
+    const data = support.isRecord(args.data) ? args.data : {};
+    const file = support.stringValue(event.file) ?? support.stringValue(args.file) ?? support.stringValue(data.file) ?? undefined;
+    const line = support.numberValue(event.line) ?? support.numberValue(args.line) ?? support.numberValue(data.line) ?? undefined;
+    return [{ category, duration_ms: round(duration), ...(file ? { file } : {}), ...(line ? { line } : {}) }];
+  }).sort((left, right) => right.duration_ms - left.duration_ms).slice(0, 50);
 }
 
 function eventCategory(value: unknown): string | null {
@@ -170,7 +185,7 @@ function frameBudgetFinding(scenario: RuntimeScenario, budget: Config["performan
 }
 
 function eventBudgetFinding(scenario: RuntimeScenario, budget: Config["performanceBudgets"][number], platform?: string): Finding | null {
-  const maxEvent = Math.max(0, ...Object.values(scenario.events).map((event) => event.max_ms));
+  const maxEvent = Math.max(0, ...Object.entries(scenario.events).filter(([category]) => !/frame/i.test(category)).map(([, event]) => event.max_ms));
   if (budget.maxEventMs === undefined || maxEvent <= budget.maxEventMs) return null;
   return { id: `runtime.performance_budget.event.${scenario.scenario}.${platform ?? "any"}`, kind: "runtime.performance_budget", severity: "medium", message: `${scenario.scenario} maximum event ${maxEvent} ms exceeds budget ${budget.maxEventMs} ms${platform ? ` on ${platform}` : ""}`, metric: maxEvent, threshold: budget.maxEventMs, actions: ["Inspect the longest binding/handler/JavaScript event and optimize the measured source path."] };
 }
