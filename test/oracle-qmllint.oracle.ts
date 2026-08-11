@@ -105,11 +105,17 @@ function qtImportPaths(): string[] {
 }
 
 function detectedQtImportPath(): string | null {
+  for (const command of ["qtpaths6", "qtpaths"]) {
+    const queried = spawnSync(command, ["--query", "QT_INSTALL_QML"], { encoding: "utf8" });
+    const candidate = queried.status === 0 ? queried.stdout.trim() : "";
+    if (candidate && fs.existsSync(candidate)) return candidate;
+  }
   const which = spawnSync("which", ["qmllint"], { encoding: "utf8" });
   const executable = which.stdout.trim();
   if (!executable) return null;
   const root = path.dirname(path.dirname(fs.realpathSync(executable)));
-  return path.join(root, "lib/qt-6/qml");
+  const candidates = [path.join(root, "lib/qt-6/qml"), path.join(root, "qml")];
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
 }
 
 function splitPathEnv(value: string | undefined): string[] {
