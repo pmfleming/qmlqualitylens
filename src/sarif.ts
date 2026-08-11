@@ -27,10 +27,10 @@ export function sarifForFindings(findings: Finding[], toolVersion = "0.2.0"): un
       },
       results: active.map((finding) => ({
         ruleId: finding.kind,
-        level: finding.enforcement === "block" || finding.severity === "high" ? "error" : finding.enforcement === "warn" || finding.severity === "medium" ? "warning" : "note",
+        level: finding.enforcement === "block" ? "error" : finding.enforcement === "warn" ? "warning" : "note",
         message: { text: finding.message },
         partialFingerprints: { qmlqualitylensFingerprint: finding.fingerprint ?? finding.id },
-        locations: finding.file ? [{ physicalLocation: { artifactLocation: { uri: finding.file }, region: { startLine: finding.line ?? 1 } } }] : [],
+        locations: finding.file ? [{ physicalLocation: { artifactLocation: { uri: finding.file }, region: { startLine: finding.line ?? 1, ...(finding.column ? { startColumn: finding.column } : {}) } } }] : [],
         properties: {
           evidence: finding.evidence ?? "heuristic",
           confidence: finding.confidence ?? "low",

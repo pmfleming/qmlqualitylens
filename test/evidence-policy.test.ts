@@ -54,6 +54,28 @@ test("audit includes configured test execution evidence", () => {
   assert.ok(artifact.findings.some((finding) => finding.kind === "tests.failure" && finding.enforcement === "block"));
 });
 
+test("audit treats malformed configured evidence as incomplete", () => {
+  const fixture = project({ reports: { tests: "tests.json", qml_profiler: "profile.json" }, policy: { incomplete: "warn" } });
+  fs.writeFileSync(path.join(fixture.root, "tests.json"), "{}");
+  fs.writeFileSync(path.join(fixture.root, "profile.json"), JSON.stringify({ scenario: "startup", environment: {} }));
+
+  const artifact = runAudit(fixture.config, "test", { base: null, baseline: null, saveBaseline: null });
+
+  assert.equal(artifact.summary.verdict, "incomplete");
+  assert.equal(artifact.summary.incomplete_checks.length, 2);
+  assert.ok(artifact.summary.incomplete_checks.some((reason) => reason.includes("test report")));
+  assert.ok(artifact.summary.incomplete_checks.some((reason) => reason.includes("runtime performance report")));
+});
+
+test("tool diagnostics do not change the heuristic maintainability score", () => {
+  const fixture = project({ qmllint_report: "qmllint.json" });
+  const withoutTool = createAnalysisContext(fixture.config).scores.overall;
+  fs.writeFileSync(path.join(fixture.root, "qmllint.json"), JSON.stringify({ diagnostics: [{ file: "Main.qml", line: 2, severity: "error", message: "tool-only failure" }] }));
+  const withTool = createAnalysisContext(fixture.config).scores.overall;
+
+  assert.equal(withTool, withoutTool);
+});
+
 test("quality contract and SARIF preserve evidence metadata", () => {
   const { config } = project({});
   const context = createAnalysisContext(config);
@@ -64,4 +86,7 @@ test("quality contract and SARIF preserve evidence metadata", () => {
   assert.ok(contract.checks.some((check) => check.id === "tool.qmllint" && check.status === "skipped"));
   assert.equal(sarif.version, "2.1.0");
   assert.equal(sarif.runs[0].results.length, context.findings.filter((finding) => !finding.suppressed).length);
+
+  const reviewSarif = sarifForFindings([{ id: "review", kind: "review", severity: "high", enforcement: "review", message: "high impact review", actions: [] }]) as any;
+  assert.equal(reviewSarif.runs[0].results[0].level, "note", "SARIF level must reflect enforcement rather than conflating impact with policy");
 });

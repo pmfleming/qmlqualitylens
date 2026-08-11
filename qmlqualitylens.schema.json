@@ -30,12 +30,70 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "cmake": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "command": { "type": "string", "minLength": 1 },
+            "check": { "type": "boolean" },
+            "build_dir": { "type": "string", "minLength": 1 },
+            "configure": { "type": "boolean" },
+            "configure_arguments": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "build_targets": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+            "build_arguments": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+          }
+        },
+        "qmllint": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "command": { "type": "string", "minLength": 1 },
+            "check": { "type": "boolean" },
+            "arguments": {
+              "type": "array",
+              "items": { "type": "string", "not": { "pattern": "^--json(?:=|$)" } }
+            },
+            "import_paths": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+            "qmltypes": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+            "use_environment_imports": { "type": "boolean" }
+          }
+        },
         "qmlformat": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
             "command": { "type": "string" },
             "check": { "type": "boolean" }
+          }
+        },
+        "qmltestrunner": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "command": { "type": "string", "minLength": 1 },
+            "check": { "type": "boolean" },
+            "arguments": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "timeout_ms": { "type": "integer", "exclusiveMinimum": 0 }
+          }
+        },
+        "runtime": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "command": { "type": "string", "minLength": 1 },
+            "check": { "type": "boolean" },
+            "arguments": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "timeout_ms": { "type": "integer", "exclusiveMinimum": 0 }
+          }
+        },
+        "qml_profiler": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "command": { "type": "string", "minLength": 1 },
+            "check": { "type": "boolean" },
+            "arguments": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "timeout_ms": { "type": "integer", "exclusiveMinimum": 0 }
           }
         }
       }

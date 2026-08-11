@@ -10,7 +10,35 @@ export type ProjectProfile = "generic" | "qtquick" | "kirigami" | "quickshell" |
 export type PolicyConfig = { requireQmllint: boolean; newCodeOnly: boolean; failOn: Enforcement[]; incomplete: "fail" | "warn" | "pass" };
 type RuleOverride = { enabled?: boolean; enforcement?: Enforcement };
 type TypeRolesConfig = { interactiveTypes: string[]; layoutTypes: string[]; delegateOwnerTypes: string[] };
-type ToolsConfig = { qmlformatCommand: string | null; qmlformatCheck: boolean };
+type ToolsConfig = {
+  cmakeCommand: string;
+  cmakeCheck: boolean;
+  cmakeBuildDir: string;
+  cmakeConfigure: boolean;
+  cmakeConfigureArguments: string[];
+  cmakeBuildTargets: string[];
+  cmakeBuildArguments: string[];
+  qmllintCommand: string;
+  qmllintCheck: boolean;
+  qmllintArguments: string[];
+  qmllintImportPaths: string[];
+  qmllintQmltypes: string[];
+  qmllintUseEnvironmentImports: boolean;
+  qmlformatCommand: string | null;
+  qmlformatCheck: boolean;
+  qmltestrunnerCommand: string;
+  qmltestrunnerCheck: boolean;
+  qmltestrunnerArguments: string[];
+  qmltestrunnerTimeoutMs: number;
+  runtimeCommand: string | null;
+  runtimeCheck: boolean;
+  runtimeArguments: string[];
+  runtimeTimeoutMs: number;
+  qmlProfilerCommand: string | null;
+  qmlProfilerCheck: boolean;
+  qmlProfilerArguments: string[];
+  qmlProfilerTimeoutMs: number;
+};
 type RuntimeBudget = { scenario: string; platform?: string; frameP95Ms?: number; maxEventMs?: number };
 type ReportsConfig = { tests: string | null; runtimeWarnings: string | null; qmlProfiler: string | null };
 
@@ -28,7 +56,14 @@ export type RawConfig = {
   external_types?: string[];
   process_boundary?: Partial<ProcessBoundaryConfig>;
   policy?: { require_qmllint?: boolean; new_code_only?: boolean; fail_on?: Enforcement[]; incomplete?: "fail" | "warn" | "pass" };
-  tools?: { qmlformat?: { command?: string; check?: boolean } };
+  tools?: {
+    cmake?: { command?: string; check?: boolean; build_dir?: string; configure?: boolean; configure_arguments?: string[]; build_targets?: string[]; build_arguments?: string[] };
+    qmllint?: { command?: string; check?: boolean; arguments?: string[]; import_paths?: string[]; qmltypes?: string[]; use_environment_imports?: boolean };
+    qmlformat?: { command?: string; check?: boolean };
+    qmltestrunner?: { command?: string; check?: boolean; arguments?: string[]; timeout_ms?: number };
+    runtime?: { command?: string; check?: boolean; arguments?: string[]; timeout_ms?: number };
+    qml_profiler?: { command?: string; check?: boolean; arguments?: string[]; timeout_ms?: number };
+  };
   type_roles?: { interactive_types?: string[]; layout_types?: string[]; delegate_owner_types?: string[] };
   reports?: { tests?: string; runtime_warnings?: string; qml_profiler?: string };
   performance_budgets?: Array<{ scenario: string; platform?: string; frame_p95_ms?: number; max_event_ms?: number }>;
@@ -170,7 +205,7 @@ export type CloneGroup = {
   sample: string[];
 };
 
-export type QmllintSource = "report" | "command" | "none";
+export type QmllintSource = "report" | "command" | "tool" | "none";
 
 export type QmllintFinding = {
   file: string;
@@ -189,6 +224,7 @@ export type Finding = {
   severity: "low" | "medium" | "high";
   file?: string;
   line?: number;
+  column?: number;
   message: string;
   metric?: number;
   threshold?: number;

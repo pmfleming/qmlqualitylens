@@ -59,8 +59,33 @@ export function loadConfig(configPath: string | null): Config {
       incomplete: raw.policy?.incomplete ?? DEFAULT_POLICY.incomplete,
     },
     tools: {
+      cmakeCommand: raw.tools?.cmake?.command ?? "cmake",
+      cmakeCheck: raw.tools?.cmake?.check ?? false,
+      cmakeBuildDir: resolveFrom(projectRoot, raw.tools?.cmake?.build_dir ?? "build"),
+      cmakeConfigure: raw.tools?.cmake?.configure ?? false,
+      cmakeConfigureArguments: raw.tools?.cmake?.configure_arguments ?? [],
+      cmakeBuildTargets: raw.tools?.cmake?.build_targets ?? [],
+      cmakeBuildArguments: raw.tools?.cmake?.build_arguments ?? [],
+      qmllintCommand: raw.tools?.qmllint?.command ?? "qmllint",
+      qmllintCheck: raw.tools?.qmllint?.check ?? false,
+      qmllintArguments: raw.tools?.qmllint?.arguments ?? [],
+      qmllintImportPaths: (raw.tools?.qmllint?.import_paths ?? []).map((item) => resolveFrom(projectRoot, item)),
+      qmllintQmltypes: (raw.tools?.qmllint?.qmltypes ?? []).map((item) => resolveFrom(projectRoot, item)),
+      qmllintUseEnvironmentImports: raw.tools?.qmllint?.use_environment_imports ?? false,
       qmlformatCommand: raw.tools?.qmlformat?.command ?? null,
       qmlformatCheck: raw.tools?.qmlformat?.check ?? false,
+      qmltestrunnerCommand: raw.tools?.qmltestrunner?.command ?? "qmltestrunner",
+      qmltestrunnerCheck: raw.tools?.qmltestrunner?.check ?? false,
+      qmltestrunnerArguments: raw.tools?.qmltestrunner?.arguments ?? [],
+      qmltestrunnerTimeoutMs: raw.tools?.qmltestrunner?.timeout_ms ?? 120_000,
+      runtimeCommand: raw.tools?.runtime?.command ?? null,
+      runtimeCheck: raw.tools?.runtime?.check ?? false,
+      runtimeArguments: raw.tools?.runtime?.arguments ?? [],
+      runtimeTimeoutMs: raw.tools?.runtime?.timeout_ms ?? 60_000,
+      qmlProfilerCommand: raw.tools?.qml_profiler?.command ?? null,
+      qmlProfilerCheck: raw.tools?.qml_profiler?.check ?? false,
+      qmlProfilerArguments: raw.tools?.qml_profiler?.arguments ?? [],
+      qmlProfilerTimeoutMs: raw.tools?.qml_profiler?.timeout_ms ?? 300_000,
     },
     typeRoles: {
       interactiveTypes: [...new Set([...profileRoles.interactiveTypes, ...(raw.type_roles?.interactive_types ?? [])])],
@@ -68,9 +93,9 @@ export function loadConfig(configPath: string | null): Config {
       delegateOwnerTypes: [...new Set([...profileRoles.delegateOwnerTypes, ...(raw.type_roles?.delegate_owner_types ?? [])])],
     },
     reports: {
-      tests: raw.reports?.tests ? resolveFrom(projectRoot, raw.reports.tests) : null,
+      tests: raw.reports?.tests ? resolveFrom(projectRoot, raw.reports.tests) : raw.tools?.qmltestrunner?.check ? path.join(outputDir, "qmltestrunner.junit.xml") : null,
       runtimeWarnings: raw.reports?.runtime_warnings ? resolveFrom(projectRoot, raw.reports.runtime_warnings) : null,
-      qmlProfiler: raw.reports?.qml_profiler ? resolveFrom(projectRoot, raw.reports.qml_profiler) : null,
+      qmlProfiler: raw.reports?.qml_profiler ? resolveFrom(projectRoot, raw.reports.qml_profiler) : raw.tools?.qml_profiler?.check ? path.join(outputDir, "qml-profiler.normalized.json") : null,
     },
     performanceBudgets: (raw.performance_budgets ?? []).map((budget) => ({ scenario: budget.scenario, platform: budget.platform, frameP95Ms: budget.frame_p95_ms, maxEventMs: budget.max_event_ms })),
     rules: raw.rules ?? {},
@@ -90,7 +115,14 @@ export function starterConfig(): RawConfig {
     profile: "qtquick",
     qmllint_report: "target/qmllint.json",
     policy: { require_qmllint: false, new_code_only: true, fail_on: ["block"], incomplete: "warn" },
-    tools: { qmlformat: { command: "qmlformat", check: false } },
+    tools: {
+      cmake: { command: "cmake", check: false, build_dir: "build", configure: false, configure_arguments: [], build_targets: ["all_qmllint"], build_arguments: [] },
+      qmllint: { command: "qmllint", check: false, arguments: [], import_paths: [], qmltypes: [], use_environment_imports: false },
+      qmlformat: { command: "qmlformat", check: false },
+      qmltestrunner: { command: "qmltestrunner", check: false, arguments: [], timeout_ms: 120000 },
+      runtime: { check: false, arguments: [], timeout_ms: 60000 },
+      qml_profiler: { check: false, arguments: [], timeout_ms: 300000 },
+    },
     type_roles: { interactive_types: [], layout_types: [], delegate_owner_types: [] },
     reports: {},
     performance_budgets: [],
@@ -176,6 +208,10 @@ function validateStringArray(value: unknown, name: string, errors: string[]): vo
   if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) errors.push(`${name} must be an array of strings`);
 }
 
+function validateNonEmptyStrings(value: unknown, name: string, errors: string[]): void {
+  if (Array.isArray(value) && value.some((item) => typeof item === "string" && !item.trim())) errors.push(`${name} must not contain empty strings`);
+}
+
 function validateRegexArray(value: unknown, name: string, errors: string[]): void {
   if (!Array.isArray(value)) return;
   value.forEach((pattern, index) => {
@@ -202,12 +238,49 @@ function validatePolicy(value: unknown, errors: string[]): void {
 }
 
 function validateTools(value: unknown, errors: string[]): void {
-  validateObjectKeys(value, "tools", new Set(["qmlformat"]), errors);
+  validateObjectKeys(value, "tools", new Set(["cmake", "qmllint", "qmlformat", "qmltestrunner", "runtime", "qml_profiler"]), errors);
   if (!isRecord(value)) return;
+  validateObjectKeys(value.cmake, "tools.cmake", new Set(["command", "check", "build_dir", "configure", "configure_arguments", "build_targets", "build_arguments"]), errors);
+  if (isRecord(value.cmake)) {
+    for (const key of ["command", "build_dir"]) if (value.cmake[key] !== undefined && (typeof value.cmake[key] !== "string" || !value.cmake[key].trim())) errors.push(`tools.cmake.${key} must be a non-empty string`);
+    for (const key of ["check", "configure"]) if (value.cmake[key] !== undefined && typeof value.cmake[key] !== "boolean") errors.push(`tools.cmake.${key} must be a boolean`);
+    for (const key of ["configure_arguments", "build_targets", "build_arguments"]) {
+      validateStringArray(value.cmake[key], `tools.cmake.${key}`, errors);
+      validateNonEmptyStrings(value.cmake[key], `tools.cmake.${key}`, errors);
+    }
+    if (Array.isArray(value.cmake.configure_arguments) && value.cmake.configure_arguments.some((argument) => ["-S", "-B"].includes(argument) || argument.startsWith("--build"))) errors.push("tools.cmake.configure_arguments must not override managed -S/-B/build options");
+    if (Array.isArray(value.cmake.build_arguments) && value.cmake.build_arguments.some((argument) => ["--build", "--target", "-t"].includes(argument))) errors.push("tools.cmake.build_arguments must not override managed build/target options");
+  }
+  validateObjectKeys(value.qmllint, "tools.qmllint", new Set(["command", "check", "arguments", "import_paths", "qmltypes", "use_environment_imports"]), errors);
+  if (isRecord(value.qmllint)) {
+    if (value.qmllint.command !== undefined && (typeof value.qmllint.command !== "string" || !value.qmllint.command.trim())) errors.push("tools.qmllint.command must be a non-empty string");
+    if (value.qmllint.check !== undefined && typeof value.qmllint.check !== "boolean") errors.push("tools.qmllint.check must be a boolean");
+    if (value.qmllint.use_environment_imports !== undefined && typeof value.qmllint.use_environment_imports !== "boolean") errors.push("tools.qmllint.use_environment_imports must be a boolean");
+    for (const key of ["arguments", "import_paths", "qmltypes"]) validateStringArray(value.qmllint[key], `tools.qmllint.${key}`, errors);
+    for (const key of ["import_paths", "qmltypes"]) validateNonEmptyStrings(value.qmllint[key], `tools.qmllint.${key}`, errors);
+    if (Array.isArray(value.qmllint.arguments) && value.qmllint.arguments.some((argument) => argument === "--json" || argument.startsWith("--json="))) errors.push("tools.qmllint.arguments must not set --json; qmlqualitylens manages structured output");
+  }
   validateObjectKeys(value.qmlformat, "tools.qmlformat", new Set(["command", "check"]), errors);
-  if (!isRecord(value.qmlformat)) return;
-  if (value.qmlformat.command !== undefined && typeof value.qmlformat.command !== "string") errors.push("tools.qmlformat.command must be a string");
-  if (value.qmlformat.check !== undefined && typeof value.qmlformat.check !== "boolean") errors.push("tools.qmlformat.check must be a boolean");
+  if (isRecord(value.qmlformat)) {
+    if (value.qmlformat.command !== undefined && typeof value.qmlformat.command !== "string") errors.push("tools.qmlformat.command must be a string");
+    if (typeof value.qmlformat.command === "string" && /(?:^|\s)(?:-i|--inplace|-F|--files|--write-defaults)(?:\s|=|$)/.test(value.qmlformat.command)) errors.push("tools.qmlformat.command must not contain mutating qmlformat options (-i, --inplace, -F, --files, --write-defaults)");
+    if (value.qmlformat.check !== undefined && typeof value.qmlformat.check !== "boolean") errors.push("tools.qmlformat.check must be a boolean");
+  }
+  validateExecutableTool(value.qmltestrunner, "tools.qmltestrunner", errors, true);
+  if (isRecord(value.qmltestrunner) && Array.isArray(value.qmltestrunner.arguments) && value.qmltestrunner.arguments.some((argument) => argument === "-o" || argument.startsWith("-o="))) errors.push("tools.qmltestrunner.arguments must not set -o; qmlqualitylens manages the JUnit report");
+  validateExecutableTool(value.runtime, "tools.runtime", errors, false);
+  validateExecutableTool(value.qml_profiler, "tools.qml_profiler", errors, false);
+}
+
+function validateExecutableTool(value: unknown, name: string, errors: string[], defaultCommand: boolean): void {
+  validateObjectKeys(value, name, new Set(["command", "check", "arguments", "timeout_ms"]), errors);
+  if (!isRecord(value)) return;
+  if (value.command !== undefined && (typeof value.command !== "string" || !value.command.trim())) errors.push(`${name}.command must be a non-empty string`);
+  if (value.check !== undefined && typeof value.check !== "boolean") errors.push(`${name}.check must be a boolean`);
+  validateStringArray(value.arguments, `${name}.arguments`, errors);
+  validateNonEmptyStrings(value.arguments, `${name}.arguments`, errors);
+  if (value.timeout_ms !== undefined && (typeof value.timeout_ms !== "number" || !Number.isInteger(value.timeout_ms) || value.timeout_ms <= 0)) errors.push(`${name}.timeout_ms must be a positive integer`);
+  if (value.check === true && !defaultCommand && (typeof value.command !== "string" || !value.command.trim())) errors.push(`${name}.command is required when check is true`);
 }
 
 function validateTypeRoles(value: unknown, errors: string[]): void {

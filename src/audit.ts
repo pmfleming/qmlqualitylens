@@ -73,13 +73,14 @@ type AuditArtifact = {
 
 export function runAudit(config: Config, command: string, options: AuditOptions): AuditArtifact {
   const context = createAnalysisContext(config);
-  const evidenceFindings = [
+  const evidenceArtifacts = [
     measureBuildEvidence(config, command, context),
     measureFormat(config, command, context),
     measureCorrectnessCatalog(config, command, context),
     measureRuntimeWarnings(config, command, context),
     measureRuntimePerformance(config, command, context),
-  ].flatMap(findingsFromArtifact);
+  ];
+  const evidenceFindings = evidenceArtifacts.flatMap(findingsFromArtifact);
   const allFindings = [...new Map([...context.findings, ...evidenceFindings].map((finding) => [finding.fingerprint ?? finding.id, finding])).values()];
   const baselineIds = readBaseline(options.baseline);
   const diff = diffContext(config, options.base);
@@ -89,7 +90,7 @@ export function runAudit(config: Config, command: string, options: AuditOptions)
   const gateFindings = options.base && config.policy.newCodeOnly
     ? active.filter((finding) => finding.introduced || (!finding.file && finding.evidence === "tool" && finding.enforcement === "block"))
     : active;
-  const incompleteChecks = requiredCheckFailures(config, context);
+  const incompleteChecks = requiredCheckFailures(config, context, evidenceArtifacts);
   const verdict = auditVerdict(config, gateFindings, incompleteChecks);
   const summary = findingSummary(findings);
   const artifact: AuditArtifact = {
@@ -153,27 +154,37 @@ function findingsFromArtifact(value: unknown): Finding[] {
   return value.findings.filter(isFindingRecord);
 }
 
-function requiredCheckFailures(config: Config, context: ReturnType<typeof createAnalysisContext>): string[] {
-  return [...qmllintFailures(config, context), ...missingReportFailures(config), ...formatCheckFailures(config)];
+function requiredCheckFailures(config: Config, context: ReturnType<typeof createAnalysisContext>, artifacts: unknown[]): string[] {
+  return [
+    ...qmllintFailures(config, context),
+    ...configuredEvidenceFailures(config, artifacts),
+  ];
 }
 
 function qmllintFailures(config: Config, context: ReturnType<typeof createAnalysisContext>): string[] {
   if (!config.policy.requireQmllint) return [];
-  if (context.qmllint.source === "none") return ["qmllint did not run and no report was available"];
-  return context.qmllint.error ? [`qmllint evidence is unusable: ${context.qmllint.error}`] : [];
+  if (context.qmllint.source === "none" || context.qmllint.status === "not_run") return ["qmllint did not run and no report was available"];
+  if (context.qmllint.status !== "complete") return [`qmllint evidence is unusable: ${context.qmllint.error ?? "the tool run was incomplete"}`];
+  return [];
 }
 
-function missingReportFailures(config: Config): string[] {
-  const reports: Array<[string, string | null]> = [["test report", config.reports.tests], ["runtime warning report", config.reports.runtimeWarnings], ["runtime performance report", config.reports.qmlProfiler]];
-  return reports.flatMap(([name, report]) => report && !fs.existsSync(report) ? [`${name} is configured but missing: ${report}`] : []);
+function configuredEvidenceFailures(config: Config, artifacts: unknown[]): string[] {
+  const byTask = new Map(artifacts.flatMap((artifact) => isRecord(artifact) && typeof artifact.task_id === "string" ? [[artifact.task_id, artifact]] : []));
+  return [
+    ...(config.tools.qmlformatCheck ? unusableArtifact(byTask.get("quality.format"), "status", ["pass", "warn"], "qmlformat check") : []),
+    ...(config.tools.cmakeCheck ? unusableArtifact(byTask.get("quality.build_evidence"), "status", ["pass", "warn", "failed"], "CMake configure/build") : []),
+    ...(config.reports.tests ? unusableArtifact(byTask.get("correctness.catalog"), "execution_status", ["complete", "failed"], "test report") : []),
+    ...(config.reports.runtimeWarnings || config.tools.runtimeCheck ? unusableArtifact(byTask.get("correctness.runtime_warnings"), "status", ["complete", "failed"], "runtime warning evidence") : []),
+    ...(config.reports.qmlProfiler ? unusableArtifact(byTask.get("performance.runtime"), "status", ["complete"], "runtime performance report") : []),
+  ];
 }
 
-function formatCheckFailures(config: Config): string[] {
-  if (!config.tools.qmlformatCheck) return [];
-  try {
-    const parsed: unknown = JSON.parse(fs.readFileSync(path.join(config.outputDir, "formatting.json"), "utf8"));
-    return isRecord(parsed) && isRecord(parsed.summary) && parsed.summary.status === "incomplete" ? ["qmlformat check was incomplete"] : [];
-  } catch { return ["qmlformat check did not produce usable evidence"]; }
+function unusableArtifact(artifact: unknown, statusKey: string, accepted: string[], name: string): string[] {
+  if (!isRecord(artifact) || !isRecord(artifact.summary)) return [`${name} did not produce usable evidence`];
+  const status = String(artifact.summary[statusKey] ?? "missing");
+  if (accepted.includes(status)) return [];
+  const reason = typeof artifact.summary.reason === "string" ? `: ${artifact.summary.reason}` : typeof artifact.summary.execution_reason === "string" ? `: ${artifact.summary.execution_reason}` : "";
+  return [`${name} is ${status}${reason}`];
 }
 
 function auditVerdict(config: Config, findings: Finding[], incomplete: string[]): AuditArtifact["summary"]["verdict"] {
@@ -264,6 +275,8 @@ function configForWorktree(config: Config, worktree: string, temp: string): Conf
     outputDir: path.join(temp, "out"),
     qmllintReport: null,
     qmllintCommand: null,
+    tools: { ...config.tools, cmakeCheck: false, qmllintCheck: false, qmlformatCheck: false, qmltestrunnerCheck: false, runtimeCheck: false, qmlProfilerCheck: false },
+    reports: { tests: null, runtimeWarnings: null, qmlProfiler: null },
   };
 }
 

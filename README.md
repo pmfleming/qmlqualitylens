@@ -19,17 +19,17 @@ The v0.2 analyzer includes a small QML lexer and parser implemented across `src/
 - `hotspots.json`: ranked QML complexity/effort/locality hotspots
 - `clones.json`: normalized line clones plus parser-derived structural QML clones
 - `qmllint.json`: normalized qmllint diagnostics with tool status/version provenance
-- `formatting.json`: optional non-mutating `qmlformat` comparison
-- `build_evidence.json`: discovered CMake `qt_add_qml_module` and lint integration evidence
+- `formatting.json`: optional non-mutating `qmlformat` comparison with tool version and discovered `.qmlformat.ini` provenance
+- `build_evidence.json`: discovered CMake `qt_add_qml_module` integration plus optional configure/build execution, normalized diagnostics, commands, exit codes, and bounded output tails
 - `resolution.json`: project-wide symbol table, qmldir modules, resolved imports/component uses, and unresolved references
 - `semantic_rules.json`: binding loss/cycles, layout conflicts, unused public API, Connections mismatches, and performance smells
 - `qml_health.json`: aggregate QML/Quickshell API, semantic, qmllint, side-effect, and Process-placement rules
 - `locality_metrics.json`: id-coupling, fan-out, and process-boundary locality records
 - `leverage_metrics.json`: component reuse/centrality relative to effort
 - `cleanup.json`: unused components and unused id candidates
-- `correctness_review.json`, `test_catalog.json`, and `test_evidence.json`: QML test discovery and optional JUnit/JSON execution evidence
-- `runtime_warnings.json`: optional imported runtime QML warnings
-- `runtime_performance.json`: optional provenance-bearing frame/event performance scenarios
+- `correctness_review.json`, `test_catalog.json`, and `test_evidence.json`: QML test discovery, optional `qmltestrunner` execution, and JUnit/JSON evidence
+- `runtime_warnings.json`: optional imported warnings or captured output from an explicit runtime smoke command
+- `runtime_performance.json`: optional profiler-adapter execution and provenance-bearing frame/event scenarios
 - `map.json`: dashboard-ready architecture graph with nodes, edges, roles, and risk
 
 `measure all` writes the contract and artifacts but does not turn a failing contract verdict into a nonzero process exit. Use `audit` to gate CI: it exits with status 1 when its verdict is `fail`. A `warn` or `incomplete` verdict exits successfully unless the selected `fail_on` or `incomplete` policy converts it to `fail`.
@@ -91,7 +91,42 @@ npm run analyze:shelllist
     "incomplete": "warn"
   },
   "tools": {
-    "qmlformat": { "command": "qmlformat", "check": false }
+    "cmake": {
+      "command": "cmake",
+      "check": false,
+      "build_dir": "build",
+      "configure": false,
+      "configure_arguments": [],
+      "build_targets": ["all_qmllint"],
+      "build_arguments": ["--parallel"]
+    },
+    "qmllint": {
+      "command": "qmllint",
+      "check": false,
+      "arguments": [],
+      "import_paths": ["build/qml"],
+      "qmltypes": [],
+      "use_environment_imports": false
+    },
+    "qmlformat": { "command": "qmlformat", "check": false },
+    "qmltestrunner": {
+      "command": "qmltestrunner",
+      "check": false,
+      "arguments": ["-input", "tests", "-import", "build/qml"],
+      "timeout_ms": 120000
+    },
+    "runtime": {
+      "command": "./scripts/qml-smoke-test",
+      "check": false,
+      "arguments": [],
+      "timeout_ms": 60000
+    },
+    "qml_profiler": {
+      "command": "./scripts/export-normalized-qml-profile",
+      "check": false,
+      "arguments": [],
+      "timeout_ms": 300000
+    }
   },
   "type_roles": {
     "interactive_types": ["CompanyButton"],
@@ -132,9 +167,17 @@ npm run analyze:shelllist
 }
 ```
 
-`project_root` is resolved relative to the config file. Source, output, `qmllint_report`, and imported report paths are resolved relative to `project_root`. If `qmllint_report` exists it is ingested; otherwise `qmllint_command` is run from `project_root` when configured. `qmllint` expects file arguments, not a directory such as `qmllint .`; use a project-specific script or command that supplies the intended QML files. The generated starter leaves command execution disabled so the default remains static.
+`project_root` is resolved relative to the config file. Source, output, `qmllint_report`, import/type paths, and imported report paths are resolved relative to `project_root`. If `qmllint_report` exists it is ingested; otherwise the legacy `qmllint_command` is run when configured; otherwise `tools.qmllint.check` can run the standard tool directly. Native integration invokes `qmllint --json -` with every discovered QML/JavaScript file, uses argument arrays rather than a shell, records source-file coverage, and supports `-I`, `-i`, and opt-in `-E` through the fields shown above. Keep `check` disabled until the real build/module import paths and generated `.qmltypes` inputs are available. For CMake projects, ingesting output from the generated `all_qmllint`/`*_qmllint` target remains preferable when it exactly matches the production build.
 
-`policy` controls evidence-based audit gating. Missing required `qmllint` evidence, an enabled but incomplete `qmlformat` check, and missing configured test/runtime reports are handled according to `policy.incomplete`. Profiles are `generic`, `qtquick`, `kirigami`, `quickshell`, and `custom`. Rule overrides can disable a rule or change its enforcement to `block`, `warn`, or `review`. `external_modules` accepts installed module prefixes outside the analyzed roots, while `external_types` accepts known QML type names. Suppressions can match findings by `id`, `kind`, and/or `file`; include a reason so the exception remains reviewable. Suppressed findings remain in artifacts but do not affect active counts or the heuristic maintainability score. Invalid configuration fails fast with actionable errors.
+`qmllint_command` remains available for project-specific scripts. It must supply file arguments—`qmllint` does not accept a directory such as `qmllint .`. Because arbitrary commands cannot prove their file scope, their coverage is reported as unknown.
+
+`tools.cmake.check` optionally runs `cmake -S/-B` and `cmake --build` without a shell. Set `configure` to false to review an existing configured build tree. An empty `build_targets` builds the default target; targets such as `all_qmllint` provide a focused Qt gate. If that target is the authoritative lint gate, leave `tools.qmllint.check` disabled to avoid duplicate diagnostics and to ensure CMake-generated type information is used. Errors and warnings from CMake, Ninja/Make, compilers, and Qt tools are normalized into findings while the last 200 stdout/stderr lines remain available for diagnosis.
+
+`tools.qmltestrunner.check` executes Qt Quick Test and manages a JUnit output argument at `reports.tests` (or an output-directory default). `tools.runtime.check` executes an explicit smoke scenario and analyzes captured stdout/stderr for QML runtime warnings. `tools.qml_profiler.check` runs a configured profiler/export adapter which must write the documented normalized JSON format to `reports.qml_profiler`; the report path is provided through `QMLQUALITYLENS_REPORT`. Native QML Profiler formats are still not guessed.
+
+All execution is opt-in. CMake configure scripts, builds, tests, and applications can run arbitrary project code or cause external side effects; enable them only for trusted projects and controlled CI environments. The generated starter leaves every execution check disabled.
+
+`policy` controls evidence-based audit gating. Missing, malformed, zero-test, partial-coverage, or otherwise unusable required evidence is handled according to `policy.incomplete`. This includes required `qmllint`, enabled `qmlformat`, and configured test/runtime reports. Profiles are `generic`, `qtquick`, `kirigami`, `quickshell`, and `custom`. Rule overrides can disable a rule or change its enforcement to `block`, `warn`, or `review`. `external_modules` accepts installed module prefixes outside the analyzed roots, while `external_types` accepts known QML type names. Suppressions can match findings by `id`, `kind`, and/or `file`; include a reason so the exception remains reviewable. Suppressed findings remain in artifacts but do not affect active counts or the heuristic maintainability score. Invalid configuration fails fast with actionable errors.
 
 ## Commands
 

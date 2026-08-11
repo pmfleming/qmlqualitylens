@@ -31,7 +31,7 @@ A `pass` means that all checks which actually ran satisfied the configured enfor
 - `skipped`: the check was optional and did not run;
 - `incomplete`: the check was requested but its evidence could not be trusted or parsed.
 
-When `policy.require_qmllint` is true, missing or unusable `qmllint` evidence affects the contract/audit according to `policy.incomplete`.
+When `policy.require_qmllint` is true, missing or unusable `qmllint` evidence affects the contract/audit according to `policy.incomplete`. Structured reports that enumerate files are checked against discovered QML/JavaScript inputs; partial coverage is incomplete. `tools.qmllint.check` provides a shell-free native adapter that passes all discovered files to `qmllint --json -` and records import paths, qmltypes, version, exit status, and coverage. Project-specific command coverage is marked unknown rather than guessed.
 
 ## Profiles
 
@@ -43,6 +43,17 @@ When `policy.require_qmllint` is true, missing or unusable `qmllint` evidence af
 
 Profiles do not make project contribution policy automatic. The contributor remains responsible for reading the target repository's rules.
 
+## Opt-in execution
+
+The default remains static and side-effect free. Trusted projects can explicitly enable:
+
+- `tools.cmake.check` to configure and/or build selected CMake targets;
+- `tools.qmltestrunner.check` to execute Qt Quick Test and produce managed JUnit evidence;
+- `tools.runtime.check` to execute a smoke scenario and inspect captured QML warnings;
+- `tools.qml_profiler.check` to execute a project-specific adapter which exports normalized profiler evidence.
+
+Commands are invoked as executable/argument arrays without a shell, have configured timeouts, retain bounded output tails, and record exit status. They can still execute arbitrary project code, tests, applications, CMake scripts, or build hooks, so they must only be enabled for trusted repositories in controlled environments.
+
 ## Imported reports
 
 ### Tests
@@ -52,11 +63,11 @@ Profiles do not make project contribution policy automatic. The contributor rema
 - JUnit XML (`testsuite`/`testcase` with `failure` or `error`);
 - JSON with a `tests` or `testCases` array and per-case `status`, `name`, `file`, `line`, and `message`.
 
-Discovery, execution, and passing are represented separately.
+Discovery, execution, and passing are represented separately. Malformed reports, unsupported JSON shapes/statuses, and configured reports containing zero tests are incomplete rather than clean passes. When `tools.qmltestrunner.check` is enabled, qmlqualitylens appends a managed `-o <report>,junitxml` argument and records the runner's command, version, timeout outcome, output tails, and exit status.
 
 ### Runtime warnings
 
-`reports.runtime_warnings` imports an existing application/test log. qmlqualitylens does not execute arbitrary applications by default.
+`reports.runtime_warnings` imports an existing application/test log. With `tools.runtime.check`, captured stdout/stderr from the configured smoke command is analyzed directly and a nonzero smoke exit is blocking. qmlqualitylens does not execute arbitrary applications by default.
 
 ### Runtime performance
 
@@ -78,7 +89,7 @@ Discovery, execution, and passing are represented separately.
 }
 ```
 
-The importer reports frame percentiles, frames over 16.67 ms, and event totals/maxima. The 16.67 ms count is diagnostic context, not a universal budget. Native QML Profiler format adapters should normalize into this interchange format after format-specific calibration.
+The importer requires a named scenario, Qt version, platform, and at least one measured frame or event. `tools.qml_profiler.check` may run an explicitly configured export adapter; it receives the target normalized report path in `QMLQUALITYLENS_REPORT`. It reports frame percentiles, frames over 16.67 ms, and event totals/maxima. Configured budgets are incomplete when their scenario or required measurement is absent. The 16.67 ms count is diagnostic context, not a universal budget. Native QML Profiler format adapters should normalize into this interchange format after format-specific calibration.
 
 ## CI examples
 

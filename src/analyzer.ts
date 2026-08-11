@@ -56,7 +56,7 @@ export function createAnalysisContext(config: Config): AnalysisContext {
   const functions = files.flatMap((file) => file.functions);
   const bindings = files.flatMap((file) => file.bindings);
   const parserDiagnostics = files.flatMap((file) => file.parserDiagnostics);
-  const qmllint = loadQmllintResult(config);
+  const qmllint = loadQmllintResult(config, sources.filter((source) => source.kind === "qml" || source.kind === "js").map((source) => source.relativePath));
   const qmllintFindings = qmllint.findings;
   const clones = detectClones(sources, config.thresholds.cloneWindow);
   const baseContext: AnalysisContext = { config, sources, qmlDocuments, resolution, files, components, functions, bindings, parserDiagnostics, qmllint, qmllintFindings, clones, findings: [], scores: emptyScores() };
@@ -399,7 +399,10 @@ function scoreProject(
   findings: Finding[],
 ): ScoreBreakdown {
   if (components.length === 0) return emptyScores();
-  const active = findings.filter((item) => !item.suppressed);
+  // The score is deliberately heuristic: authoritative tool diagnostics and
+  // semantic correctness findings belong in the quality contract, not in a
+  // maintainability number.
+  const active = findings.filter((item) => !item.suppressed && item.evidence === "heuristic");
   const highRate = active.filter((item) => item.severity === "high").length / components.length;
   const mediumRate = active.filter((item) => item.severity === "medium").length / components.length;
   const complexity = boundedScore(100 - average(functions.map((item) => Math.max(0, item.cyclomatic - 4))) * 10);

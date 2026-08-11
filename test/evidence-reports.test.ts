@@ -44,10 +44,22 @@ test("ingests runtime QML warnings and provenance-bearing performance scenarios"
   assert.equal(performance.findings.filter((finding: any) => finding.kind === "runtime.performance_budget").length, 2);
 });
 
+test("performance evidence is incomplete when a configured budget has no matching measurements", () => {
+  const fixture = setup({ reports: { qml_profiler: "profile.json" }, performance_budgets: [{ scenario: "startup", platform: "offscreen", frame_p95_ms: 16.67 }] });
+  fs.writeFileSync(path.join(fixture.root, "profile.json"), JSON.stringify({ scenario: "other", environment: { qt: "6.8", platform: "offscreen" }, events: [{ category: "Binding", duration_ms: 1 }] }));
+
+  const artifact = measureRuntimePerformance(fixture.config, "test", fixture.context) as any;
+
+  assert.equal(artifact.summary.status, "incomplete");
+  assert.match(artifact.summary.reason, /No performance scenario matches budget/);
+});
+
 test("qmlformat check can use a configured deterministic formatter", () => {
   const fixture = setup({ tools: { qmlformat: { command: "cat", check: true } } });
+  fs.writeFileSync(path.join(fixture.root, ".qmlformat.ini"), "[General]\nIndentWidth=4\n");
   const artifact = measureFormat(fixture.config, "test", fixture.context) as any;
 
   assert.equal(artifact.summary.status, "pass");
   assert.equal(artifact.summary.drift, 0);
+  assert.deepEqual(artifact.summary.settings, [path.join(fixture.root, ".qmlformat.ini")]);
 });

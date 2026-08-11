@@ -1,8 +1,8 @@
 import type { LocMetrics } from "./types.js";
 
 export function locFor(text: string): LocMetrics {
-  const lines = text.split(/\r?\n/);
-  const codeLines = stripComments(text).split(/\r?\n/);
+  const lines = physicalLines(text);
+  const codeLines = physicalLines(stripComments(text));
   let blank = 0;
   let comment = 0;
   let source = 0;
@@ -12,6 +12,13 @@ export function locFor(text: string): LocMetrics {
     else source += 1;
   });
   return { physical: lines.length, source, blank, comment };
+}
+
+function physicalLines(text: string): string[] {
+  if (!text) return [];
+  const lines = text.split(/\r?\n/);
+  if (lines.at(-1) === "") lines.pop();
+  return lines;
 }
 
 export function lineNumberAt(text: string, offset: number): number {

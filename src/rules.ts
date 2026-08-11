@@ -69,9 +69,13 @@ export const RULES: RuleDefinition[] = [
   qt("qml.performance.loader_without_active", "Loader policy is implicit", "performance", QT_PERFORMANCE, "heuristic", "low", "review"),
   lens("correctness.no_qml_tests", "No QML tests discovered", "testing", "heuristic", "low", "review"),
   lens("tests.failure", "Test failure", "testing", "tool", "high", "block"),
+  lens("tests.execution_failed", "Qt Quick Test execution failed", "testing", "tool", "high", "block"),
+  lens("runtime.execution_failed", "Configured runtime smoke execution failed", "correctness", "tool", "high", "block"),
   lens("runtime.qml_warning", "Runtime QML warning", "correctness", "tool", "high", "warn"),
   lens("format.qmlformat_drift", "QML formatting drift", "style", "tool", "high", "warn"),
   qt("build.qml_module_missing", "CMake QML module declaration missing", "correctness", QT_BEST_PRACTICES, "heuristic", "low", "review"),
+  lens("build.cmake_diagnostic", "CMake configure/build diagnostic", "correctness", "tool", "high", "warn"),
+  lens("build.cmake_failed", "CMake configure/build failed", "correctness", "tool", "high", "block"),
   lens("runtime.performance_budget", "Runtime performance budget exceeded", "performance", "tool", "high", "warn"),
 ];
 
@@ -126,5 +130,5 @@ function diagnosticOverlap(kind: string, message: string): boolean {
 
 function fingerprintFor(finding: Finding): string {
   const stableMessage = finding.message.replace(/\b\d+\b/g, "#");
-  return createHash("sha256").update([finding.kind, finding.file ?? "", String(finding.line ?? 0), stableMessage].join("\u0000")).digest("hex").slice(0, 24);
+  return createHash("sha256").update([finding.kind, finding.file ?? "", String(finding.line ?? 0), String(finding.column ?? 0), stableMessage].join("\u0000")).digest("hex").slice(0, 24);
 }

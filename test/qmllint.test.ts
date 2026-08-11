@@ -43,6 +43,18 @@ test("parses revision 4 nested qmllint JSON and accepts clean file reports", () 
   assert.equal(clean.findings.length, 0);
 });
 
+test("does not treat an unscoped empty qmllint report as a verified clean run", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-qmllint-unscoped-"));
+  fs.writeFileSync(path.join(root, "Main.qml"), "import QtQuick\nItem {}\n");
+  fs.writeFileSync(path.join(root, "qmllint.json"), JSON.stringify({ diagnostics: [] }));
+
+  const context = createAnalysisContext(configWithRoot(root));
+
+  assert.equal(context.qmllint.status, "incomplete");
+  assert.equal(context.qmllint.coverage, "unknown");
+  assert.match(context.qmllint.error ?? "", /does not identify which/);
+});
+
 test("runs qmllint_command when no report exists", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-qmllint-command-"));
   fs.writeFileSync(path.join(root, "qmlqualitylens.config.json"), JSON.stringify({ project_name: "lint", project_root: ".", source_roots: ["."], output_dir: "target", qmllint_command: "printf 'Main.qml:4:2: error: command diagnostic\\n'" }));
@@ -61,6 +73,33 @@ test("malformed qmllint reports are surfaced without aborting analysis", () => {
 
   assert.equal(result.findings.length, 0);
   assert.match(result.error ?? "", /Unable to parse qmllint output/);
+});
+
+test("native qmllint integration uses structured output, import arguments, and input coverage", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-qmllint-native-"));
+  const tool = path.join(root, "fake-qmllint.sh");
+  const argumentsFile = path.join(root, "arguments.txt");
+  fs.writeFileSync(tool, `#!/bin/sh
+if [ "$1" = "--version" ]; then echo "qmllint 6.test"; exit 0; fi
+printf '%s\\n' "$@" > ${JSON.stringify(argumentsFile)}
+printf '{"files":[{"filename":"%s/Main.qml","success":false,"warnings":[{"line":2,"column":3,"type":"warning","id":"syntax","message":"Expected token"}]}],"revision":4}\\n' "$PWD"
+`);
+  fs.chmodSync(tool, 0o755);
+  fs.writeFileSync(path.join(root, "Main.qml"), "import QtQuick\nItem { ??? }\n");
+  fs.writeFileSync(path.join(root, "qmlqualitylens.config.json"), JSON.stringify({ project_root: ".", source_roots: ["."], output_dir: "target", tools: { qmllint: { command: tool, check: true, import_paths: ["build/qml"], use_environment_imports: true } } }));
+
+  const context = createAnalysisContext(loadConfig(path.join(root, "qmlqualitylens.config.json")));
+  const argumentsUsed = fs.readFileSync(argumentsFile, "utf8").split(/\r?\n/);
+
+  assert.equal(context.qmllint.source, "tool");
+  assert.equal(context.qmllint.status, "complete");
+  assert.equal(context.qmllint.coverage, "complete");
+  assert.equal(context.qmllint.version, "qmllint 6.test");
+  assert.ok(argumentsUsed.includes("--json"));
+  assert.ok(argumentsUsed.includes("-I"));
+  assert.ok(argumentsUsed.includes("-E"));
+  assert.equal(context.qmllintFindings[0]?.severity, "error", "qmllint syntax diagnostics must block even when Qt labels their type warning");
+  assert.equal(context.findings.find((finding) => finding.kind === "qmllint.diagnostic")?.column, 3);
 });
 
 test("qml health ingests configured qmllint reports", () => {

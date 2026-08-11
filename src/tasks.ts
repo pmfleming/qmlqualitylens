@@ -72,7 +72,7 @@ export const TASKS: TaskDefinition[] = [
     category: "quality",
     title: "CMake QML module evidence",
     artifact: "build_evidence.json",
-    description: "Discovers CMake qt_add_qml_module declarations and QML lint integration signals.",
+    description: "Discovers CMake QML modules and optionally runs configured configure/build targets, normalizing diagnostics and output evidence.",
     handler: measureBuildEvidence,
   },
   {
@@ -129,7 +129,8 @@ export const TASKS: TaskDefinition[] = [
     category: "correctness",
     title: "QML correctness catalog",
     artifact: "correctness_review.json",
-    description: "Discovers Qt Quick Test and QML test-like files.",
+    description: "Discovers Qt Quick Test files, optionally executes qmltestrunner, and imports managed JUnit evidence.",
+    dependsOn: ["quality.build_evidence"],
     handler: measureCorrectnessCatalog,
   },
   {
@@ -137,7 +138,8 @@ export const TASKS: TaskDefinition[] = [
     category: "correctness",
     title: "Runtime QML warnings",
     artifact: "runtime_warnings.json",
-    description: "Optionally ingests runtime QML warning logs without executing the application.",
+    description: "Optionally ingests runtime QML warning logs or executes an explicit smoke command and inspects captured output.",
+    dependsOn: ["quality.build_evidence"],
     handler: measureRuntimeWarnings,
   },
   {
@@ -145,7 +147,8 @@ export const TASKS: TaskDefinition[] = [
     category: "performance",
     title: "Runtime QML performance",
     artifact: "runtime_performance.json",
-    description: "Optionally imports provenance-bearing QML performance scenarios and frame/event metrics.",
+    description: "Optionally runs a configured profiler export adapter and imports provenance-bearing QML frame/event metrics.",
+    dependsOn: ["quality.build_evidence"],
     handler: measureRuntimePerformance,
   },
   {

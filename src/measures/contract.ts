@@ -35,7 +35,7 @@ function contractChecks(config: Config, context: AnalysisContext) {
     check("static.resolution", "Project import/type resolution", unresolved ? "warn" : "pass", unresolved),
     qmllintCheck(config, context),
     artifactCheck(config, "tool.qmlformat", "qmlformat", "formatting.json"),
-    artifactCheck(config, "build.qml_module", "CMake QML modules", "build_evidence.json"),
+    cmakeCheck(config),
     artifactCheck(config, "tests.execution", "Test execution", "test_evidence.json"),
     artifactCheck(config, "runtime.warnings", "Runtime QML warnings", "runtime_warnings.json"),
     artifactCheck(config, "runtime.performance", "Runtime performance", "runtime_performance.json"),
@@ -43,7 +43,7 @@ function contractChecks(config: Config, context: AnalysisContext) {
 }
 
 function isRequired(id: string, config: Config): boolean {
-  const required: Record<string, boolean> = { "tool.qmllint": config.policy.requireQmllint, "tool.qmlformat": config.tools.qmlformatCheck, "tests.execution": Boolean(config.reports.tests), "runtime.warnings": Boolean(config.reports.runtimeWarnings), "runtime.performance": Boolean(config.reports.qmlProfiler) };
+  const required: Record<string, boolean> = { "tool.qmllint": config.policy.requireQmllint, "tool.qmlformat": config.tools.qmlformatCheck, "tool.cmake": config.tools.cmakeCheck, "tests.execution": Boolean(config.reports.tests) || config.tools.qmltestrunnerCheck, "runtime.warnings": Boolean(config.reports.runtimeWarnings) || config.tools.runtimeCheck, "runtime.performance": Boolean(config.reports.qmlProfiler) || config.tools.qmlProfilerCheck };
   return required[id] ?? false;
 }
 
@@ -70,6 +70,11 @@ function artifactFindings(config: Config, filename: string): Finding[] {
   } catch {
     return [];
   }
+}
+
+function cmakeCheck(config: Config): CheckRecord {
+  if (!config.tools.cmakeCheck) return check("tool.cmake", "CMake configure/build", "skipped", 0, "tools.cmake.check is disabled; static CMake module discovery may still be present.");
+  return artifactCheck(config, "tool.cmake", "CMake configure/build", "build_evidence.json");
 }
 
 function artifactCheck(config: Config, id: string, name: string, filename: string): CheckRecord {

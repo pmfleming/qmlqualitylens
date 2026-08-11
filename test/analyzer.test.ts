@@ -97,7 +97,7 @@ test("counts only root declarations as component public API", () => {
   assert.equal(component?.signals, 0);
 });
 
-test("does not penalize scores for suppressions or allowed process boundaries", () => {
+test("keeps semantic suppressions and allowed process boundaries out of heuristic scores", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-score-policy-"));
   fs.writeFileSync(path.join(root, "Service.qml"), `import Missing.Module\nItem { Process {} }\n`);
   const configPath = path.join(root, "qmlqualitylens.config.json");
@@ -110,7 +110,7 @@ test("does not penalize scores for suppressions or allowed process boundaries", 
   assert.equal(context.components[0]?.processBoundaryViolations, 0);
   assert.equal(context.scores.boundary, 100);
   assert.equal(context.findings.find((finding) => finding.kind === "resolution.unresolved_import")?.suppressed, true);
-  assert.ok(context.scores.overall > unsuppressed.scores.overall);
+  assert.equal(context.scores.overall, unsuppressed.scores.overall);
 });
 
 test("reports stale suppressions", () => {

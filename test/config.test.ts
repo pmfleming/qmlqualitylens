@@ -25,7 +25,7 @@ test("config comments are stripped without touching string values", () => {
 test("config validation rejects invalid thresholds, regexes, and unknown properties", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-invalid-config-"));
   const configPath = path.join(root, "qmlqualitylens.config.json");
-  fs.writeFileSync(configPath, JSON.stringify({ unknown: true, thresholds: { cloneWindow: 1 }, process_boundary: { allowedFilePatterns: ["["] }, policy: { fail_on: ["invalid"] }, performance_budgets: [{ scenario: "", frame_p95_ms: -1 }] }));
+  fs.writeFileSync(configPath, JSON.stringify({ unknown: true, thresholds: { cloneWindow: 1 }, process_boundary: { allowedFilePatterns: ["["] }, policy: { fail_on: ["invalid"] }, tools: { cmake: { configure_arguments: ["-B"] }, qmllint: { import_paths: [""] }, qmlformat: { command: "qmlformat --inplace" }, runtime: { check: true } }, performance_budgets: [{ scenario: "", frame_p95_ms: -1 }] }));
 
   assert.throws(() => loadConfig(configPath), (error: unknown) => {
     assert.match(String(error), /unknown property 'unknown'/);
@@ -33,6 +33,10 @@ test("config validation rejects invalid thresholds, regexes, and unknown propert
     assert.match(String(error), /not a valid regular expression/);
     assert.match(String(error), /policy.fail_on/);
     assert.match(String(error), /performance_budgets\[0\]\.scenario/);
+    assert.match(String(error), /must not contain mutating qmlformat options/);
+    assert.match(String(error), /tools\.qmllint\.import_paths must not contain empty strings/);
+    assert.match(String(error), /tools\.cmake\.configure_arguments must not override/);
+    assert.match(String(error), /tools\.runtime\.command is required/);
     return true;
   });
 });

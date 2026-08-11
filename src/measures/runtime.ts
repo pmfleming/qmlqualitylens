@@ -1,23 +1,29 @@
 import fs from "node:fs";
 import path from "node:path";
+import { executeTool, type ToolExecution } from "../tool-execution.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding } from "./foundation.js";
 
 export function measureRuntimeWarnings(config: Config, command: string, context: AnalysisContext): unknown {
   const report = config.reports.runtimeWarnings;
-  let status: "not_configured" | "missing" | "complete" = "not_configured";
-  let raw: Finding[] = [];
+  const execution = runRuntimeSmoke(config);
+  let status: "not_configured" | "missing" | "complete" | "failed" | "incomplete" = execution?.status === "incomplete" ? "incomplete" : execution?.status === "failed" ? "failed" : execution ? "complete" : "not_configured";
+  let raw: Finding[] = execution ? parseRuntimeWarnings(`${execution.stdout}\n${execution.stderr}`, config) : [];
+  if (execution?.status === "failed") raw.push({ id: "runtime.execution_failed", kind: "runtime.execution_failed", severity: "high", message: `Configured runtime smoke command failed with exit code ${execution.exit_code ?? "unknown"}`, actions: ["Inspect runtime_warnings.json output tails, reproduce the smoke scenario, and fix the crash or nonzero exit."] });
   if (report) {
-    if (!fs.existsSync(report)) status = "missing";
-    else {
-      status = "complete";
-      raw = parseRuntimeWarnings(fs.readFileSync(report, "utf8"), config);
+    if (!fs.existsSync(report)) {
+      if (!execution || execution.status === "pass") status = "missing";
+    } else {
+      if (!execution || execution.status === "pass") status = "complete";
+      raw.push(...parseRuntimeWarnings(fs.readFileSync(report, "utf8"), config));
     }
   }
+  raw = [...new Map(raw.map((finding) => [`${finding.kind}\0${finding.file ?? ""}\0${finding.line ?? 0}\0${finding.message}`, finding])).values()];
   const findings = support.applySuppressions(support.enrichFindings(raw, config), config);
   const artifact = {
     ...baseArtifact(context, "correctness.runtime_warnings", command),
-    summary: { status, report, ...findingSummary(findings) },
+    summary: { status, reason: execution?.error ?? null, report, tool_status: execution?.status ?? "not_configured", ...findingSummary(findings) },
+    execution: execution ? publicExecution(execution) : null,
     findings,
   };
   writeArtifact(config, "runtime_warnings.json", artifact);
@@ -26,23 +32,45 @@ export function measureRuntimeWarnings(config: Config, command: string, context:
 
 export function measureRuntimePerformance(config: Config, command: string, context: AnalysisContext): unknown {
   const report = config.reports.qmlProfiler;
+  const execution = runProfilerProducer(config, report);
   if (!report || !fs.existsSync(report)) {
-    const artifact = { ...baseArtifact(context, "performance.runtime", command), summary: { status: report ? "missing" : "not_configured", report }, scenarios: [], findings: [] };
+    const status = execution?.status === "incomplete" ? "incomplete" : execution?.status === "failed" ? "incomplete" : report ? "missing" : "not_configured";
+    const artifact = { ...baseArtifact(context, "performance.runtime", command), summary: { status, reason: execution?.error ?? (execution?.status === "failed" ? `Profiler producer exited with ${execution.exit_code}` : null), report }, execution: execution ? publicExecution(execution) : null, scenarios: [], findings: [] };
     writeArtifact(config, "runtime_performance.json", artifact);
     return artifact;
   }
   let parsed: unknown;
   try { parsed = JSON.parse(fs.readFileSync(report, "utf8")); } catch { parsed = null; }
   const normalized = normalizePerformanceReport(parsed);
+  const budgetReason = performanceBudgetCoverageReason(normalized.scenarios, config);
+  const complete = normalized.complete && !budgetReason;
   const findings = support.applySuppressions(support.enrichFindings(performanceBudgetFindings(normalized.scenarios, config), config), config);
   const artifact = {
     ...baseArtifact(context, "performance.runtime", command),
-    summary: { status: normalized.complete ? "complete" : "incomplete", report, reason: normalized.reason, scenarios: normalized.scenarios.length, ...findingSummary(findings) },
+    summary: { status: complete && execution?.status !== "incomplete" && execution?.status !== "failed" ? "complete" : "incomplete", report, reason: [execution?.error, execution?.status === "failed" ? `Profiler producer exited with ${execution.exit_code}` : null, normalized.reason, budgetReason].filter(Boolean).join("; ") || null, scenarios: normalized.scenarios.length, ...findingSummary(findings) },
+    execution: execution ? publicExecution(execution) : null,
     scenarios: normalized.scenarios,
     findings,
   };
   writeArtifact(config, "runtime_performance.json", artifact);
   return artifact;
+}
+
+function runRuntimeSmoke(config: Config): ToolExecution | null {
+  if (!config.tools.runtimeCheck || !config.tools.runtimeCommand) return null;
+  return executeTool(config.tools.runtimeCommand, config.tools.runtimeArguments, config.projectRoot, config.tools.runtimeTimeoutMs);
+}
+
+function runProfilerProducer(config: Config, report: string | null): ToolExecution | null {
+  if (!config.tools.qmlProfilerCheck || !config.tools.qmlProfilerCommand || !report) return null;
+  fs.mkdirSync(path.dirname(report), { recursive: true });
+  fs.rmSync(report, { force: true });
+  return executeTool(config.tools.qmlProfilerCommand, config.tools.qmlProfilerArguments, config.projectRoot, config.tools.qmlProfilerTimeoutMs, { ...process.env, QMLQUALITYLENS_REPORT: report });
+}
+
+function publicExecution(execution: ToolExecution): Omit<ToolExecution, "stdout" | "stderr"> {
+  const { stdout: _stdout, stderr: _stderr, ...record } = execution;
+  return record;
 }
 
 function parseRuntimeWarnings(text: string, config: Config): Finding[] {
@@ -70,20 +98,25 @@ type RuntimeScenario = {
 function normalizePerformanceReport(value: unknown): { complete: boolean; reason: string | null; scenarios: RuntimeScenario[] } {
   const roots = Array.isArray(value) ? value : support.isRecord(value) && Array.isArray(value.scenarios) ? value.scenarios : value ? [value] : [];
   const scenarios = roots.flatMap((item) => normalizeScenario(item));
-  if (!scenarios.length) return { complete: false, reason: "No supported scenario with scenario/environment provenance was found.", scenarios: [] };
+  if (!scenarios.length) return { complete: false, reason: "No supported scenario with Qt/platform provenance and measured frames or events was found.", scenarios: [] };
+  if (scenarios.length !== roots.length) return { complete: false, reason: `${roots.length - scenarios.length} scenario(s) were rejected because provenance or measurements were missing.`, scenarios };
   return { complete: true, reason: null, scenarios };
 }
 
 function normalizeScenario(value: unknown): RuntimeScenario[] {
-  if (!support.isRecord(value) || typeof value.scenario !== "string" || !support.isRecord(value.environment)) return [];
+  if (!support.isRecord(value) || typeof value.scenario !== "string" || !value.scenario.trim() || !support.isRecord(value.environment)) return [];
+  const qt = value.environment.qt ?? value.environment.qt_version ?? value.environment.qtVersion;
+  if (typeof qt !== "string" || !qt.trim() || typeof value.environment.platform !== "string" || !value.environment.platform.trim()) return [];
   const traceEvents = Array.isArray(value.traceEvents) ? value.traceEvents : [];
   const frames = frameDurations(value.frames, traceEvents).sort((a, b) => a - b);
-  return [{ scenario: value.scenario, environment: value.environment, frame_count: frames.length, frame_time_ms: { p50: percentile(frames, 0.5), p95: percentile(frames, 0.95), p99: percentile(frames, 0.99), max: frames.at(-1) ?? null }, dropped_frames: frames.filter((duration) => duration > 16.67).length, events: eventSummaries(Array.isArray(value.events) ? value.events : traceEvents) }];
+  const events = eventSummaries(Array.isArray(value.events) ? value.events : traceEvents);
+  if (!frames.length && !Object.keys(events).length) return [];
+  return [{ scenario: value.scenario, environment: value.environment, frame_count: frames.length, frame_time_ms: { p50: percentile(frames, 0.5), p95: percentile(frames, 0.95), p99: percentile(frames, 0.99), max: frames.at(-1) ?? null }, dropped_frames: frames.filter((duration) => duration > 16.67).length, events }];
 }
 
 function frameDurations(frames: unknown, traceEvents: unknown[]): number[] {
   const input = Array.isArray(frames) ? frames : traceEvents.filter((event) => support.isRecord(event) && /frame/i.test(String(event.name ?? event.cat ?? "")));
-  return input.map((frame) => typeof frame === "number" ? frame : durationMs(frame)).filter((duration): duration is number => duration !== null);
+  return input.map((frame) => typeof frame === "number" ? frame : durationMs(frame)).filter((duration): duration is number => duration !== null && Number.isFinite(duration) && duration >= 0);
 }
 
 function eventSummaries(input: unknown[]): RuntimeScenario["events"] {
@@ -91,7 +124,7 @@ function eventSummaries(input: unknown[]): RuntimeScenario["events"] {
   for (const event of input) {
     const category = eventCategory(event);
     const duration = durationMs(event);
-    if (!category || duration === null) continue;
+    if (!category || duration === null || !Number.isFinite(duration) || duration < 0) continue;
     events.set(category, [...(events.get(category) ?? []), duration]);
   }
   return Object.fromEntries([...events].map(([category, durations]) => [category, { count: durations.length, total_ms: round(durations.reduce((sum, duration) => sum + duration, 0)), max_ms: round(Math.max(...durations)) }]));
@@ -107,6 +140,17 @@ function durationMs(value: unknown): number | null {
   if (!support.isRecord(value)) return null;
   if (typeof value.duration_ms === "number") return value.duration_ms;
   return typeof value.dur === "number" ? value.dur / 1000 : null;
+}
+
+function performanceBudgetCoverageReason(scenarios: RuntimeScenario[], config: Config): string | null {
+  const missing = config.performanceBudgets.flatMap((budget) => {
+    const matching = scenarios.filter((scenario) => budget.scenario === scenario.scenario && (!budget.platform || budget.platform === scenario.environment.platform));
+    if (!matching.length) return [`No performance scenario matches budget '${budget.scenario}'${budget.platform ? ` on ${budget.platform}` : ""}.`];
+    if (budget.frameP95Ms !== undefined && matching.every((scenario) => scenario.frame_time_ms.p95 === null)) return [`Budget '${budget.scenario}' requires frame measurements, but none were present.`];
+    if (budget.maxEventMs !== undefined && matching.every((scenario) => Object.keys(scenario.events).length === 0)) return [`Budget '${budget.scenario}' requires event measurements, but none were present.`];
+    return [];
+  });
+  return missing.length ? missing.join(" ") : null;
 }
 
 function performanceBudgetFindings(scenarios: RuntimeScenario[], config: Config): Finding[] {

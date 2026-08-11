@@ -15,18 +15,32 @@ export type QmllintResult = {
   disabledCategories: string[];
   compilerWarningsEnabled: boolean | null;
   importPaths: string[];
+  expectedFiles: string[];
+  reportedFiles: string[];
+  coverage: "complete" | "partial" | "unknown";
   error: string | null;
   findings: QmllintFinding[];
 };
 
-export function loadQmllintResult(config: Config): QmllintResult {
+export function loadQmllintResult(config: Config, expectedFiles: string[] = []): QmllintResult {
+  const expected = normalizedExpectedFiles(expectedFiles);
   if (config.qmllintReport && fs.existsSync(config.qmllintReport)) {
-    const parsed = safeParseQmllintOutput(fs.readFileSync(config.qmllintReport, "utf8"), config);
+    const text = fs.readFileSync(config.qmllintReport, "utf8");
+    const parsed = safeParseQmllintOutput(text, config);
+    const reportedFiles = filesFromStructuredReport(text, config);
+    const coverage = reportCoverage(expected, reportedFiles, hasStructuredFileManifest(text));
+    const coverageError = coverage === "partial"
+      ? `qmllint report covers ${reportedFiles.length} of ${expected.length} expected QML/JavaScript files`
+      : coverage === "unknown" && expected.length > 0 && parsed.findings.length === 0
+        ? "clean qmllint report does not identify which QML/JavaScript files were checked"
+        : null;
+    const error = [parsed.error, coverageError].filter(Boolean).join("; ") || null;
     const settings = qmllintSettings(config);
-    return { source: "report", status: parsed.error ? "incomplete" : "complete", command: null, report: config.qmllintReport, exitCode: null, version: versionFromReport(fs.readFileSync(config.qmllintReport, "utf8")), ...settings, error: parsed.error, findings: parsed.findings };
+    return { source: "report", status: error ? "incomplete" : "complete", command: null, report: config.qmllintReport, exitCode: null, version: versionFromReport(text), ...settings, expectedFiles: expected, reportedFiles, coverage, error, findings: parsed.findings };
   }
-  if (config.qmllintCommand) return runQmllintCommand(config);
-  return { source: "none", status: "not_run", command: null, report: config.qmllintReport, exitCode: null, version: null, ...qmllintSettings(config), error: null, findings: [] };
+  if (config.qmllintCommand) return runQmllintCommand(config, expected);
+  if (config.tools.qmllintCheck) return runNativeQmllint(config, expected);
+  return { source: "none", status: "not_run", command: null, report: config.qmllintReport, exitCode: null, version: null, ...qmllintSettings(config), expectedFiles: expected, reportedFiles: [], coverage: "unknown", error: null, findings: [] };
 }
 
 export function findingForQmllint(item: QmllintFinding): Finding {
@@ -38,13 +52,14 @@ export function findingForQmllint(item: QmllintFinding): Finding {
     severity,
     file: item.file,
     line: item.line,
+    column: item.column ?? undefined,
     message: `qmllint${rule}: ${item.message}`,
     actions: ["Fix the syntax/type issue reported by qmllint; qmlqualitylens uses this as authoritative Qt tool evidence."],
     authority: { kind: "tool", name: "qmllint", rule: item.rule ?? undefined, url: "https://doc.qt.io/qt-6/qtqml-tooling-qmllint.html" },
   };
 }
 
-function runQmllintCommand(config: Config): QmllintResult {
+function runQmllintCommand(config: Config, expectedFiles: string[]): QmllintResult {
   const result = spawnSync(config.qmllintCommand ?? "", { cwd: config.projectRoot, shell: true, encoding: "utf8", maxBuffer: 10 * 1024 * 1024 });
   const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
   const parsed = safeParseQmllintOutput(output, config);
@@ -58,6 +73,48 @@ function runQmllintCommand(config: Config): QmllintResult {
     exitCode: result.status,
     version: qmllintVersion(config.qmllintCommand, config),
     ...qmllintSettings(config, config.qmllintCommand),
+    expectedFiles,
+    reportedFiles: filesFromStructuredReport(output, config),
+    coverage: "unknown",
+    error,
+    findings: parsed.findings,
+  };
+}
+
+function runNativeQmllint(config: Config, expectedFiles: string[]): QmllintResult {
+  if (expectedFiles.length === 0) {
+    return { source: "tool", status: "incomplete", command: config.tools.qmllintCommand, report: null, exitCode: null, version: qmllintExecutableVersion(config.tools.qmllintCommand, config), ...nativeQmllintSettings(config), expectedFiles, reportedFiles: [], coverage: "partial", error: "No QML or JavaScript files were available for qmllint", findings: [] };
+  }
+  const args = [
+    ...config.tools.qmllintArguments,
+    "--json", "-",
+    ...config.tools.qmllintImportPaths.flatMap((item) => ["-I", item]),
+    ...config.tools.qmllintQmltypes.flatMap((item) => ["-i", item]),
+    ...(config.tools.qmllintUseEnvironmentImports ? ["-E"] : []),
+    "--",
+    ...expectedFiles,
+  ];
+  const result = spawnSync(config.tools.qmllintCommand, args, { cwd: config.projectRoot, encoding: "utf8", maxBuffer: 20 * 1024 * 1024 });
+  const stdout = result.stdout ?? "";
+  const stderr = result.stderr ?? "";
+  const parseInput = stdout.trim() ? stdout : stderr;
+  const parsed = safeParseQmllintOutput(parseInput, config);
+  const reportedFiles = filesFromStructuredReport(stdout, config);
+  const coverage = hasStructuredFileManifest(stdout) ? reportCoverage(expectedFiles, reportedFiles, true) : "complete";
+  const noDiagnosticFailure = result.status !== 0 && parsed.findings.length === 0 ? `qmllint exited with ${result.status} without parseable diagnostics` : null;
+  const coverageError = coverage === "partial" ? `qmllint output covers ${reportedFiles.length} of ${expectedFiles.length} expected files` : null;
+  const error = [result.error?.message, parsed.error, noDiagnosticFailure, coverageError].filter(Boolean).join("; ") || null;
+  return {
+    source: "tool",
+    status: error ? "incomplete" : "complete",
+    command: commandDisplay(config.tools.qmllintCommand, args),
+    report: null,
+    exitCode: result.status,
+    version: qmllintExecutableVersion(config.tools.qmllintCommand, config),
+    ...nativeQmllintSettings(config),
+    expectedFiles,
+    reportedFiles,
+    coverage,
     error,
     findings: parsed.findings,
   };
@@ -110,13 +167,14 @@ function normalizeJsonFinding(item: Record<string, unknown>, file: string | null
   const message = stringValue(item.message) ?? stringValue(item.description) ?? stringValue(item.text);
   if (!file || !message) return [];
   const location = isRecord(item.location) ? item.location : isRecord(item.loc) ? item.loc : {};
+  const rule = stringValue(item.rule) ?? stringValue(item.code) ?? stringValue(item.id) ?? stringValue(item.category) ?? null;
   return [{
     file: relativeFile(file, config),
     line: numberValue(item.line) ?? numberValue(item.row) ?? numberValue(location.line) ?? numberValue(location.startLine) ?? 1,
     column: numberValue(item.column) ?? numberValue(item.col) ?? numberValue(location.column) ?? numberValue(location.startColumn) ?? null,
-    severity: severityFor(stringValue(item.severity) ?? stringValue(item.type) ?? stringValue(item.level)),
+    severity: severityFor(stringValue(item.severity) ?? stringValue(item.type) ?? stringValue(item.level), rule),
     message,
-    rule: stringValue(item.rule) ?? stringValue(item.code) ?? stringValue(item.id) ?? stringValue(item.category) ?? null,
+    rule,
   }];
 }
 
@@ -131,7 +189,7 @@ function parseTextLine(line: string, config: Config): QmllintFinding[] {
       file: relativeFile(prefixed[2], config),
       line: Number(prefixed[3]),
       column: prefixed[4] ? Number(prefixed[4]) : null,
-      severity: severityFor(prefixed[1]),
+      severity: severityFor(prefixed[1], ruleFromMessage(prefixed[5])),
       message: prefixed[5].trim(),
       rule: ruleFromMessage(prefixed[5]),
     }];
@@ -142,7 +200,7 @@ function parseTextLine(line: string, config: Config): QmllintFinding[] {
     file: relativeFile(match[1], config),
     line: Number(match[2]),
     column: match[3] ? Number(match[3]) : null,
-    severity: severityFor(match[4]),
+    severity: severityFor(match[4], ruleFromMessage(match[5])),
     message: match[5].trim(),
     rule: ruleFromMessage(match[5]),
   }];
@@ -154,8 +212,9 @@ function relativeFile(file: string, config: Config): string {
   return path.relative(config.projectRoot, absolute).split(path.sep).join("/");
 }
 
-function severityFor(value: string | null | undefined): QmllintFinding["severity"] {
+function severityFor(value: string | null | undefined, rule: string | null = null): QmllintFinding["severity"] {
   const normalized = value?.toLowerCase();
+  if (rule?.toLowerCase() === "syntax") return "error";
   if (normalized === "error" || normalized === "fatal") return "error";
   if (normalized === "info" || normalized === "note") return "info";
   return "warning";
@@ -167,7 +226,10 @@ function ruleFromMessage(message: string): string | null {
 
 function qmllintVersion(command: string | null, config: Config): string | null {
   const executable = command?.trim().match(/^(?:"([^"]+)"|'([^']+)'|([^\s]+))/)?.slice(1).find(Boolean);
-  if (!executable) return null;
+  return executable ? qmllintExecutableVersion(executable, config) : null;
+}
+
+function qmllintExecutableVersion(executable: string, config: Config): string | null {
   const result = spawnSync(executable, ["--version"], { cwd: config.projectRoot, encoding: "utf8" });
   if (result.status !== 0) return null;
   return `${result.stdout ?? result.stderr ?? ""}`.trim() || null;
@@ -182,6 +244,48 @@ function qmllintSettings(config: Config, command: string | null = null): { setti
   const compiler = text.match(/^\s*CompilerWarnings\s*=\s*(\w+)\s*$/im)?.[1]?.toLowerCase();
   const configuredPaths = text.match(/^\s*AdditionalQmlImportPaths\s*=\s*(.*)$/im)?.[1]?.split(/[,;]/).map((item) => item.trim()).filter(Boolean) ?? [];
   return { settings: file, disabledCategories, compilerWarningsEnabled: compiler ? compiler !== "disable" : null, importPaths: [...new Set([...commandPaths, ...configuredPaths])] };
+}
+
+function nativeQmllintSettings(config: Config): { settings: string | null; disabledCategories: string[]; compilerWarningsEnabled: boolean | null; importPaths: string[] } {
+  const settings = qmllintSettings(config);
+  return { ...settings, importPaths: [...new Set([...settings.importPaths, ...config.tools.qmllintImportPaths])] };
+}
+
+function normalizedExpectedFiles(files: string[]): string[] {
+  return [...new Set(files.map((file) => file.split(path.sep).join("/")))].sort();
+}
+
+function filesFromStructuredReport(text: string, config: Config): string[] {
+  try {
+    const value: unknown = JSON.parse(text);
+    const records = isRecord(value) && Array.isArray(value.files) ? value.files : Array.isArray(value) ? value : [];
+    return [...new Set(records.flatMap((item) => {
+      if (!isRecord(item)) return [];
+      const file = stringValue(item.filename) ?? stringValue(item.file) ?? stringValue(item.path);
+      return file ? [relativeFile(file, config)] : [];
+    }))].sort();
+  } catch {
+    return [];
+  }
+}
+
+function hasStructuredFileManifest(text: string): boolean {
+  try {
+    const value: unknown = JSON.parse(text);
+    return (isRecord(value) && Array.isArray(value.files)) || Array.isArray(value);
+  } catch {
+    return false;
+  }
+}
+
+function reportCoverage(expectedFiles: string[], reportedFiles: string[], hasManifest: boolean): QmllintResult["coverage"] {
+  if (expectedFiles.length === 0 || !hasManifest) return "unknown";
+  const reported = new Set(reportedFiles);
+  return expectedFiles.every((file) => reported.has(file)) ? "complete" : "partial";
+}
+
+function commandDisplay(executable: string, args: string[]): string {
+  return [executable, ...args].map((value) => /\s/.test(value) ? JSON.stringify(value) : value).join(" ");
 }
 
 function versionFromReport(text: string): string | null {
