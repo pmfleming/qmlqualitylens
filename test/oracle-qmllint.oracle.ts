@@ -8,7 +8,7 @@ import type { Config, Finding, QmllintFinding } from "../src/types.js";
 
 type Label = { kind: string; file: string };
 type Category = { name: string; patterns: string[] };
-type QmllintLabel = { category: string; file: string };
+type QmllintLabel = { category: string; file: string; min_qt?: string };
 type Expected = { positives: Label[]; negatives: Label[]; qmllint_categories: Category[]; qmllint_expected?: QmllintLabel[] };
 type RuleScore = { kind: string; true_positives: number; false_positives: number; false_negatives: number; precision: number; recall: number };
 
@@ -24,6 +24,7 @@ type QmllintOracleResult = {
   exit_code: number | null;
   error: string | null;
   diagnostics: number;
+  version: string | null;
   categories: Array<{ name: string; diagnostics: number; files: string[] }>;
   expected: QmllintLabel[];
   missing_expected: QmllintLabel[];
@@ -67,12 +68,14 @@ function runQmllint(config: Config, expected: Expected): QmllintOracleResult {
   const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
   const diagnostics = safeParseQmllint(output, config);
   const categories = categorizeDiagnostics(diagnostics, expected.qmllint_categories);
-  const expectedLabels = expected.qmllint_expected ?? [];
+  const version = qmllintVersion();
+  const expectedLabels = (expected.qmllint_expected ?? []).filter((label) => !label.min_qt || versionAtLeast(version, label.min_qt));
   return {
     command: `qmllint ${args.join(" ")}`,
     exit_code: result.status,
     error: result.error?.message ?? null,
     diagnostics: diagnostics.length,
+    version,
     categories,
     expected: expectedLabels,
     missing_expected: expectedLabels.filter((label) => !categoryHasFile(categories, label)),
@@ -89,6 +92,21 @@ function safeParseQmllint(output: string, config: Config): QmllintFinding[] {
 
 function qmlFixtureFiles(): string[] {
   return fs.readdirSync(fixtureRoot).filter((file) => file.endsWith(".qml")).sort();
+}
+
+function qmllintVersion(): string | null {
+  const result = spawnSync("qmllint", ["--version"], { encoding: "utf8" });
+  return result.status === 0 ? `${result.stdout ?? result.stderr ?? ""}`.match(/\d+\.\d+(?:\.\d+)?/)?.[0] ?? null : null;
+}
+
+function versionAtLeast(actual: string | null, minimum: string): boolean {
+  if (!actual) return false;
+  const parts = (value: string) => value.split(".").map(Number);
+  const left = parts(actual), right = parts(minimum);
+  for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+    if ((left[index] ?? 0) !== (right[index] ?? 0)) return (left[index] ?? 0) > (right[index] ?? 0);
+  }
+  return true;
 }
 
 function qmllintImportArgs(): string[] {

@@ -32,6 +32,6 @@
   ],
   "qmllint_expected": [
     { "category": "unresolved_import_or_type", "file": "UnknownType.qml" },
-    { "category": "unresolved_import_or_type", "file": "UnresolvedImport.qml" }
+    { "category": "unresolved_import_or_type", "file": "UnresolvedImport.qml", "min_qt": "6.5" }
   ]
 }

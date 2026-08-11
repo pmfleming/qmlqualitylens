@@ -32,7 +32,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             cmake ninja-build qt6-base-dev qt6-qpa-plugins qt6-declarative-dev qt6-declarative-dev-tools \
-            qml6-module-qtquick qml6-module-qtqml-workerscript qml6-module-qttest
+            qml6-module-qtquick qml6-module-qtquick-window qml6-module-qtqml-workerscript \
+            qml6-module-qttest
           echo /usr/lib/qt6/bin >> "$GITHUB_PATH"
       - run: npm run integration:qt
       - name: Upload Qt quality evidence
