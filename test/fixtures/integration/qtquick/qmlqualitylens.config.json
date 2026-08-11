@@ -27,7 +27,8 @@
       "command": "qmltestrunner",
       "check": true,
       "arguments": ["-input", "tests", "-import", "build"],
-      "timeout_ms": 120000
+      "timeout_ms": 120000,
+      "environment": { "QT_QPA_PLATFORM": "offscreen" }
     },
     "runtime": {
       "command": "scripts/runtime-smoke.sh",

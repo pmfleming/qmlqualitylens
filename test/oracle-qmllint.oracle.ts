@@ -114,7 +114,12 @@ function detectedQtImportPath(): string | null {
   const executable = which.stdout.trim();
   if (!executable) return null;
   const root = path.dirname(path.dirname(fs.realpathSync(executable)));
-  const candidates = [path.join(root, "lib/qt-6/qml"), path.join(root, "qml")];
+  const candidates = [
+    path.join(root, "lib/qt-6/qml"),
+    path.join(root, "qml"),
+    "/usr/lib/x86_64-linux-gnu/qt6/qml",
+    "/usr/lib/qt6/qml",
+  ];
   return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
 }
 
