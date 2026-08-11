@@ -38,7 +38,7 @@ jobs:
       - run: npm run integration:qt
       - name: Upload Qt quality evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: qt-integration-evidence
           path: test/fixtures/integration/qtquick/target/qmlqualitylens
