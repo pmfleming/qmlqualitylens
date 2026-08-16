@@ -1,7 +1,7 @@
 import { ruleFor } from "./rules.js";
 import type { Finding } from "./types.js";
 
-export function sarifForFindings(findings: Finding[], toolVersion = "0.3.0"): unknown {
+export function sarifForFindings(findings: Finding[], toolVersion = "0.3.0") {
   const active = findings.filter((finding) => !finding.suppressed);
   const kinds = [...new Set(active.map((finding) => finding.kind))];
   return {

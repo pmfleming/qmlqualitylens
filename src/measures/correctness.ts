@@ -1,27 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
-import { executeTool, toolVersion, type ToolExecution } from "../tool-execution.js";
+import { executeTool, publicToolExecution, toolVersion, type ToolExecution } from "../tool-execution.js";
 import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding } from "./foundation.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 
-export function measureCorrectnessCatalog(config: Config, command: string, context: AnalysisContext): unknown {
-  const tests = context.sources
-    .filter((file) => file.kind !== "qmldir" && isTestFile(file.relativePath, file.text))
-    .map((file) => ({
-      file: file.relativePath,
-      kind: file.kind,
-      framework: /\bTestCase\s*\{/.test(file.text) ? "qt_quick_test" : "unknown",
-      signal_spies: (file.text.match(/\bSignalSpy\s*\{/g) ?? []).length,
-      test_cases: [...file.text.matchAll(/\bfunction\s+((?:test|benchmark)_[A-Za-z0-9_]+)/g)].map((match) => ({ name: match[1], line: lineOf(file.text, match.index ?? 0), kind: match[1]?.startsWith("benchmark_") ? "benchmark" : "test" })),
-      components: context.resolution.componentUses.filter((use) => use.from === file.relativePath && use.target).map((use) => use.target),
-    }));
+export function measureCorrectnessCatalog(config: Config, command: string, context: AnalysisContext) {
+  const tests = discoverTests(context);
   const toolExecution = runQmlTests(config);
   const execution = loadTestEvidence(config.reports.tests);
-  const rawFindings: Finding[] = [
-    ...(tests.length ? [] : [noTestsFinding()]),
-    ...(toolExecution?.status === "failed" && execution.failures.length === 0 ? [testExecutionFailed(toolExecution)] : []),
-    ...execution.failures.map((failure, index): Finding => ({ id: `tests.failure.${index}.${failure.name}`, kind: "tests.failure", severity: "high", file: failure.file, line: failure.line, message: `Test '${failure.name}' failed${failure.message ? `: ${failure.message}` : ""}`, actions: ["Reproduce and fix the failing test, or update the expectation only when the behavior change is intentional."] })),
-  ];
+  const rawFindings = catalogFindings(tests.length, toolExecution, execution);
   const findings = support.applySuppressions(support.enrichFindings(rawFindings, config), config);
   const artifact = {
     ...baseArtifact(context, "correctness.catalog", command),
@@ -38,13 +25,34 @@ export function measureCorrectnessCatalog(config: Config, command: string, conte
       ...findingSummary(findings),
     },
     tests,
-    execution: { report: execution, tool: toolExecution ? publicExecution(toolExecution) : null },
+    execution: { report: execution, tool: toolExecution ? publicToolExecution(toolExecution) : null },
     findings,
   };
   writeArtifact(config, "correctness_review.json", artifact);
   writeArtifact(config, "test_catalog.json", { schema_version: "0.3.0", project: { name: config.projectName, root: config.projectRoot }, tests });
   writeArtifact(config, "test_evidence.json", { ...baseArtifact(context, "correctness.test_evidence", command), summary: artifact.summary, execution: artifact.execution, findings: findings.filter((finding) => finding.kind === "tests.failure" || finding.kind === "tests.execution_failed") });
   return artifact;
+}
+
+function discoverTests(context: AnalysisContext) {
+  return context.sources
+    .filter((file) => file.kind !== "qmldir" && isTestFile(file.relativePath, file.text))
+    .map((file) => ({
+      file: file.relativePath,
+      kind: file.kind,
+      framework: /\bTestCase\s*\{/.test(file.text) ? "qt_quick_test" : "unknown",
+      signal_spies: (file.text.match(/\bSignalSpy\s*\{/g) ?? []).length,
+      test_cases: [...file.text.matchAll(/\bfunction\s+((?:test|benchmark)_[A-Za-z0-9_]+)/g)].map((match) => ({ name: match[1], line: lineOf(file.text, match.index ?? 0), kind: match[1]?.startsWith("benchmark_") ? "benchmark" : "test" })),
+      components: context.resolution.componentUses.filter((use) => use.from === file.relativePath && use.target).map((use) => use.target),
+    }));
+}
+
+function catalogFindings(testFiles: number, execution: ToolExecution | null, evidence: TestEvidence): Finding[] {
+  return [
+    ...(testFiles ? [] : [noTestsFinding()]),
+    ...(execution?.status === "failed" && evidence.failures.length === 0 ? [testExecutionFailed(execution)] : []),
+    ...evidence.failures.map((failure, index): Finding => ({ id: `tests.failure.${index}.${failure.name}`, kind: "tests.failure", severity: "high", file: failure.file, line: failure.line, message: `Test '${failure.name}' failed${failure.message ? `: ${failure.message}` : ""}`, actions: ["Reproduce and fix the failing test, or update the expectation only when the behavior change is intentional."] })),
+  ];
 }
 
 function runQmlTests(config: Config): ToolExecution | null {
@@ -61,11 +69,6 @@ function runQmlTests(config: Config): ToolExecution | null {
     { ...process.env, ...config.tools.qmltestrunnerEnvironment, QMLQUALITYLENS_REPORT: report },
     config.tools.qmltestrunnerRedactPatterns,
   );
-}
-
-function publicExecution(execution: ToolExecution): Omit<ToolExecution, "stdout" | "stderr"> {
-  const { stdout: _stdout, stderr: _stderr, ...record } = execution;
-  return record;
 }
 
 function testExecutionFailed(execution: ToolExecution): Finding {

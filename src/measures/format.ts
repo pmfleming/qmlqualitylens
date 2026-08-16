@@ -4,7 +4,7 @@ import path from "node:path";
 import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding } from "./foundation.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 
-export function measureFormat(config: Config, command: string, context: AnalysisContext): unknown {
+export function measureFormat(config: Config, command: string, context: AnalysisContext) {
   const tool = config.tools.qmlformatCommand ?? "qmlformat";
   if (!config.tools.qmlformatCheck) return writeSkippedFormat(config, command, context);
   const versionResult = run(`${tool} --version`, config);
@@ -32,7 +32,7 @@ export function measureFormat(config: Config, command: string, context: Analysis
   return artifact;
 }
 
-function writeSkippedFormat(config: Config, command: string, context: AnalysisContext): unknown {
+function writeSkippedFormat(config: Config, command: string, context: AnalysisContext) {
   const artifact = { ...baseArtifact(context, "quality.format", command), summary: { status: "skipped", reason: "tools.qmlformat.check is disabled", files: 0, drift: 0 }, files: [], findings: [] };
   writeArtifact(config, "formatting.json", artifact);
   return artifact;

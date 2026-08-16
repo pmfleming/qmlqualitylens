@@ -9,7 +9,7 @@ import { parseQmlDocument } from "./qml-parser.js";
 import type { QmlDocument, QmlExecutableNode } from "./qml-parser-types.js";
 import { buildProjectResolution, type ProjectResolution } from "./qml-resolution.js";
 import { qmlSemanticFindings } from "./qml-rules.js";
-import { findingForQmllint, loadQmllintResult, type QmllintResult } from "./qmllint.js";
+import { loadQmllintResult, qmllintDiagnostic, type QmllintResult } from "./qmllint.js";
 import { deduplicateToolFindings, enrichFindings } from "./rules.js";
 import { applySuppressions, staleSuppressionFindings } from "./suppressions.js";
 import type {
@@ -64,7 +64,7 @@ export function createAnalysisContext(config: Config): AnalysisContext {
     ...inputFindings(config, sources),
     ...deriveFindings(config, files, components, functions, bindings, clones, resolution),
     ...qmlSemanticFindings(baseContext),
-    ...qmllintFindings.map(findingForQmllint),
+    ...qmllintFindings.map(qmllintDiagnostic),
   ], config));
   const findings = [...applySuppressions(rawFindings, config), ...enrichFindings(staleSuppressionFindings(rawFindings, config), config)];
   const scores = scoreProject(config, files, components, functions, clones, findings);

@@ -11,7 +11,6 @@ type QmldirComponent = {
   qmldir: string;
   line: number;
   public: boolean;
-  singleton: boolean;
 };
 
 type QmldirModule = {
@@ -51,123 +50,19 @@ export type ProjectResolution = {
 
 const EXTERNAL_MODULE_PREFIXES = ["Qt", "QtQuick", "Quickshell", "QML", "org.kde", "org.freedesktop"];
 
-const BUILTIN_TYPES = new Set([
-  "AbstractButton",
-  "Action",
-  "AnchorAnimation",
-  "ApplicationWindow",
-  "Behavior",
-  "BorderImage",
-  "BusyIndicator",
-  "Button",
-  "ButtonGroup",
-  "Canvas",
-  "CheckBox",
-  "CheckDelegate",
-  "ColorAnimation",
-  "Column",
-  "ColumnLayout",
-  "ComboBox",
-  "Component",
-  "Connections",
-  "Control",
-  "DelayButton",
-  "Dialog",
-  "DialogButtonBox",
-  "DragHandler",
-  "Drawer",
-  "Flickable",
-  "Flow",
-  "FocusScope",
-  "Grid",
-  "Gradient",
-  "GradientStop",
-  "GridLayout",
-  "GroupBox",
-  "HandlerPoint",
-  "HoverHandler",
-  "Image",
-  "Instantiator",
-  "Item",
-  "Label",
-  "Layout",
-  "ListElement",
-  "ListModel",
-  "ListView",
-  "Loader",
-  "Menu",
-  "MenuBar",
-  "MenuItem",
-  "NumberAnimation",
-  "Page",
-  "PageIndicator",
-  "Pane",
-  "ParallelAnimation",
-  "ParentAnimation",
-  "ParentChange",
-  "PauseAnimation",
-  "MouseArea",
-  "MultiEffect",
-  "PinchHandler",
-  "PointHandler",
-  "Popup",
-  "Process",
-  "ProgressBar",
-  "PropertyAction",
-  "PropertyAnimation",
-  "QtObject",
-  "RadioButton",
-  "RangeSlider",
-  "Rectangle",
-  "Repeater",
-  "RoundButton",
-  "RotationAnimation",
-  "Row",
-  "RowLayout",
-  "ScrollBar",
-  "ScrollIndicator",
-  "ScrollView",
-  "SequentialAnimation",
-  "ShaderEffect",
-  "ShaderEffectSource",
-  "ShellRoot",
-  "ShellCommand",
-  "Slider",
-  "SpinBox",
-  "SplitView",
-  "StackView",
-  "State",
-  "StateChangeScript",
-  "StateGroup",
-  "StdioCollector",
-  "SplitParser",
-  "SwipeDelegate",
-  "SwipeView",
-  "Switch",
-  "SwitchDelegate",
-  "SystemPalette",
-  "TabBar",
-  "TabButton",
-  "TapHandler",
-  "Text",
-  "TextArea",
-  "TextEdit",
-  "TextField",
-  "TextInput",
-  "ToolBar",
-  "ToolButton",
-  "ToolSeparator",
-  "ToolTip",
-  "Tumbler",
-  "Timer",
-  "Transition",
-  "Window",
-  "WlrLayershell",
-  "FloatingWindow",
-  "PopupWindow",
-  "HyprlandFocusGrab",
-  "WheelHandler",
-]);
+const BUILTIN_TYPES = new Set(`
+  AbstractButton Action AnchorAnimation ApplicationWindow Behavior BorderImage BusyIndicator Button ButtonGroup Canvas
+  CheckBox CheckDelegate ColorAnimation Column ColumnLayout ComboBox Component Connections Control DelayButton Dialog
+  DialogButtonBox DragHandler Drawer Flickable Flow FocusScope Grid Gradient GradientStop GridLayout GroupBox HandlerPoint
+  HoverHandler Image Instantiator Item Label Layout ListElement ListModel ListView Loader Menu MenuBar MenuItem MouseArea
+  MultiEffect NumberAnimation Page PageIndicator Pane ParallelAnimation ParentAnimation ParentChange PauseAnimation PinchHandler
+  PointHandler Popup Process ProgressBar PropertyAction PropertyAnimation QtObject RadioButton RangeSlider Rectangle Repeater
+  RotationAnimation RoundButton Row RowLayout ScrollBar ScrollIndicator ScrollView SequentialAnimation ShaderEffect
+  ShaderEffectSource ShellCommand ShellRoot Slider SpinBox SplitParser SplitView StackView State StateChangeScript StateGroup
+  StdioCollector SwipeDelegate SwipeView Switch SwitchDelegate SystemPalette TabBar TabButton TapHandler Text TextArea TextEdit
+  TextField TextInput Timer ToolBar ToolButton ToolSeparator ToolTip Transition Tumbler Window WlrLayershell FloatingWindow
+  PopupWindow HyprlandFocusGrab WheelHandler
+`.trim().split(/\s+/));
 
 export function buildProjectResolution(sources: SourceFile[], documents: QmlDocumentEntry[], components: ComponentRecord[], config: Config): ProjectResolution {
   const sourcePaths = new Set(sources.map((source) => source.relativePath));
@@ -221,7 +116,7 @@ function qmldirComponent(parts: string[], qmldir: string, line: number, sourcePa
   if (!name || !filePart) return null;
   const file = resolveQmldirFile(qmldir, filePart);
   if (!sourcePaths.has(file)) return null;
-  return { name, file, qmldir, line, public: directive !== "internal", singleton: directive === "singleton" };
+  return { name, file, qmldir, line, public: directive !== "internal" };
 }
 
 function buildComponentMaps(components: ComponentRecord[], modules: QmldirModule[]): { unique: Map<string, string>; ambiguous: Map<string, string[]> } {

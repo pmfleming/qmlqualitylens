@@ -5,16 +5,16 @@ import { stripCommentsAndStrings } from "./metrics.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./measures/shared.js";
 import { matchesAnyConfiguredTypeName } from "./qml-model.js";
 import { qmlSemanticFindings } from "./qml-rules.js";
-import { findingForQmllint } from "./qmllint.js";
+import { qmllintDiagnostic } from "./qmllint.js";
 import type { Config, Finding } from "./types.js";
 
-export function measureQmlHealth(config: Config, command: string, context: AnalysisContext): unknown {
+export function measureQmlHealth(config: Config, command: string, context: AnalysisContext) {
   const findings: Finding[] = support.applySuppressions(support.deduplicateToolFindings(support.enrichFindings([
     ...context.components.flatMap(componentHealthFindings),
     ...context.bindings.flatMap(sideEffectBindingFinding),
     ...context.qmlDocuments.flatMap((entry) => processPlacementFinding(entry, config)),
     ...qmlSemanticFindings(context),
-    ...context.qmllintFindings.map(findingForQmllint),
+    ...context.qmllintFindings.map(qmllintDiagnostic),
   ], config)), config);
   const artifact = {
     ...baseArtifact(context, "quality.qml_health", command),

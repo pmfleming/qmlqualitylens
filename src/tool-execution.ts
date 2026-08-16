@@ -43,13 +43,24 @@ export function toolVersion(executable: string, cwd: string): string | null {
   return `${result.stdout ?? result.stderr ?? ""}`.split(/\r?\n/)[0]?.trim() || null;
 }
 
+export function publicToolExecution(execution: ToolExecution): Omit<ToolExecution, "stdout" | "stderr"> {
+  const { stdout: _stdout, stderr: _stderr, ...summary } = execution;
+  return summary;
+}
+
+export function projectRelativePath(file: string, projectRoot: string): string {
+  const normalized = file.replace(/^file:\/\//, "");
+  const absolute = path.isAbsolute(normalized) ? normalized : path.resolve(projectRoot, normalized);
+  return path.relative(projectRoot, absolute).split(path.sep).join("/");
+}
+
 function outputTail(output: string): string[] {
   const lines = output.split(/\r?\n/);
   if (lines.at(-1) === "") lines.pop();
   return lines.slice(-200);
 }
 
-function commandDisplay(executable: string, args: string[]): string {
+export function commandDisplay(executable: string, args: string[]): string {
   const sensitive = /(?:password|passwd|token|secret|credential|api[-_]?key)/i;
   const displayArgs = args.map((value, index) => {
     if (index > 0 && sensitive.test(args[index - 1] ?? "")) return "<redacted>";

@@ -1,7 +1,7 @@
 import type { MeasureCloneGroup as CloneGroup, MeasureConfig as Config, MeasureContext as AnalysisContext } from "./foundation.js";
 import { baseArtifact, writeArtifact } from "./shared.js";
 
-export function measureClones(config: Config, command: string, context: AnalysisContext): unknown {
+export function measureClones(config: Config, command: string, context: AnalysisContext) {
   const structural = qmlStructuralClones(context);
   const cloneGroups = [...context.clones, ...structural];
   const byFile = new Map<string, number>();

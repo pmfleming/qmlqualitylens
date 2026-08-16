@@ -89,7 +89,7 @@ function runAuditCommand(args: ParsedArgs): void {
   if (artifact.summary.verdict === "fail") process.exitCode = 1;
 }
 
-export function runMeasure(config: Config, taskId: string, command: string): unknown[] {
+export function runMeasure(config: Config, taskId: string, command: string) {
   const context = createAnalysisContext(config);
   const taskIds = taskId === "all" ? taskIdsWithDependencies(...MEASURE_ORDER) : taskIdsWithDependencies(taskId);
   const results = [];

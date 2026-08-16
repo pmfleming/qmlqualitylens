@@ -2,7 +2,7 @@ import path from "node:path";
 import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding } from "./foundation.js";
 import { baseArtifact, writeArtifact } from "./shared.js";
 
-export function measureCleanup(config: Config, command: string, context: AnalysisContext): unknown {
+export function measureCleanup(config: Config, command: string, context: AnalysisContext) {
   const findings: Finding[] = support.applySuppressions([
     ...context.components.flatMap((component) => unusedComponentFinding(component, context.resolution.referencedFiles, context.resolution.publicFiles)),
     ...context.qmlDocuments.flatMap(unusedIdFindings),

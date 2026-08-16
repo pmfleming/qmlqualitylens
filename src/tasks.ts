@@ -177,7 +177,7 @@ export function findTask(id: string): TaskDefinition | undefined {
   return TASKS.find((task) => task.id === id);
 }
 
-export function catalogForConfig(config: Config): unknown {
+export function catalogForConfig(config: Config) {
   return {
     schema_version: "0.3.0",
     lens: "qmlqualitylens",

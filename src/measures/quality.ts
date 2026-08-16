@@ -2,13 +2,13 @@ import { legacyQualityArtifact } from "../analyzer.js";
 import type { MeasureConfig as Config, MeasureContext as AnalysisContext } from "./foundation.js";
 import { baseArtifact, writeArtifact } from "./shared.js";
 
-export function measureQuality(config: Config, _command: string, context: AnalysisContext): unknown {
+export function measureQuality(config: Config, _command: string, context: AnalysisContext) {
   const artifact = legacyQualityArtifact(context);
   writeArtifact(config, "qml_quality_report.json", artifact);
   return artifact;
 }
 
-export function measureLocality(config: Config, command: string, context: AnalysisContext): unknown {
+export function measureLocality(config: Config, command: string, context: AnalysisContext) {
   const records = context.components
     .map((component) => ({
       file: component.file,
@@ -33,7 +33,7 @@ export function measureLocality(config: Config, command: string, context: Analys
   return artifact;
 }
 
-export function measureLeverage(config: Config, command: string, context: AnalysisContext): unknown {
+export function measureLeverage(config: Config, command: string, context: AnalysisContext) {
   const records = context.components
     .map((component) => ({
       file: component.file,

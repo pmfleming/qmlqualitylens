@@ -1,8 +1,9 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { commandDisplay, projectRelativePath } from "./tool-execution.js";
 import type { Config, Finding, QmllintFinding, QmllintSource } from "./types.js";
-import { isRecord, numberValue, stringValue } from "./value-utils.js";
+import { hasCaptures, isRecord, numberValue, stringValue } from "./value-utils.js";
 
 export type QmllintResult = {
   source: QmllintSource;
@@ -43,7 +44,7 @@ export function loadQmllintResult(config: Config, expectedFiles: string[] = []):
   return { source: "none", status: "not_run", command: null, report: config.qmllintReport, exitCode: null, version: null, ...qmllintSettings(config), expectedFiles: expected, reportedFiles: [], coverage: "unknown", error: null, findings: [] };
 }
 
-export function findingForQmllint(item: QmllintFinding): Finding {
+export function qmllintDiagnostic(item: QmllintFinding): Finding {
   const severity = item.severity === "error" ? "high" : item.severity === "info" ? "low" : "medium";
   const rule = item.rule ? ` (${item.rule})` : "";
   return {
@@ -169,7 +170,7 @@ function normalizeJsonFinding(item: Record<string, unknown>, file: string | null
   const location = isRecord(item.location) ? item.location : isRecord(item.loc) ? item.loc : {};
   const rule = stringValue(item.rule) ?? stringValue(item.code) ?? stringValue(item.id) ?? stringValue(item.category) ?? null;
   return [{
-    file: relativeFile(file, config),
+    file: projectRelativePath(file, config.projectRoot),
     line: numberValue(item.line) ?? numberValue(item.row) ?? numberValue(location.line) ?? numberValue(location.startLine) ?? 1,
     column: numberValue(item.column) ?? numberValue(item.col) ?? numberValue(location.column) ?? numberValue(location.startColumn) ?? null,
     severity: severityFor(stringValue(item.severity) ?? stringValue(item.type) ?? stringValue(item.level), rule),
@@ -184,9 +185,9 @@ function parseTextQmllint(text: string, config: Config): QmllintFinding[] {
 
 function parseTextLine(line: string, config: Config): QmllintFinding[] {
   const prefixed = line.match(/^(warning|error|info|note):\s*(.*?):(\d+)(?::(\d+))?:\s*(.*)$/i);
-  if (prefixed?.[2] && prefixed[3] && prefixed[5]) {
+  if (hasCaptures(prefixed, 2, 3, 5)) {
     return [{
-      file: relativeFile(prefixed[2], config),
+      file: projectRelativePath(prefixed[2] ?? "", config.projectRoot),
       line: Number(prefixed[3]),
       column: prefixed[4] ? Number(prefixed[4]) : null,
       severity: severityFor(prefixed[1], ruleFromMessage(prefixed[5])),
@@ -195,21 +196,15 @@ function parseTextLine(line: string, config: Config): QmllintFinding[] {
     }];
   }
   const match = line.match(/^(.*?):(\d+)(?::(\d+))?:\s*(?:(warning|error|info|note):\s*)?(.*)$/i);
-  if (!match?.[1] || !match[2] || !match[5]) return [];
+  if (!hasCaptures(match, 1, 2, 5)) return [];
   return [{
-    file: relativeFile(match[1], config),
+    file: projectRelativePath(match[1] ?? "", config.projectRoot),
     line: Number(match[2]),
     column: match[3] ? Number(match[3]) : null,
     severity: severityFor(match[4], ruleFromMessage(match[5])),
     message: match[5].trim(),
     rule: ruleFromMessage(match[5]),
   }];
-}
-
-function relativeFile(file: string, config: Config): string {
-  const normalized = file.replace(/^file:\/\//, "");
-  const absolute = path.isAbsolute(normalized) ? normalized : path.resolve(config.projectRoot, normalized);
-  return path.relative(config.projectRoot, absolute).split(path.sep).join("/");
 }
 
 function severityFor(value: string | null | undefined, rule: string | null = null): QmllintFinding["severity"] {
@@ -262,7 +257,7 @@ function filesFromStructuredReport(text: string, config: Config): string[] {
     return [...new Set(records.flatMap((item) => {
       if (!isRecord(item)) return [];
       const file = stringValue(item.filename) ?? stringValue(item.file) ?? stringValue(item.path);
-      return file ? [relativeFile(file, config)] : [];
+      return file ? [projectRelativePath(file, config.projectRoot)] : [];
     }))].sort();
   } catch {
     return [];
@@ -282,10 +277,6 @@ function reportCoverage(expectedFiles: string[], reportedFiles: string[], hasMan
   if (expectedFiles.length === 0 || !hasManifest) return "unknown";
   const reported = new Set(reportedFiles);
   return expectedFiles.every((file) => reported.has(file)) ? "complete" : "partial";
-}
-
-function commandDisplay(executable: string, args: string[]): string {
-  return [executable, ...args].map((value) => /\s/.test(value) ? JSON.stringify(value) : value).join(" ");
 }
 
 function versionFromReport(text: string): string | null {

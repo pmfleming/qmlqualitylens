@@ -1,7 +1,7 @@
 import type { MeasureConfig as Config, MeasureContext as AnalysisContext } from "./foundation.js";
 import { baseArtifact, writeArtifact } from "./shared.js";
 
-export function measureResolution(config: Config, command: string, context: AnalysisContext): unknown {
+export function measureResolution(config: Config, command: string, context: AnalysisContext) {
   const resolution = context.resolution;
   const artifact = {
     ...baseArtifact(context, "map.resolution", command),

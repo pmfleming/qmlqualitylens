@@ -92,38 +92,49 @@ function usesBareProperty(expression: string, propertyPath: string): boolean {
   return new RegExp(`(^|[^A-Za-z0-9_$.])${escapeRegex(name)}\\b`).test(stripCommentsAndStrings(expression));
 }
 
+type ComponentTraversal = {
+  nextIndex: number;
+  indexes: Map<string, number>;
+  lowLinks: Map<string, number>;
+  stack: string[];
+  onStack: Set<string>;
+  result: string[][];
+};
+
 function stronglyConnectedComponents(edges: Map<string, Set<string>>): string[][] {
-  let nextIndex = 0;
-  const indexes = new Map<string, number>();
-  const lowLinks = new Map<string, number>();
-  const stack: string[] = [];
-  const onStack = new Set<string>();
-  const result: string[][] = [];
-  const visit = (node: string): void => {
-    indexes.set(node, nextIndex);
-    lowLinks.set(node, nextIndex);
-    nextIndex += 1;
-    stack.push(node);
-    onStack.add(node);
-    for (const target of edges.get(node) ?? []) {
-      if (!edges.has(target)) continue;
-      if (!indexes.has(target)) {
-        visit(target);
-        lowLinks.set(node, Math.min(lowLinks.get(node) ?? 0, lowLinks.get(target) ?? 0));
-      } else if (onStack.has(target)) lowLinks.set(node, Math.min(lowLinks.get(node) ?? 0, indexes.get(target) ?? 0));
+  const traversal: ComponentTraversal = { nextIndex: 0, indexes: new Map(), lowLinks: new Map(), stack: [], onStack: new Set(), result: [] };
+  for (const node of edges.keys()) if (!traversal.indexes.has(node)) visitComponent(node, edges, traversal);
+  return traversal.result;
+}
+
+function visitComponent(node: string, edges: Map<string, Set<string>>, traversal: ComponentTraversal): void {
+  traversal.indexes.set(node, traversal.nextIndex);
+  traversal.lowLinks.set(node, traversal.nextIndex++);
+  traversal.stack.push(node);
+  traversal.onStack.add(node);
+  for (const target of edges.get(node) ?? []) updateLowLink(node, target, edges, traversal);
+  if (traversal.lowLinks.get(node) === traversal.indexes.get(node)) traversal.result.push(popComponent(node, traversal));
+}
+
+function updateLowLink(node: string, target: string, edges: Map<string, Set<string>>, traversal: ComponentTraversal): void {
+  if (!edges.has(target)) return;
+  if (!traversal.indexes.has(target)) {
+    visitComponent(target, edges, traversal);
+    traversal.lowLinks.set(node, Math.min(traversal.lowLinks.get(node) ?? 0, traversal.lowLinks.get(target) ?? 0));
+  } else if (traversal.onStack.has(target)) traversal.lowLinks.set(node, Math.min(traversal.lowLinks.get(node) ?? 0, traversal.indexes.get(target) ?? 0));
+}
+
+function popComponent(node: string, traversal: ComponentTraversal): string[] {
+  const component: string[] = [];
+  let current: string | undefined;
+  do {
+    current = traversal.stack.pop();
+    if (current) {
+      traversal.onStack.delete(current);
+      component.push(current);
     }
-    if (lowLinks.get(node) !== indexes.get(node)) return;
-    const component: string[] = [];
-    let current = "";
-    do {
-      current = stack.pop() ?? "";
-      onStack.delete(current);
-      if (current) component.push(current);
-    } while (current && current !== node);
-    if (component.length) result.push(component);
-  };
-  for (const node of edges.keys()) if (!indexes.has(node)) visit(node);
-  return result;
+  } while (current && current !== node);
+  return component;
 }
 
 function referencedProperties(expression: string, idName: string, target: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number]): string[] {

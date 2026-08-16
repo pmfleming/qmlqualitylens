@@ -3,7 +3,7 @@ import { isShellEntrypoint } from "../qml-model.js";
 import type { MeasureConfig as Config, MeasureContext as AnalysisContext } from "./foundation.js";
 import { baseArtifact, writeArtifact } from "./shared.js";
 
-export function measureArchitectureMap(config: Config, command: string, context: AnalysisContext): unknown {
+export function measureArchitectureMap(config: Config, command: string, context: AnalysisContext) {
   const nodes = context.files.map(architectureNode);
   const idEdges = context.qmlDocuments.flatMap(({ file, document }) => document.idReferences.filter((item) => item.external).map((reference) => ({ from: file, to: `${file}#${reference.name}`, kind: "id_reference", line: reference.line })));
   const edges = [

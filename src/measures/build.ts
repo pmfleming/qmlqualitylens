@@ -1,8 +1,8 @@
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { executeTool } from "../tool-execution.js";
+import { executeTool, projectRelativePath, toolVersion } from "../tool-execution.js";
 import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding } from "./foundation.js";
+import { hasCaptures } from "../value-utils.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 
 type CmakeDiagnostic = {
@@ -38,7 +38,7 @@ type CmakeExecution = {
 
 const CMAKE_HELP = "https://cmake.org/cmake/help/latest/manual/cmake.1.html";
 
-export function measureBuildEvidence(config: Config, command: string, context: AnalysisContext): unknown {
+export function measureBuildEvidence(config: Config, command: string, context: AnalysisContext) {
   const cmakeFiles = discoverCmake(config);
   const modules = cmakeFiles.flatMap((file) => {
     const text = fs.readFileSync(file.absolute, "utf8");
@@ -89,7 +89,7 @@ function runCmake(config: Config): CmakeExecution {
   const reason = status === "incomplete" ? steps.find((step) => step.status === "incomplete")?.error ?? "CMake execution was incomplete."
     : status === "failed" ? "A configured CMake configure/build step failed."
       : null;
-  return { enabled: true, status, version: cmakeVersion(config), build_dir: config.tools.cmakeBuildDir, reason, steps };
+  return { enabled: true, status, version: toolVersion(config.tools.cmakeCommand, config.projectRoot), build_dir: config.tools.cmakeBuildDir, reason, steps };
 }
 
 function runCmakeStep(config: Config, phase: CmakeStep["phase"], args: string[]): CmakeStep {
@@ -122,15 +122,15 @@ function parseCmakeDiagnostics(output: string, phase: CmakeStep["phase"], config
 function diagnosticForLine(line: string, phase: CmakeStep["phase"], config: Config): CmakeDiagnostic[] {
   if (!line.trim()) return [];
   const qtPrefixed = line.match(/^(warning|error|fatal):\s*(.*?):(\d+)(?::(\d+))?:\s*(.*)$/i);
-  if (qtPrefixed?.[2] && qtPrefixed[3] && qtPrefixed[5]) return [diagnostic(phase, qtPrefixed[1] ?? "warning", qtPrefixed[5], config, qtPrefixed[2], qtPrefixed[3], qtPrefixed[4])];
+  if (hasCaptures(qtPrefixed, 2, 3, 5)) return [diagnostic(phase, qtPrefixed[1] ?? "warning", qtPrefixed[5] ?? "", config, qtPrefixed[2], qtPrefixed[3], qtPrefixed[4])];
   const compiler = line.match(/^(.*?):(\d+)(?::(\d+))?:\s*(warning|error|fatal error|fatal):\s*(.*)$/i);
-  if (compiler?.[1] && compiler[2] && compiler[4] && compiler[5]) return [diagnostic(phase, compiler[4], compiler[5], config, compiler[1], compiler[2], compiler[3])];
+  if (hasCaptures(compiler, 1, 2, 4, 5)) return [diagnostic(phase, compiler[4] ?? "error", compiler[5] ?? "", config, compiler[1], compiler[2], compiler[3])];
   const msvc = line.match(/^(.*?)\((\d+)(?:,(\d+))?\)\s*:\s*(warning|error|fatal error)\b[^:]*:\s*(.*)$/i);
-  if (msvc?.[1] && msvc[2] && msvc[4] && msvc[5]) return [diagnostic(phase, msvc[4], msvc[5], config, msvc[1], msvc[2], msvc[3])];
+  if (hasCaptures(msvc, 1, 2, 4, 5)) return [diagnostic(phase, msvc[4] ?? "error", msvc[5] ?? "", config, msvc[1], msvc[2], msvc[3])];
   const cmake = line.match(/^CMake\s+(Warning|Error)(?:\s+at\s+(.+?):(\d+)(?:\s+\([^)]*\))?)?:?\s*(.*)$/i);
-  if (cmake?.[1]) return [diagnostic(phase, cmake[1], cmake[4] || line, config, cmake[2], cmake[3], undefined)];
+  if (hasCaptures(cmake, 1)) return [diagnostic(phase, cmake[1] ?? "error", cmake[4] || line, config, cmake[2], cmake[3], undefined)];
   const generic = line.match(/^(?:ninja|make(?:\[\d+\])?|g?make(?:\[\d+\])?).*?:\s*(warning|error|fatal error)\s*:\s*(.*)$/i);
-  if (generic?.[1] && generic[2]) return [diagnostic(phase, generic[1], generic[2], config)];
+  if (hasCaptures(generic, 1, 2)) return [diagnostic(phase, generic[1] ?? "error", generic[2] ?? "", config)];
   return [];
 }
 
@@ -138,7 +138,7 @@ function diagnostic(phase: CmakeStep["phase"], severity: string, message: string
   return {
     phase,
     severity: /error|fatal/i.test(severity) ? "error" : "warning",
-    ...(file ? { file: relativeFile(file, config) } : {}),
+    ...(file ? { file: projectRelativePath(file, config.projectRoot) } : {}),
     ...(line ? { line: Number(line) } : {}),
     ...(column ? { column: Number(column) } : {}),
     message: message.trim(),
@@ -174,18 +174,6 @@ function stepFindings(step: CmakeStep): Finding[] {
     authority: { kind: "tool", name: "CMake", url: CMAKE_HELP },
   });
   return findings;
-}
-
-function cmakeVersion(config: Config): string | null {
-  const result = spawnSync(config.tools.cmakeCommand, ["--version"], { cwd: config.projectRoot, encoding: "utf8" });
-  if (result.status !== 0) return null;
-  return `${result.stdout ?? result.stderr ?? ""}`.split(/\r?\n/)[0]?.trim() || null;
-}
-
-function relativeFile(file: string, config: Config): string {
-  const normalized = file.replace(/^file:\/\//, "");
-  const absolute = path.isAbsolute(normalized) ? normalized : path.resolve(config.projectRoot, normalized);
-  return path.relative(config.projectRoot, absolute).split(path.sep).join("/");
 }
 
 function discoverCmake(config: Config): Array<{ absolute: string; relative: string }> {

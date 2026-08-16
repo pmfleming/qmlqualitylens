@@ -165,10 +165,14 @@ const THRESHOLD_KEYS = new Set(Object.keys(DEFAULT_THRESHOLDS));
 const PROCESS_BOUNDARY_KEYS = new Set(Object.keys(DEFAULT_PROCESS_BOUNDARY));
 
 function validateRawConfig(value: unknown, file: string): RawConfig {
+  assertRawConfig(value, file);
+  return value;
+}
+
+function assertRawConfig(value: unknown, file: string): asserts value is RawConfig {
   if (!isRecord(value)) throw new Error(`Invalid config ${file}: expected a JSON object`);
   const errors = validateConfigSections(value);
   if (errors.length) throw new Error(`Invalid config ${file}:\n- ${errors.join("\n- ")}`);
-  return value as RawConfig;
 }
 
 function validateConfigSections(value: Record<string, unknown>): string[] {
@@ -253,53 +257,62 @@ function validatePolicy(value: unknown, errors: string[]): void {
 function validateTools(value: unknown, errors: string[]): void {
   validateObjectKeys(value, "tools", new Set(["cmake", "qmllint", "qmlformat", "qmltestrunner", "runtime", "qml_profiler"]), errors);
   if (!isRecord(value)) return;
-  validateObjectKeys(value.cmake, "tools.cmake", new Set(["command", "check", "build_dir", "configure", "configure_arguments", "build_targets", "build_arguments", "timeout_ms", "working_directory", "environment", "redact_patterns"]), errors);
-  if (isRecord(value.cmake)) {
-    for (const key of ["command", "build_dir"]) if (value.cmake[key] !== undefined && (typeof value.cmake[key] !== "string" || !value.cmake[key].trim())) errors.push(`tools.cmake.${key} must be a non-empty string`);
-    for (const key of ["check", "configure"]) if (value.cmake[key] !== undefined && typeof value.cmake[key] !== "boolean") errors.push(`tools.cmake.${key} must be a boolean`);
-    for (const key of ["configure_arguments", "build_targets", "build_arguments"]) {
-      validateStringArray(value.cmake[key], `tools.cmake.${key}`, errors);
-      validateNonEmptyStrings(value.cmake[key], `tools.cmake.${key}`, errors);
-    }
-    if (Array.isArray(value.cmake.configure_arguments) && value.cmake.configure_arguments.some((argument) => ["-S", "-B"].includes(argument) || argument.startsWith("--build"))) errors.push("tools.cmake.configure_arguments must not override managed -S/-B/build options");
-    if (Array.isArray(value.cmake.build_arguments) && value.cmake.build_arguments.some((argument) => ["--build", "--target", "-t"].includes(argument))) errors.push("tools.cmake.build_arguments must not override managed build/target options");
-    validateExecutionControls(value.cmake, "tools.cmake", errors);
-  }
-  validateObjectKeys(value.qmllint, "tools.qmllint", new Set(["command", "check", "arguments", "import_paths", "qmltypes", "use_environment_imports"]), errors);
-  if (isRecord(value.qmllint)) {
-    if (value.qmllint.command !== undefined && (typeof value.qmllint.command !== "string" || !value.qmllint.command.trim())) errors.push("tools.qmllint.command must be a non-empty string");
-    if (value.qmllint.check !== undefined && typeof value.qmllint.check !== "boolean") errors.push("tools.qmllint.check must be a boolean");
-    if (value.qmllint.use_environment_imports !== undefined && typeof value.qmllint.use_environment_imports !== "boolean") errors.push("tools.qmllint.use_environment_imports must be a boolean");
-    for (const key of ["arguments", "import_paths", "qmltypes"]) validateStringArray(value.qmllint[key], `tools.qmllint.${key}`, errors);
-    for (const key of ["import_paths", "qmltypes"]) validateNonEmptyStrings(value.qmllint[key], `tools.qmllint.${key}`, errors);
-    if (Array.isArray(value.qmllint.arguments) && value.qmllint.arguments.some((argument) => argument === "--json" || argument.startsWith("--json="))) errors.push("tools.qmllint.arguments must not set --json; qmlqualitylens manages structured output");
-  }
-  validateObjectKeys(value.qmlformat, "tools.qmlformat", new Set(["command", "check"]), errors);
-  if (isRecord(value.qmlformat)) {
-    if (value.qmlformat.command !== undefined && typeof value.qmlformat.command !== "string") errors.push("tools.qmlformat.command must be a string");
-    if (typeof value.qmlformat.command === "string" && /(?:^|\s)(?:-i|--inplace|-F|--files|--write-defaults)(?:\s|=|$)/.test(value.qmlformat.command)) errors.push("tools.qmlformat.command must not contain mutating qmlformat options (-i, --inplace, -F, --files, --write-defaults)");
-    if (value.qmlformat.check !== undefined && typeof value.qmlformat.check !== "boolean") errors.push("tools.qmlformat.check must be a boolean");
-  }
+  validateCmakeTool(value.cmake, errors);
+  validateQmllintTool(value.qmllint, errors);
+  validateQmlformatTool(value.qmlformat, errors);
   validateExecutableTool(value.qmltestrunner, "tools.qmltestrunner", errors, true);
   if (isRecord(value.qmltestrunner) && Array.isArray(value.qmltestrunner.arguments) && value.qmltestrunner.arguments.some((argument) => argument === "-o" || argument.startsWith("-o="))) errors.push("tools.qmltestrunner.arguments must not set -o; qmlqualitylens manages the JUnit report");
   validateExecutableTool(value.runtime, "tools.runtime", errors, false);
   validateExecutableTool(value.qml_profiler, "tools.qml_profiler", errors, false);
 }
 
+function validateCmakeTool(value: unknown, errors: string[]): void {
+  validateObjectKeys(value, "tools.cmake", new Set(["command", "check", "build_dir", "configure", "configure_arguments", "build_targets", "build_arguments", "timeout_ms", "working_directory", "environment", "redact_patterns"]), errors);
+  if (!isRecord(value)) return;
+  for (const key of ["command", "build_dir"]) if (value[key] !== undefined && !isNonEmptyString(value[key])) errors.push(`tools.cmake.${key} must be a non-empty string`);
+  for (const key of ["check", "configure"]) if (value[key] !== undefined && typeof value[key] !== "boolean") errors.push(`tools.cmake.${key} must be a boolean`);
+  for (const key of ["configure_arguments", "build_targets", "build_arguments"]) {
+    validateStringArray(value[key], `tools.cmake.${key}`, errors);
+    validateNonEmptyStrings(value[key], `tools.cmake.${key}`, errors);
+  }
+  if (Array.isArray(value.configure_arguments) && value.configure_arguments.some((argument) => ["-S", "-B"].includes(argument) || argument.startsWith("--build"))) errors.push("tools.cmake.configure_arguments must not override managed -S/-B/build options");
+  if (Array.isArray(value.build_arguments) && value.build_arguments.some((argument) => ["--build", "--target", "-t"].includes(argument))) errors.push("tools.cmake.build_arguments must not override managed build/target options");
+  validateExecutionControls(value, "tools.cmake", errors);
+}
+
+function validateQmllintTool(value: unknown, errors: string[]): void {
+  validateObjectKeys(value, "tools.qmllint", new Set(["command", "check", "arguments", "import_paths", "qmltypes", "use_environment_imports"]), errors);
+  if (!isRecord(value)) return;
+  if (value.command !== undefined && !isNonEmptyString(value.command)) errors.push("tools.qmllint.command must be a non-empty string");
+  if (value.check !== undefined && typeof value.check !== "boolean") errors.push("tools.qmllint.check must be a boolean");
+  if (value.use_environment_imports !== undefined && typeof value.use_environment_imports !== "boolean") errors.push("tools.qmllint.use_environment_imports must be a boolean");
+  for (const key of ["arguments", "import_paths", "qmltypes"]) validateStringArray(value[key], `tools.qmllint.${key}`, errors);
+  for (const key of ["import_paths", "qmltypes"]) validateNonEmptyStrings(value[key], `tools.qmllint.${key}`, errors);
+  if (Array.isArray(value.arguments) && value.arguments.some((argument) => argument === "--json" || argument.startsWith("--json="))) errors.push("tools.qmllint.arguments must not set --json; qmlqualitylens manages structured output");
+}
+
+function validateQmlformatTool(value: unknown, errors: string[]): void {
+  validateObjectKeys(value, "tools.qmlformat", new Set(["command", "check"]), errors);
+  if (!isRecord(value)) return;
+  if (value.command !== undefined && typeof value.command !== "string") errors.push("tools.qmlformat.command must be a string");
+  if (typeof value.command === "string" && /(?:^|\s)(?:-i|--inplace|-F|--files|--write-defaults)(?:\s|=|$)/.test(value.command)) errors.push("tools.qmlformat.command must not contain mutating qmlformat options (-i, --inplace, -F, --files, --write-defaults)");
+  if (value.check !== undefined && typeof value.check !== "boolean") errors.push("tools.qmlformat.check must be a boolean");
+}
+
 function validateExecutableTool(value: unknown, name: string, errors: string[], defaultCommand: boolean): void {
   validateObjectKeys(value, name, new Set(["command", "check", "arguments", "timeout_ms", "working_directory", "environment", "redact_patterns"]), errors);
   if (!isRecord(value)) return;
-  if (value.command !== undefined && (typeof value.command !== "string" || !value.command.trim())) errors.push(`${name}.command must be a non-empty string`);
+  if (value.command !== undefined && !isNonEmptyString(value.command)) errors.push(`${name}.command must be a non-empty string`);
   if (value.check !== undefined && typeof value.check !== "boolean") errors.push(`${name}.check must be a boolean`);
   validateStringArray(value.arguments, `${name}.arguments`, errors);
   validateNonEmptyStrings(value.arguments, `${name}.arguments`, errors);
   validateExecutionControls(value, name, errors);
-  if (value.check === true && !defaultCommand && (typeof value.command !== "string" || !value.command.trim())) errors.push(`${name}.command is required when check is true`);
+  if (value.check === true && !defaultCommand && !isNonEmptyString(value.command)) errors.push(`${name}.command is required when check is true`);
 }
 
 function validateExecutionControls(value: Record<string, unknown>, name: string, errors: string[]): void {
   if (value.timeout_ms !== undefined && (typeof value.timeout_ms !== "number" || !Number.isInteger(value.timeout_ms) || value.timeout_ms <= 0)) errors.push(`${name}.timeout_ms must be a positive integer`);
-  if (value.working_directory !== undefined && (typeof value.working_directory !== "string" || !value.working_directory.trim())) errors.push(`${name}.working_directory must be a non-empty string`);
+  if (value.working_directory !== undefined && !isNonEmptyString(value.working_directory)) errors.push(`${name}.working_directory must be a non-empty string`);
   if (value.environment !== undefined && (!isRecord(value.environment) || Object.values(value.environment).some((item) => typeof item !== "string"))) errors.push(`${name}.environment must be an object of string values`);
   validateStringArray(value.redact_patterns, `${name}.redact_patterns`, errors);
   validateNonEmptyStrings(value.redact_patterns, `${name}.redact_patterns`, errors);
@@ -331,6 +344,10 @@ function validatePerformanceBudget(value: unknown, index: number, errors: string
   if (typeof value.scenario !== "string" || !value.scenario) errors.push(`${name}.scenario must be a non-empty string`);
   if (value.platform !== undefined && typeof value.platform !== "string") errors.push(`${name}.platform must be a string`);
   for (const key of ["frame_p95_ms", "max_event_ms"]) validatePositiveNumber(value[key], `${name}.${key}`, errors);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && Boolean(value.trim());
 }
 
 function validatePositiveNumber(value: unknown, name: string, errors: string[]): void {

@@ -1,7 +1,7 @@
 import type { MeasureConfig as Config, MeasureContext as AnalysisContext, MeasureThresholds as Thresholds } from "./foundation.js";
 import { baseArtifact, writeArtifact } from "./shared.js";
 
-export function measureHotspots(config: Config, command: string, context: AnalysisContext): unknown {
+export function measureHotspots(config: Config, command: string, context: AnalysisContext) {
   const records = context.components
     .map((component) => {
       const fileFunctions = context.functions.filter((fn) => fn.file === component.file);

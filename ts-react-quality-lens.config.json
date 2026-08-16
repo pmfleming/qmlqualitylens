@@ -10,7 +10,7 @@
   "test_command": "npm test",
   "exclude": ["node_modules", "dist", "target", ".direnv"],
   "public_api": {
-    "entry": ["bin/qmlqualitylens.ts", "src/cli.ts"],
+    "entry": ["bin/qmlqualitylens.ts", "bin/tool-process-runner.ts", "src/cli.ts"],
     "exports": [{ "file": "src/qmllint.ts", "names": ["parseQmllintOutput"] }]
   },
   "cache": { "enabled": true },

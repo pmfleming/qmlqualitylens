@@ -6,42 +6,39 @@ if (!command) {
   console.error("QMLQUALITYLENS_EXEC_ERROR: missing executable");
   process.exit(126);
 }
+run(command, args);
 
-const detached = process.platform !== "win32";
-let stopping = false;
-const child = spawn(command, args, { env: process.env, cwd: process.cwd(), stdio: "inherit", detached });
-
-child.on("error", (error) => {
-  console.error(`QMLQUALITYLENS_EXEC_ERROR: ${error.message}`);
-  process.exitCode = 126;
-});
-child.on("exit", (code, signal) => {
-  if (stopping) return;
-  if (signal) {
-    console.error(`QMLQUALITYLENS_EXEC_ERROR: executable terminated by ${signal}`);
-    process.exitCode = 128;
-  } else process.exitCode = code ?? 1;
-});
-
-for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
-  process.on(signal, () => stopTree(child, signal));
+function run(executable: string, executableArgs: string[]): void {
+  const child = spawn(executable, executableArgs, { env: process.env, cwd: process.cwd(), stdio: "inherit", detached: process.platform !== "win32" });
+  let stopping = false;
+  child.on("error", (error) => {
+    console.error(`QMLQUALITYLENS_EXEC_ERROR: ${error.message}`);
+    process.exitCode = 126;
+  });
+  child.on("exit", (code, signal) => {
+    if (stopping) return;
+    if (signal) console.error(`QMLQUALITYLENS_EXEC_ERROR: executable terminated by ${signal}`);
+    process.exitCode = signal ? 128 : code ?? 1;
+  });
+  const stop = (signal: NodeJS.Signals): void => {
+    if (stopping) return;
+    stopping = true;
+    terminateTree(child, signal);
+    const timer = setTimeout(() => {
+      if (child.pid && process.platform !== "win32") try { process.kill(-child.pid, "SIGKILL"); } catch { /* already exited */ }
+      process.exit(128);
+    }, 500);
+    timer.unref();
+    child.once("exit", () => process.exit(128));
+  };
+  const signals: NodeJS.Signals[] = ["SIGTERM", "SIGINT", "SIGHUP"];
+  for (const signal of signals) process.on(signal, () => stop(signal));
 }
 
-function stopTree(processHandle: ChildProcess, signal: NodeJS.Signals): void {
-  if (stopping) return;
-  stopping = true;
-  if (processHandle.pid) {
-    try {
-      if (process.platform === "win32") spawnSync("taskkill", ["/pid", String(processHandle.pid), "/T", "/F"], { stdio: "ignore" });
-      else process.kill(-processHandle.pid, signal);
-    } catch { /* The process tree may already have exited. */ }
-  }
-  const timer = setTimeout(() => {
-    if (processHandle.pid && process.platform !== "win32") {
-      try { process.kill(-processHandle.pid, "SIGKILL"); } catch { /* already exited */ }
-    }
-    process.exit(128);
-  }, 500);
-  timer.unref();
-  processHandle.once("exit", () => process.exit(128));
+function terminateTree(child: ChildProcess, signal: NodeJS.Signals): void {
+  if (!child.pid) return;
+  try {
+    if (process.platform === "win32") spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+    else process.kill(-child.pid, signal);
+  } catch { /* The process tree may already have exited. */ }
 }

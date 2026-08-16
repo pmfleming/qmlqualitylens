@@ -1,13 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
-import { executeTool, type ToolExecution } from "../tool-execution.js";
+import { executeTool, publicToolExecution, type ToolExecution } from "../tool-execution.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding } from "./foundation.js";
 
-export function measureRuntimeWarnings(config: Config, command: string, context: AnalysisContext): unknown {
+export function measureRuntimeWarnings(config: Config, command: string, context: AnalysisContext) {
   const report = config.reports.runtimeWarnings;
   const execution = runRuntimeSmoke(config);
-  let status: "not_configured" | "missing" | "complete" | "failed" | "incomplete" = execution?.status === "incomplete" ? "incomplete" : execution?.status === "failed" ? "failed" : execution ? "complete" : "not_configured";
+  let status = runtimeExecutionStatus(execution);
   let raw: Finding[] = execution ? parseRuntimeWarnings(`${execution.stdout}\n${execution.stderr}`, config) : [];
   if (execution?.status === "failed") raw.push({ id: "runtime.execution_failed", kind: "runtime.execution_failed", severity: "high", message: `Configured runtime smoke command failed with exit code ${execution.exit_code ?? "unknown"}`, actions: ["Inspect runtime_warnings.json output tails, reproduce the smoke scenario, and fix the crash or nonzero exit."] });
   if (report) {
@@ -23,22 +23,17 @@ export function measureRuntimeWarnings(config: Config, command: string, context:
   const artifact = {
     ...baseArtifact(context, "correctness.runtime_warnings", command),
     summary: { status, reason: execution?.error ?? null, report, tool_status: execution?.status ?? "not_configured", ...findingSummary(findings) },
-    execution: execution ? publicExecution(execution) : null,
+    execution: execution ? publicToolExecution(execution) : null,
     findings,
   };
   writeArtifact(config, "runtime_warnings.json", artifact);
   return artifact;
 }
 
-export function measureRuntimePerformance(config: Config, command: string, context: AnalysisContext): unknown {
+export function measureRuntimePerformance(config: Config, command: string, context: AnalysisContext) {
   const report = config.reports.qmlProfiler;
   const execution = runProfilerProducer(config, report);
-  if (!report || !fs.existsSync(report)) {
-    const status = execution?.status === "incomplete" ? "incomplete" : execution?.status === "failed" ? "incomplete" : report ? "missing" : "not_configured";
-    const artifact = { ...baseArtifact(context, "performance.runtime", command), summary: { status, reason: execution?.error ?? (execution?.status === "failed" ? `Profiler producer exited with ${execution.exit_code}` : null), report }, execution: execution ? publicExecution(execution) : null, scenarios: [], findings: [] };
-    writeArtifact(config, "runtime_performance.json", artifact);
-    return artifact;
-  }
+  if (!report || !fs.existsSync(report)) return writeEmptyPerformanceArtifact(config, command, context, report, execution);
   let parsed: unknown;
   try { parsed = JSON.parse(fs.readFileSync(report, "utf8")); } catch { parsed = null; }
   const normalized = normalizePerformanceReport(parsed);
@@ -47,13 +42,34 @@ export function measureRuntimePerformance(config: Config, command: string, conte
   const findings = support.applySuppressions(support.enrichFindings(performanceBudgetFindings(normalized.scenarios, config), config), config);
   const artifact = {
     ...baseArtifact(context, "performance.runtime", command),
-    summary: { status: complete && execution?.status !== "incomplete" && execution?.status !== "failed" ? "complete" : "incomplete", report, reason: [execution?.error, execution?.status === "failed" ? `Profiler producer exited with ${execution.exit_code}` : null, normalized.reason, budgetReason].filter(Boolean).join("; ") || null, scenarios: normalized.scenarios.length, ...findingSummary(findings) },
-    execution: execution ? publicExecution(execution) : null,
+    summary: { status: performanceReportStatus(complete, execution), report, reason: [producerFailureReason(execution), normalized.reason, budgetReason].filter(Boolean).join("; ") || null, scenarios: normalized.scenarios.length, ...findingSummary(findings) },
+    execution: execution ? publicToolExecution(execution) : null,
     scenarios: normalized.scenarios,
     findings,
   };
   writeArtifact(config, "runtime_performance.json", artifact);
   return artifact;
+}
+
+function runtimeExecutionStatus(execution: ToolExecution | null): "not_configured" | "missing" | "complete" | "failed" | "incomplete" {
+  if (!execution) return "not_configured";
+  return execution.status === "pass" ? "complete" : execution.status;
+}
+
+function writeEmptyPerformanceArtifact(config: Config, command: string, context: AnalysisContext, report: string | null, execution: ToolExecution | null) {
+  const status = execution?.status === "incomplete" || execution?.status === "failed" ? "incomplete" : report ? "missing" : "not_configured";
+  const artifact = { ...baseArtifact(context, "performance.runtime", command), summary: { status, reason: producerFailureReason(execution), report }, execution: execution ? publicToolExecution(execution) : null, scenarios: [], findings: [] };
+  writeArtifact(config, "runtime_performance.json", artifact);
+  return artifact;
+}
+
+function performanceReportStatus(complete: boolean, execution: ToolExecution | null): "complete" | "incomplete" {
+  return complete && execution?.status !== "incomplete" && execution?.status !== "failed" ? "complete" : "incomplete";
+}
+
+function producerFailureReason(execution: ToolExecution | null): string | null {
+  if (execution?.error) return execution.error;
+  return execution?.status === "failed" ? `Profiler producer exited with ${execution.exit_code}` : null;
 }
 
 function runRuntimeSmoke(config: Config): ToolExecution | null {
@@ -66,11 +82,6 @@ function runProfilerProducer(config: Config, report: string | null): ToolExecuti
   fs.mkdirSync(path.dirname(report), { recursive: true });
   fs.rmSync(report, { force: true });
   return executeTool(config.tools.qmlProfilerCommand, config.tools.qmlProfilerArguments, config.tools.qmlProfilerWorkingDirectory, config.tools.qmlProfilerTimeoutMs, { ...process.env, ...config.tools.qmlProfilerEnvironment, QMLQUALITYLENS_REPORT: report }, config.tools.qmlProfilerRedactPatterns);
-}
-
-function publicExecution(execution: ToolExecution): Omit<ToolExecution, "stdout" | "stderr"> {
-  const { stdout: _stdout, stderr: _stderr, ...record } = execution;
-  return record;
 }
 
 function parseRuntimeWarnings(text: string, config: Config): Finding[] {

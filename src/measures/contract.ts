@@ -3,7 +3,7 @@ import path from "node:path";
 import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding } from "./foundation.js";
 import { baseArtifact, writeArtifact } from "./shared.js";
 
-export function measureQualityContract(config: Config, command: string, context: AnalysisContext): unknown {
+export function measureQualityContract(config: Config, command: string, context: AnalysisContext) {
   const imported = ["formatting.json", "build_evidence.json", "test_evidence.json", "runtime_warnings.json", "runtime_performance.json"].flatMap((file) => artifactFindings(config, file));
   const active = [...new Map([...context.findings, ...imported].filter((finding) => !finding.suppressed).map((finding) => [finding.fingerprint ?? finding.id, finding])).values()];
   const checks = contractChecks(config, context);
