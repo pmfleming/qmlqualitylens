@@ -4,7 +4,7 @@ import { support, type MeasureConfig as Config, type MeasureContext as AnalysisC
 import { baseArtifact, writeArtifact } from "./shared.js";
 
 export function measureQualityContract(config: Config, command: string, context: AnalysisContext) {
-  const imported = ["formatting.json", "build_evidence.json", "test_evidence.json", "runtime_warnings.json", "runtime_performance.json"].flatMap((file) => artifactFindings(config, file));
+  const imported = ["parser_oracle.json", "formatting.json", "build_evidence.json", "test_evidence.json", "runtime_warnings.json", "runtime_performance.json"].flatMap((file) => artifactFindings(config, file));
   const active = [...new Map([...context.findings, ...imported].filter((finding) => !finding.suppressed).map((finding) => [finding.fingerprint ?? finding.id, finding])).values()];
   const checks = contractChecks(config, context);
   const incomplete = checks.filter((item) => item.status === "skipped" || item.status === "incomplete");
@@ -33,6 +33,8 @@ function contractChecks(config: Config, context: AnalysisContext) {
   return [
     check("static.parser", "Internal QML parser", context.parserDiagnostics.length ? "warn" : "pass", context.parserDiagnostics.length, context.parserDiagnostics.length ? "Parser diagnostics reduce heuristic precision." : undefined),
     check("static.resolution", "Project import/type resolution", unresolved ? "warn" : "pass", unresolved),
+    check("static.type_evidence", "QML type evidence", context.typeEvidence.status === "complete" ? "pass" : "incomplete", context.typeEvidence.missing_sources.length, context.typeEvidence.status === "partial" ? "Some configured type metadata was missing or invalid." : undefined),
+    artifactCheck(config, "tool.parser_oracle", "Parser oracle", "parser_oracle.json"),
     qmllintCheck(config, context),
     artifactCheck(config, "tool.qmlformat", "qmlformat", "formatting.json"),
     cmakeCheck(config),
@@ -43,7 +45,7 @@ function contractChecks(config: Config, context: AnalysisContext) {
 }
 
 function isRequired(id: string, config: Config): boolean {
-  const required: Record<string, boolean> = { "tool.qmllint": config.policy.requireQmllint, "tool.qmlformat": config.tools.qmlformatCheck, "tool.cmake": config.tools.cmakeCheck, "tests.execution": Boolean(config.reports.tests) || config.tools.qmltestrunnerCheck, "runtime.warnings": Boolean(config.reports.runtimeWarnings) || config.tools.runtimeCheck, "runtime.performance": Boolean(config.reports.qmlProfiler) || config.tools.qmlProfilerCheck };
+  const required: Record<string, boolean> = { "tool.parser_oracle": config.tools.parserOracleCheck, "tool.qmllint": config.policy.requireQmllint, "tool.qmlformat": config.tools.qmlformatCheck, "tool.cmake": config.tools.cmakeCheck, "tests.execution": Boolean(config.reports.tests) || config.tools.qmltestrunnerCheck, "runtime.warnings": Boolean(config.reports.runtimeWarnings) || config.tools.runtimeCheck, "runtime.performance": Boolean(config.reports.qmlProfiler) || config.tools.qmlProfilerCheck };
   return required[id] ?? false;
 }
 

@@ -6,12 +6,14 @@ import { createAnalysisContext } from "./analyzer.js";
 import { measureBuildEvidence } from "./measures/build.js";
 import { measureCorrectnessCatalog } from "./measures/correctness.js";
 import { measureFormat } from "./measures/format.js";
+import { measureParserOracle } from "./measures/parser-oracle.js";
 import { measureRuntimePerformance, measureRuntimeWarnings } from "./measures/runtime.js";
 import { findingSummary } from "./measures/shared.js";
 import { confidence, provenance } from "./provenance.js";
 import { isFindingRecord } from "./rules.js";
 import type { Config, Finding } from "./types.js";
 import { isRecord } from "./value-utils.js";
+import { ARTIFACT_SCHEMA_VERSION } from "./version.js";
 
 type AuditOptions = {
   baseline: string | null;
@@ -43,7 +45,7 @@ type BaseSnapshot = {
 };
 
 type AuditArtifact = {
-  schema_version: "0.3.0";
+  schema_version: string;
   task_id: "audit";
   project: { name: string; root: string };
   provenance: Record<string, unknown>;
@@ -74,6 +76,7 @@ type AuditArtifact = {
 export function runAudit(config: Config, command: string, options: AuditOptions): AuditArtifact {
   const context = createAnalysisContext(config);
   const evidenceArtifacts = [
+    measureParserOracle(config, command, context),
     measureBuildEvidence(config, command, context),
     measureFormat(config, command, context),
     measureCorrectnessCatalog(config, command, context),
@@ -94,7 +97,7 @@ export function runAudit(config: Config, command: string, options: AuditOptions)
   const verdict = auditVerdict(config, gateFindings, incompleteChecks);
   const summary = findingSummary(findings);
   const artifact: AuditArtifact = {
-    schema_version: "0.3.0",
+    schema_version: ARTIFACT_SCHEMA_VERSION,
     task_id: "audit",
     project: { name: config.projectName, root: config.projectRoot },
     provenance: provenance(config, command),
@@ -171,6 +174,7 @@ function qmllintFailures(config: Config, context: ReturnType<typeof createAnalys
 function configuredEvidenceFailures(config: Config, artifacts: unknown[]): string[] {
   const byTask = new Map(artifacts.flatMap((artifact) => isRecord(artifact) && typeof artifact.task_id === "string" ? [[artifact.task_id, artifact]] : []));
   return [
+    ...(config.tools.parserOracleCheck ? unusableArtifact(byTask.get("quality.parser_oracle"), "status", ["pass", "warn"], "parser oracle") : []),
     ...(config.tools.qmlformatCheck ? unusableArtifact(byTask.get("quality.format"), "status", ["pass", "warn"], "qmlformat check") : []),
     ...(config.tools.cmakeCheck ? unusableArtifact(byTask.get("quality.build_evidence"), "status", ["pass", "warn", "failed"], "CMake configure/build") : []),
     ...(config.reports.tests ? unusableArtifact(byTask.get("correctness.catalog"), "execution_status", ["complete", "failed"], "test report") : []),
@@ -275,7 +279,7 @@ function configForWorktree(config: Config, worktree: string, temp: string): Conf
     outputDir: path.join(temp, "out"),
     qmllintReport: null,
     qmllintCommand: null,
-    tools: { ...config.tools, cmakeCheck: false, qmllintCheck: false, qmlformatCheck: false, qmltestrunnerCheck: false, runtimeCheck: false, qmlProfilerCheck: false },
+    tools: { ...config.tools, parserOracleCheck: false, cmakeCheck: false, qmllintCheck: false, qmlformatCheck: false, qmltestrunnerCheck: false, runtimeCheck: false, qmlProfilerCheck: false },
     reports: { tests: null, runtimeWarnings: null, qmlProfiler: null },
   };
 }
@@ -290,7 +294,7 @@ function readBaseline(file: string | null): Set<string> {
 
 function writeBaseline(file: string, findings: Finding[]): void {
   fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
-  fs.writeFileSync(file, `${JSON.stringify({ schema_version: "0.3.0", generated_at: new Date().toISOString(), findings: findings.map((finding) => ({ id: finding.id, fingerprint: finding.fingerprint, kind: finding.kind, file: finding.file, line: finding.line })) }, null, 2)}\n`);
+  fs.writeFileSync(file, `${JSON.stringify({ schema_version: ARTIFACT_SCHEMA_VERSION, generated_at: new Date().toISOString(), findings: findings.map((finding) => ({ id: finding.id, fingerprint: finding.fingerprint, kind: finding.kind, file: finding.file, line: finding.line })) }, null, 2)}\n`);
 }
 
 function findingKey(finding: Finding): string {

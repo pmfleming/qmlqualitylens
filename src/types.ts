@@ -11,6 +11,10 @@ export type PolicyConfig = { requireQmllint: boolean; newCodeOnly: boolean; fail
 type RuleOverride = { enabled?: boolean; enforcement?: Enforcement };
 type TypeRolesConfig = { interactiveTypes: string[]; layoutTypes: string[]; delegateOwnerTypes: string[] };
 type ToolsConfig = {
+  parserOracleCheck: boolean;
+  parserOracleQmldomCommand: string;
+  parserOracleTreeSitter: boolean;
+  parserOracleTimeoutMs: number;
   cmakeCommand: string;
   cmakeCheck: boolean;
   cmakeBuildDir: string;
@@ -70,6 +74,7 @@ export type RawConfig = {
   process_boundary?: Partial<ProcessBoundaryConfig>;
   policy?: { require_qmllint?: boolean; new_code_only?: boolean; fail_on?: Enforcement[]; incomplete?: "fail" | "warn" | "pass" };
   tools?: {
+    parser_oracle?: { check?: boolean; qmldom_command?: string; tree_sitter?: boolean; timeout_ms?: number };
     cmake?: { command?: string; check?: boolean; build_dir?: string; configure?: boolean; configure_arguments?: string[]; build_targets?: string[]; build_arguments?: string[]; timeout_ms?: number; working_directory?: string; environment?: Record<string, string>; redact_patterns?: string[] };
     qmllint?: { command?: string; check?: boolean; arguments?: string[]; import_paths?: string[]; qmltypes?: string[]; use_environment_imports?: boolean };
     qmlformat?: { command?: string; check?: boolean };
@@ -231,6 +236,14 @@ export type QmllintFinding = {
 
 export type FindingAuthority = { kind: "qt" | "project" | "tool" | "lens"; name: string; url?: string; rule?: string };
 
+export type RuleCoverageRecord = {
+  rule: string;
+  applicable: number;
+  evaluated: number;
+  skipped: number;
+  skip_reasons: Record<string, number>;
+};
+
 export type Finding = {
   id: string;
   kind: string;
@@ -247,6 +260,7 @@ export type Finding = {
   enforcement?: Enforcement;
   category?: FindingCategory;
   authority?: FindingAuthority;
+  semantic_anchor?: string;
   fingerprint?: string;
   suppressed?: boolean;
   suppression_reason?: string;
@@ -255,7 +269,7 @@ export type Finding = {
 export type ScoreBreakdown = { overall: number; complexity: number; cognitive: number; effort: number; locality: number; leverage: number; duplication: number; size: number; styling: number; boundary: number };
 
 export type AnalysisArtifact = {
-  schema_version: "0.3.0";
+  schema_version: string;
   task_id: "quality.qml";
   project: {
     name: string;

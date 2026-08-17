@@ -2,16 +2,19 @@ import fs from "node:fs";
 import path from "node:path";
 import { detectClones } from "./clone-detector.js";
 import { discoverSourceFiles } from "./file-walk.js";
+import { attachSemanticAnchors } from "./finding-identity.js";
 import { boundedScore, complexityForCode, countMatches, lineNumberAt, locFor, stripComments, stripCommentsAndStrings } from "./metrics.js";
 import { isProcessBoundaryFile } from "./config.js";
 import { baseTypeName, matchesAnyConfiguredTypeName } from "./qml-model.js";
 import { parseQmlDocument } from "./qml-parser.js";
 import type { QmlDocument, QmlExecutableNode } from "./qml-parser-types.js";
 import { buildProjectResolution, type ProjectResolution } from "./qml-resolution.js";
-import { qmlSemanticFindings } from "./qml-rules.js";
+import { qmlSemanticFindings, qmlSemanticRuleCoverage } from "./qml-rules.js";
 import { loadQmllintResult, qmllintDiagnostic, type QmllintResult } from "./qmllint.js";
 import { deduplicateToolFindings, enrichFindings } from "./rules.js";
 import { applySuppressions, staleSuppressionFindings } from "./suppressions.js";
+import { buildTypeEvidence, type TypeEvidence } from "./type-evidence.js";
+import { ARTIFACT_SCHEMA_VERSION } from "./version.js";
 import type {
   AnalysisArtifact,
   BindingRecord,
@@ -22,6 +25,7 @@ import type {
   Finding,
   FunctionRecord,
   QmllintFinding,
+  RuleCoverageRecord,
   ScoreBreakdown,
   SourceFile,
 } from "./types.js";
@@ -31,6 +35,8 @@ export type AnalysisContext = {
   sources: SourceFile[];
   qmlDocuments: Array<{ file: string; document: QmlDocument }>;
   resolution: ProjectResolution;
+  typeEvidence: TypeEvidence;
+  ruleCoverage: RuleCoverageRecord[];
   files: FileRecord[];
   components: ComponentRecord[];
   functions: FunctionRecord[];
@@ -48,6 +54,7 @@ export function createAnalysisContext(config: Config): AnalysisContext {
   const qmlDocuments = sources
     .filter((file) => file.kind === "qml")
     .map((file) => ({ file: file.relativePath, document: parseQmlDocument(file.text, file.relativePath) }));
+  const typeEvidence = buildTypeEvidence(config, qmlDocuments);
   const documentByFile = new Map(qmlDocuments.map((entry) => [entry.file, entry.document]));
   const files = sources.map((file) => analyzeFile(file, documentByFile.get(file.relativePath) ?? null, config));
   const components = files.flatMap((file) => file.qmlComponent ? [file.qmlComponent] : []);
@@ -59,16 +66,17 @@ export function createAnalysisContext(config: Config): AnalysisContext {
   const qmllint = loadQmllintResult(config, sources.filter((source) => source.kind === "qml" || source.kind === "js").map((source) => source.relativePath));
   const qmllintFindings = qmllint.findings;
   const clones = detectClones(sources, config.thresholds.cloneWindow);
-  const baseContext: AnalysisContext = { config, sources, qmlDocuments, resolution, files, components, functions, bindings, parserDiagnostics, qmllint, qmllintFindings, clones, findings: [], scores: emptyScores() };
-  const rawFindings = deduplicateToolFindings(enrichFindings([
+  const baseContext: AnalysisContext = { config, sources, qmlDocuments, resolution, typeEvidence, ruleCoverage: [], files, components, functions, bindings, parserDiagnostics, qmllint, qmllintFindings, clones, findings: [], scores: emptyScores() };
+  const candidates = attachSemanticAnchors([
     ...inputFindings(config, sources),
     ...deriveFindings(config, files, components, functions, bindings, clones, resolution),
     ...qmlSemanticFindings(baseContext),
     ...qmllintFindings.map(qmllintDiagnostic),
-  ], config));
+  ], qmlDocuments);
+  const rawFindings = deduplicateToolFindings(enrichFindings(candidates, config));
   const findings = [...applySuppressions(rawFindings, config), ...enrichFindings(staleSuppressionFindings(rawFindings, config), config)];
   const scores = scoreProject(config, files, components, functions, clones, findings);
-  return { ...baseContext, findings, scores };
+  return { ...baseContext, ruleCoverage: qmlSemanticRuleCoverage(baseContext), findings, scores };
 }
 
 export function analyzeProject(config: Config): AnalysisArtifact {
@@ -81,7 +89,7 @@ export function analyzeProject(config: Config): AnalysisArtifact {
 export function legacyQualityArtifact(context: AnalysisContext): AnalysisArtifact {
   const { config, files, components, functions, bindings, parserDiagnostics, clones, findings, scores } = context;
   return {
-    schema_version: "0.3.0",
+    schema_version: ARTIFACT_SCHEMA_VERSION,
     task_id: "quality.qml",
     project: { name: config.projectName, root: config.projectRoot },
     generated_at: new Date().toISOString(),

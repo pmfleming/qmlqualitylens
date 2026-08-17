@@ -14,7 +14,10 @@ import { measureQmlHealth } from "./qml-health-measure.js";
 import { measureQmllint } from "./measures/qmllint.js";
 import { measureResolution } from "./measures/resolution.js";
 import { measureRuntimePerformance, measureRuntimeWarnings } from "./measures/runtime.js";
+import { measureParserOracle } from "./measures/parser-oracle.js";
 import { measureSemanticRules } from "./measures/semantic.js";
+import { measureTypeEvidence } from "./measures/type-evidence.js";
+import { ARTIFACT_SCHEMA_VERSION } from "./version.js";
 
 type TaskDefinition = {
   id: string;
@@ -60,6 +63,22 @@ export const TASKS: TaskDefinition[] = [
     handler: measureResolution,
   },
   {
+    id: "quality.type_evidence",
+    category: "quality",
+    title: "QML type evidence",
+    artifact: "type_evidence.json",
+    description: "Builds an inheritance/member model from project components and configured qmltypes metadata.",
+    handler: measureTypeEvidence,
+  },
+  {
+    id: "quality.parser_oracle",
+    category: "quality",
+    title: "QML parser oracle",
+    artifact: "parser_oracle.json",
+    description: "Optionally compares the internal parser with Qt qmldom and tree-sitter-qmljs parse evidence.",
+    handler: measureParserOracle,
+  },
+  {
     id: "quality.qmllint",
     category: "quality",
     title: "qmllint diagnostics",
@@ -89,7 +108,7 @@ export const TASKS: TaskDefinition[] = [
     title: "QML semantic rules",
     artifact: "semantic_rules.json",
     description: "Reports binding loss, binding cycles, layout conflicts, unused public API, Connections mismatches, and performance smells.",
-    dependsOn: ["map.resolution"],
+    dependsOn: ["map.resolution", "quality.type_evidence"],
     handler: measureSemanticRules,
   },
   {
@@ -157,7 +176,7 @@ export const TASKS: TaskDefinition[] = [
     title: "QML quality contract",
     artifact: "quality_contract.json",
     description: "Primary CI contract separating verified, semantic, heuristic, and incomplete evidence.",
-    dependsOn: ["quality.qmllint", "quality.build_evidence", "quality.format", "quality.semantic_rules", "correctness.catalog", "correctness.runtime_warnings", "performance.runtime"],
+    dependsOn: ["quality.type_evidence", "quality.parser_oracle", "quality.qmllint", "quality.build_evidence", "quality.format", "quality.semantic_rules", "correctness.catalog", "correctness.runtime_warnings", "performance.runtime"],
     handler: measureQualityContract,
   },
   {
@@ -179,7 +198,7 @@ export function findTask(id: string): TaskDefinition | undefined {
 
 export function catalogForConfig(config: Config) {
   return {
-    schema_version: "0.3.0",
+    schema_version: ARTIFACT_SCHEMA_VERSION,
     lens: "qmlqualitylens",
     project_name: config.projectName,
     project_root: config.projectRoot,

@@ -1,12 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
+import { ARTIFACT_SCHEMA_VERSION } from "../version.js";
 import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding, type MeasureJsonValue as JsonValue } from "./foundation.js";
 
 type MeasureArtifact = Record<string, JsonValue>;
 
 export function baseArtifact(context: AnalysisContext, taskId: string, command: string): MeasureArtifact {
   return {
-    schema_version: "0.3.0",
+    schema_version: ARTIFACT_SCHEMA_VERSION,
     task_id: taskId,
     project: {
       name: context.config.projectName,

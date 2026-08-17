@@ -59,6 +59,10 @@ export function loadConfig(configPath: string | null): Config {
       incomplete: raw.policy?.incomplete ?? DEFAULT_POLICY.incomplete,
     },
     tools: {
+      parserOracleCheck: raw.tools?.parser_oracle?.check ?? false,
+      parserOracleQmldomCommand: raw.tools?.parser_oracle?.qmldom_command ?? "qmldom",
+      parserOracleTreeSitter: raw.tools?.parser_oracle?.tree_sitter ?? false,
+      parserOracleTimeoutMs: raw.tools?.parser_oracle?.timeout_ms ?? 30_000,
       cmakeCommand: raw.tools?.cmake?.command ?? "cmake",
       cmakeCheck: raw.tools?.cmake?.check ?? false,
       cmakeBuildDir: resolveFrom(projectRoot, raw.tools?.cmake?.build_dir ?? "build"),
@@ -129,6 +133,7 @@ export function starterConfig(): RawConfig {
     qmllint_report: "target/qmllint.json",
     policy: { require_qmllint: false, new_code_only: true, fail_on: ["block"], incomplete: "warn" },
     tools: {
+      parser_oracle: { check: false, qmldom_command: "qmldom", tree_sitter: false, timeout_ms: 30000 },
       cmake: { command: "cmake", check: false, build_dir: "build", configure: false, configure_arguments: [], build_targets: ["all_qmllint"], build_arguments: [], timeout_ms: 600000, working_directory: ".", environment: {}, redact_patterns: [] },
       qmllint: { command: "qmllint", check: false, arguments: [], import_paths: [], qmltypes: [], use_environment_imports: false },
       qmlformat: { command: "qmlformat", check: false },
@@ -255,8 +260,9 @@ function validatePolicy(value: unknown, errors: string[]): void {
 }
 
 function validateTools(value: unknown, errors: string[]): void {
-  validateObjectKeys(value, "tools", new Set(["cmake", "qmllint", "qmlformat", "qmltestrunner", "runtime", "qml_profiler"]), errors);
+  validateObjectKeys(value, "tools", new Set(["parser_oracle", "cmake", "qmllint", "qmlformat", "qmltestrunner", "runtime", "qml_profiler"]), errors);
   if (!isRecord(value)) return;
+  validateParserOracle(value.parser_oracle, errors);
   validateCmakeTool(value.cmake, errors);
   validateQmllintTool(value.qmllint, errors);
   validateQmlformatTool(value.qmlformat, errors);
@@ -264,6 +270,14 @@ function validateTools(value: unknown, errors: string[]): void {
   if (isRecord(value.qmltestrunner) && Array.isArray(value.qmltestrunner.arguments) && value.qmltestrunner.arguments.some((argument) => argument === "-o" || argument.startsWith("-o="))) errors.push("tools.qmltestrunner.arguments must not set -o; qmlqualitylens manages the JUnit report");
   validateExecutableTool(value.runtime, "tools.runtime", errors, false);
   validateExecutableTool(value.qml_profiler, "tools.qml_profiler", errors, false);
+}
+
+function validateParserOracle(value: unknown, errors: string[]): void {
+  validateObjectKeys(value, "tools.parser_oracle", new Set(["check", "qmldom_command", "tree_sitter", "timeout_ms"]), errors);
+  if (!isRecord(value)) return;
+  for (const key of ["check", "tree_sitter"]) if (value[key] !== undefined && typeof value[key] !== "boolean") errors.push(`tools.parser_oracle.${key} must be a boolean`);
+  if (value.qmldom_command !== undefined && !isNonEmptyString(value.qmldom_command)) errors.push("tools.parser_oracle.qmldom_command must be a non-empty string");
+  if (value.timeout_ms !== undefined && (typeof value.timeout_ms !== "number" || !Number.isInteger(value.timeout_ms) || value.timeout_ms <= 0)) errors.push("tools.parser_oracle.timeout_ms must be a positive integer");
 }
 
 function validateCmakeTool(value: unknown, errors: string[]): void {

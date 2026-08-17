@@ -89,7 +89,7 @@ Discovery, execution, and passing are represented separately. Malformed reports,
 }
 ```
 
-The importer requires a named scenario, Qt version, platform, and at least one measured frame or event. `tools.qml_profiler.check` may run an explicitly configured export adapter; it receives the target normalized report path in `QMLQUALITYLENS_REPORT`. It reports frame percentiles, frames over 16.67 ms, and event totals/maxima. Configured budgets are incomplete when their scenario or required measurement is absent. The 16.67 ms count is diagnostic context, not a universal budget. Chrome trace JSON can be converted with `scripts/normalize-qml-profile.mjs`. Native binary QML Profiler formats should normalize into this interchange only after format-specific calibration.
+The importer requires a named scenario, Qt version, platform, and at least one measured frame or event. `tools.qml_profiler.check` may run an explicitly configured export adapter; it receives the target normalized report path in `QMLQUALITYLENS_REPORT`. It reports frame percentiles, scenario-relative frames over budget, and event totals/maxima. A scenario supplies `environment.frame_budget_ms` or `environment.refresh_hz`; without either, over-budget frame counts remain unknown. Configured budgets are incomplete when their scenario or required measurement is absent. Chrome trace JSON can be converted with `scripts/normalize-qml-profile.mjs`. Native binary QML Profiler formats should normalize into this interchange only after format-specific calibration.
 
 ## CI examples
 

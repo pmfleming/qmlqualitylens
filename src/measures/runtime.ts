@@ -102,7 +102,8 @@ type RuntimeScenario = {
   environment: Record<string, unknown>;
   frame_count: number;
   frame_time_ms: { p50: number | null; p95: number | null; p99: number | null; max: number | null };
-  dropped_frames: number;
+  frame_budget_ms: number | null;
+  frames_over_budget: number | null;
   events: Record<string, { count: number; total_ms: number; max_ms: number }>;
   hotspots: Array<{ category: string; duration_ms: number; file?: string; line?: number }>;
 };
@@ -124,7 +125,15 @@ function normalizeScenario(value: unknown): RuntimeScenario[] {
   const measuredEvents = Array.isArray(value.events) ? value.events : traceEvents;
   const events = eventSummaries(measuredEvents);
   if (!frames.length && !Object.keys(events).length) return [];
-  return [{ scenario: value.scenario, environment: value.environment, frame_count: frames.length, frame_time_ms: { p50: percentile(frames, 0.5), p95: percentile(frames, 0.95), p99: percentile(frames, 0.99), max: frames.at(-1) ?? null }, dropped_frames: frames.filter((duration) => duration > 16.67).length, events, hotspots: eventHotspots(measuredEvents) }];
+  const frameBudget = scenarioFrameBudget(value.environment);
+  return [{ scenario: value.scenario, environment: value.environment, frame_count: frames.length, frame_time_ms: { p50: percentile(frames, 0.5), p95: percentile(frames, 0.95), p99: percentile(frames, 0.99), max: frames.at(-1) ?? null }, frame_budget_ms: frameBudget, frames_over_budget: frameBudget === null ? null : frames.filter((duration) => duration > frameBudget).length, events, hotspots: eventHotspots(measuredEvents) }];
+}
+
+function scenarioFrameBudget(environment: Record<string, unknown>): number | null {
+  const explicit = support.numberValue(environment.frame_budget_ms) ?? support.numberValue(environment.frameBudgetMs);
+  if (explicit !== null && explicit > 0) return explicit;
+  const refresh = support.numberValue(environment.refresh_hz) ?? support.numberValue(environment.refreshHz);
+  return refresh !== null && refresh > 0 ? round(1000 / refresh) : null;
 }
 
 function frameDurations(frames: unknown, traceEvents: unknown[]): number[] {

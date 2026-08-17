@@ -1,7 +1,9 @@
 import type { AnalysisContext } from "./analyzer.js";
 import { lineNumberAt, stripCommentsAndStrings } from "./metrics.js";
 import { baseTypeName } from "./qml-model.js";
-import type { Finding } from "./types.js";
+import { RULES } from "./rules.js";
+import { inheritedSignals, typeIsA } from "./type-evidence.js";
+import type { Finding, RuleCoverageRecord } from "./types.js";
 
 const ASSIGNMENT_PATTERN = /\b([A-Za-z_]\w*)(?:\.([A-Za-z_]\w*))?\s*=(?!=|>)/g;
 const DECLARATION_PREFIX = /\b(?:const|let|var|property)\s+$/;
@@ -24,6 +26,37 @@ export function qmlSemanticFindings(context: AnalysisContext): Finding[] {
     ...context.qmlDocuments.flatMap((entry) => functionConventionFindings(entry)),
     ...context.qmlDocuments.flatMap((entry) => performanceSmellFindings(entry)),
   ];
+}
+
+export function qmlSemanticRuleCoverage(context: AnalysisContext): RuleCoverageRecord[] {
+  const qmlRules = RULES.filter((rule) => rule.id.startsWith("qml.") && rule.evidence !== "tool");
+  const cleanFiles = new Set(context.qmlDocuments.filter((entry) => entry.document.diagnostics.length === 0).map((entry) => entry.file));
+  return qmlRules.map((rule) => {
+    if (rule.id === "qml.connection_signal_mismatch" || rule.id === "qml.connections.unknown_target") return connectionRuleCoverage(rule.id, context);
+    const applicable = context.qmlDocuments.length;
+    const evaluated = cleanFiles.size;
+    return { rule: rule.id, applicable, evaluated, skipped: applicable - evaluated, skip_reasons: applicable === evaluated ? {} : { parser_diagnostic: applicable - evaluated } };
+  });
+}
+
+function connectionRuleCoverage(rule: string, context: AnalysisContext): RuleCoverageRecord {
+  let applicable = 0, evaluated = 0;
+  const reasons: Record<string, number> = {};
+  for (const entry of context.qmlDocuments) {
+    const ids = new Map(entry.document.objects.flatMap((object) => object.idName ? [[object.idName, object]] : []));
+    for (const connection of entry.document.objects.filter((object) => baseTypeName(object.typeName) === "Connections")) {
+      applicable += 1;
+      const target = targetExpression(connection)?.match(/^([A-Za-z_]\w*)$/)?.[1];
+      if (!target) increment(reasons, "dynamic_target");
+      else if (!ids.has(target)) rule === "qml.connections.unknown_target" ? evaluated += 1 : increment(reasons, "unknown_target");
+      else evaluated += 1;
+    }
+  }
+  return { rule, applicable, evaluated, skipped: applicable - evaluated, skip_reasons: reasons };
+}
+
+function increment(record: Record<string, number>, key: string): void {
+  record[key] = (record[key] ?? 0) + 1;
 }
 
 function bindingLossFindings({ file, document }: AnalysisContext["qmlDocuments"][number]): Finding[] {
@@ -162,7 +195,7 @@ function layoutConflictFindings({ file, document }: AnalysisContext["qmlDocument
   return document.objects.flatMap((object) => {
     const names = new Set(object.bindings.map((binding) => binding.propertyPath));
     const parent = object.parentObjectId ? objectById.get(object.parentObjectId) : null;
-    const layoutManaged = Boolean(parent && context.config.typeRoles.layoutTypes.some((type) => baseTypeName(type) === baseTypeName(parent.typeName)));
+    const layoutManaged = Boolean(parent && configuredRole(context, parent.typeName, context.config.typeRoles.layoutTypes));
     const hasAnchors = hasPrefix(names, "anchors.");
     const hasLayout = hasPrefix(names, "Layout.");
     const contradictoryGeometry = hasContradictoryGeometry(names);
@@ -214,22 +247,23 @@ function connectionMismatchFindings(entry: AnalysisContext["qmlDocuments"][numbe
     .filter((object) => baseTypeName(object.typeName) === "Connections")
     .flatMap((connection) => {
       const targetId = targetExpression(connection)?.match(/^([A-Za-z_]\w*)$/)?.[1];
+      if (targetId && !idToObject.has(targetId)) return [finding(`qml.connections.unknown_target.${entry.file}.${connection.line}.${targetId}`, "qml.connections.unknown_target", "high", entry.file, connection.line, `Connections target '${targetId}' is not declared in this component`, "Correct the target id or expose the intended target explicitly; use a suppression only for a documented injected context object.")];
       const targetObject = targetId ? idToObject.get(targetId) : null;
-      const targetFile = targetObject ? resolvedTargetForObject(context, entry.file, targetObject.typeName, targetObject.line) : null;
-      const targetSignals = targetFile ? signalsForComponent(context, targetFile) : null;
-      if (!targetSignals || targetSignals.size === 0) return [];
+      if (!targetObject) return [];
+      const targetFile = resolvedTargetForObject(context, entry.file, targetObject.typeName, targetObject.line);
+      const targetSignals = targetFile ? signalsForComponent(context, targetFile) : inheritedSignals(context.typeEvidence, targetObject.typeName);
+      if (targetSignals.size === 0) return [];
       return connectionHandlerEntries(connection).flatMap((handler) => {
         const signal = signalNameForHandler(handler.name);
-        return signal && !targetSignals.has(signal) ? [finding(`qml.connection_mismatch.${entry.file}.${handler.line}.${handler.name}`, "qml.connection_signal_mismatch", "medium", entry.file, handler.line, `Connections handler '${handler.name}' does not match a signal declared by ${targetObject?.typeName}`, "Rename the handler or add the matching signal to the target component.")] : [];
+        return signal && !targetSignals.has(signal) ? [finding(`qml.connection_mismatch.${entry.file}.${handler.line}.${handler.name}`, "qml.connection_signal_mismatch", "medium", entry.file, handler.line, `Connections handler '${handler.name}' does not match a known signal on ${targetObject.typeName}`, "Rename the handler or add the matching signal to the target component.")] : [];
       });
     });
 }
 
 function delegateStateFindings(entry: AnalysisContext["qmlDocuments"][number], context: AnalysisContext): Finding[] {
   const source = context.sources.find((item) => item.relativePath === entry.file)?.text ?? "";
-  const ownerTypes = new Set(context.config.typeRoles.delegateOwnerTypes.map(baseTypeName));
   return entry.document.objects
-    .filter((owner) => ownerTypes.has(baseTypeName(owner.typeName)))
+    .filter((owner) => configuredRole(context, owner.typeName, context.config.typeRoles.delegateOwnerTypes))
     .flatMap((owner) => owner.bindings.filter((binding) => leafName(binding.propertyPath) === "delegate").flatMap((binding) => delegateBindingFindings(entry.file, source, owner, binding)));
 }
 
@@ -319,24 +353,23 @@ function internationalizationFindings({ file, document }: AnalysisContext["qmlDo
 
 function accessibilityFindings({ file, document }: AnalysisContext["qmlDocuments"][number], context: AnalysisContext): Finding[] {
   const objects = new Map(document.objects.map((object) => [object.objectId, object]));
-  const interactive = new Set(context.config.typeRoles.interactiveTypes.map(baseTypeName));
-  return document.objects.flatMap((object) => accessibilityForObject(file, object, object.parentObjectId ? objects.get(object.parentObjectId) : null, interactive));
+  return document.objects.flatMap((object) => accessibilityForObject(file, object, object.parentObjectId ? objects.get(object.parentObjectId) : null, context));
 }
 
-function accessibilityForObject(file: string, object: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number], parent: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number] | null | undefined, interactive: Set<string>): Finding[] {
-  return [iconOnlyFinding(file, object, interactive), pointerOnlyFinding(file, object, parent, interactive), popupEscapeFinding(file, object)].filter(isFinding);
+function accessibilityForObject(file: string, object: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number], parent: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number] | null | undefined, context: AnalysisContext): Finding[] {
+  return [iconOnlyFinding(file, object, context), pointerOnlyFinding(file, object, parent, context), popupEscapeFinding(file, object)].filter(isFinding);
 }
 
-function iconOnlyFinding(file: string, object: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number], interactive: Set<string>): Finding | null {
+function iconOnlyFinding(file: string, object: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number], context: AnalysisContext): Finding | null {
   const names = new Set(object.bindings.map((binding) => binding.propertyPath));
-  if (!interactive.has(baseTypeName(object.typeName)) || (!names.has("icon.source") && !names.has("icon.name")) || hasMeaningfulText(object) || names.has("Accessible.name") || names.has("Accessible.description")) return null;
+  if (!configuredRole(context, object.typeName, context.config.typeRoles.interactiveTypes) || (!names.has("icon.source") && !names.has("icon.name")) || hasMeaningfulText(object) || names.has("Accessible.name") || names.has("Accessible.description")) return null;
   return finding(`qml.accessibility.icon_only.${file}.${object.line}`, "qml.accessibility.icon_only_control", "low", file, object.line, `${object.typeName} appears to be icon-only without an accessible name`, "Set Accessible.name or meaningful text so screen-reader users can identify the control.");
 }
 
-function pointerOnlyFinding(file: string, object: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number], parent: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number] | null | undefined, interactive: Set<string>): Finding | null {
+function pointerOnlyFinding(file: string, object: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number], parent: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number] | null | undefined, context: AnalysisContext): Finding | null {
   const pointerHandler = object.handlers.some((handler) => /onClicked|onPressed|onReleased/.test(handler.name));
   const keyboardSupport = parent?.bindings.some((binding) => /^(?:Keys\.on|activeFocusOnTab|focus)/.test(binding.propertyPath));
-  if (baseTypeName(object.typeName) !== "MouseArea" || !pointerHandler || !parent || interactive.has(baseTypeName(parent.typeName)) || keyboardSupport) return null;
+  if (baseTypeName(object.typeName) !== "MouseArea" || !pointerHandler || !parent || configuredRole(context, parent.typeName, context.config.typeRoles.interactiveTypes) || keyboardSupport) return null;
   return finding(`qml.accessibility.pointer_keyboard.${file}.${object.line}`, "qml.accessibility.pointer_without_keyboard", "low", file, object.line, "Custom pointer interaction has no apparent keyboard activation on its parent", "Use a Qt Quick Control or add focus/tab behavior and Enter/Space key activation; verify manually with keyboard and assistive technology.");
 }
 
@@ -468,7 +501,15 @@ function targetExpression(object: AnalysisContext["qmlDocuments"][number]["docum
 
 function signalsForComponent(context: AnalysisContext, file: string): Set<string> {
   const root = context.qmlDocuments.find((entry) => entry.file === file)?.document.root;
-  return new Set(root?.signals.map((signal) => signal.name) ?? []);
+  return new Set([...(root?.signals.map((signal) => signal.name) ?? []), ...inheritedSignals(context.typeEvidence, pathTypeName(file))]);
+}
+
+function pathTypeName(file: string): string {
+  return file.split("/").at(-1)?.replace(/\.qml$/, "") ?? file;
+}
+
+function configuredRole(context: AnalysisContext, typeName: string, configuredTypes: string[]): boolean {
+  return configuredTypes.some((configured) => baseTypeName(configured) === baseTypeName(typeName) || typeIsA(context.typeEvidence, typeName, configured));
 }
 
 function apiNameForBinding(path: string): string {

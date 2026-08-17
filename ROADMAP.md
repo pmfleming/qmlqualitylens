@@ -1,5 +1,7 @@
 # QML Quality Lens Roadmap
 
+Version 0.4 adds project/`.qmltypes` type evidence, parser-oracle calibration, rule evaluation coverage, semantic moved-finding identities, inherited type roles, and refresh-aware frame evidence.
+
 The implemented v0.2 research plan is in [`docs/qml-quality-improvement-plan.md`](docs/qml-quality-improvement-plan.md). Version 0.3 adds opt-in CMake builds, Qt Quick Test and runtime-smoke execution, hardened process controls, Chrome-trace normalization, a real Qt integration fixture, and a documented Shelllist trial. It introduced evidence classification, correct `qmllint` gating, incomplete-check reporting, policy-based audit verdicts, report ingestion, UX/performance checks, profiles, SARIF, and calibration. This checklist remains the historical feature roadmap and identifies areas for deeper calibration.
 
 ## Phase 1: MVP static artifact
@@ -58,5 +60,5 @@ The implemented v0.2 research plan is in [`docs/qml-quality-improvement-plan.md`
 - [x] QtQuick, Kirigami, Quickshell, generic, and custom profile scaffolding.
 - [x] Initial Quickshell-specific Process/service checks.
 - [x] Initial Kirigami/Qt Controls import and convention support.
-- Optional tree-sitter-QML integration if a suitable grammar is available.
+- [x] Optional `qmldom` and tree-sitter-QML parser oracle integration, while retaining the dependency-free internal parser.
 - Dashboard/project-management-board catalog compatibility.

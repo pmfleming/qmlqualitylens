@@ -1,6 +1,6 @@
 {
   "name": "qmlqualitylens",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Evidence-aware quality lens for QML, Qt Quick, and Quickshell projects.",
   "type": "module",
   "main": "./dist/src/cli.js",
@@ -49,6 +49,20 @@
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^25.0.0",
+    "tree-sitter": "^0.21.1",
+    "tree-sitter-qmljs": "^0.3.1",
     "typescript": "^6.0.0"
+  },
+  "peerDependencies": {
+    "tree-sitter": "^0.21.0",
+    "tree-sitter-qmljs": "^0.3.1"
+  },
+  "peerDependenciesMeta": {
+    "tree-sitter": {
+      "optional": true
+    },
+    "tree-sitter-qmljs": {
+      "optional": true
+    }
   }
 }

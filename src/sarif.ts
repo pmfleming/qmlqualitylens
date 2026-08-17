@@ -1,7 +1,8 @@
 import { ruleFor } from "./rules.js";
 import type { Finding } from "./types.js";
+import { LENS_VERSION } from "./version.js";
 
-export function sarifForFindings(findings: Finding[], toolVersion = "0.3.0") {
+export function sarifForFindings(findings: Finding[], toolVersion = LENS_VERSION) {
   const active = findings.filter((finding) => !finding.suppressed);
   const kinds = [...new Set(active.map((finding) => finding.kind))];
   return {

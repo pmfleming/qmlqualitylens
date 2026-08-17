@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { executeTool, publicToolExecution, toolVersion, type ToolExecution } from "../tool-execution.js";
 import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding } from "./foundation.js";
+import { ARTIFACT_SCHEMA_VERSION } from "../version.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 
 export function measureCorrectnessCatalog(config: Config, command: string, context: AnalysisContext) {
@@ -29,7 +30,7 @@ export function measureCorrectnessCatalog(config: Config, command: string, conte
     findings,
   };
   writeArtifact(config, "correctness_review.json", artifact);
-  writeArtifact(config, "test_catalog.json", { schema_version: "0.3.0", project: { name: config.projectName, root: config.projectRoot }, tests });
+  writeArtifact(config, "test_catalog.json", { schema_version: ARTIFACT_SCHEMA_VERSION, project: { name: config.projectName, root: config.projectRoot }, tests });
   writeArtifact(config, "test_evidence.json", { ...baseArtifact(context, "correctness.test_evidence", command), summary: artifact.summary, execution: artifact.execution, findings: findings.filter((finding) => finding.kind === "tests.failure" || finding.kind === "tests.execution_failed") });
   return artifact;
 }

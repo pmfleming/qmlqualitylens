@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import type { AnalysisContext } from "./analyzer.js";
 import type { Config, JsonValue } from "./types.js";
+import { LENS_VERSION } from "./version.js";
 
 export function provenance(config: Config, command: string): Record<string, JsonValue> {
   return {
@@ -9,7 +10,7 @@ export function provenance(config: Config, command: string): Record<string, Json
     config_path: config.configPath,
     project_root: config.projectRoot,
     lens: "qmlqualitylens",
-    lens_version: "0.3.0",
+    lens_version: LENS_VERSION,
   };
 }
 

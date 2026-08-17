@@ -30,6 +30,16 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "parser_oracle": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "check": { "type": "boolean" },
+            "qmldom_command": { "type": "string", "minLength": 1 },
+            "tree_sitter": { "type": "boolean" },
+            "timeout_ms": { "type": "integer", "exclusiveMinimum": 0 }
+          }
+        },
         "cmake": {
           "type": "object",
           "additionalProperties": false,

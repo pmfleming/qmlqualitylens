@@ -22,7 +22,9 @@ The v0.3 analyzer retains a small QML lexer and parser implemented across `src/q
 - `formatting.json`: optional non-mutating `qmlformat` comparison with tool version and discovered `.qmlformat.ini` provenance
 - `build_evidence.json`: discovered CMake `qt_add_qml_module` integration plus optional configure/build execution, normalized diagnostics, commands, exit codes, and bounded output tails
 - `resolution.json`: project-wide symbol table, qmldir modules, resolved imports/component uses, and unresolved references
-- `semantic_rules.json`: binding loss/cycles, layout conflicts, unused public API, Connections mismatches, and performance smells
+- `type_evidence.json`: project and configured `.qmltypes` inheritance, property, signal, and method evidence
+- `parser_oracle.json`: optional `qmldom` and Tree-sitter differential parser evidence
+- `semantic_rules.json`: binding/layout/API/Connections/performance findings plus applicable/evaluated/skipped counts and skip reasons
 - `qml_health.json`: aggregate QML/Quickshell API, semantic, qmllint, side-effect, and Process-placement rules
 - `locality_metrics.json`: id-coupling, fan-out, and process-boundary locality records
 - `leverage_metrics.json`: component reuse/centrality relative to effort
@@ -38,7 +40,8 @@ The v0.3 analyzer retains a small QML lexer and parser implemented across `src/q
 
 - Node.js 20 or newer (the version required by `package.json`)
 - npm
-- Optional Qt tools only when `qmllint`, `qmlformat`, or oracle calibration is enabled
+- Optional Qt tools only when `qmllint`, `qmlformat`, or `qmldom` parser calibration is enabled
+- Optional `tree-sitter` and `tree-sitter-qmljs` peers only when the Tree-sitter parser oracle is enabled
 
 `qmlqualitylens` is currently consumed from a source checkout or a locally packed/linked package; it is not currently published on npm. From a source checkout:
 
@@ -97,6 +100,12 @@ npm run analyze:shelllist
     "incomplete": "warn"
   },
   "tools": {
+    "parser_oracle": {
+      "check": false,
+      "qmldom_command": "qmldom",
+      "tree_sitter": false,
+      "timeout_ms": 30000
+    },
     "cmake": {
       "command": "cmake",
       "check": false,
@@ -181,7 +190,9 @@ npm run analyze:shelllist
 
 `tools.qmltestrunner.check` executes Qt Quick Test and manages a JUnit output argument at `reports.tests` (or an output-directory default). `tools.runtime.check` executes an explicit smoke scenario and analyzes captured stdout/stderr for QML runtime warnings. `tools.qml_profiler.check` runs a configured profiler/export adapter which must write the documented normalized JSON format to `reports.qml_profiler`; the report path is provided through `QMLQUALITYLENS_REPORT`. Native QML Profiler formats are still not guessed.
 
-All execution is opt-in. CMake configure scripts, builds, tests, and applications can run arbitrary project code or cause external side effects; enable them only for trusted projects and controlled CI environments. Execution adapters support project-relative `working_directory`, string-valued `environment`, positive `timeout_ms`, and regex `redact_patterns`. Output tails are bounded, sensitive-looking command arguments are redacted, and timed-out process groups are terminated. The generated starter leaves every execution check disabled.
+All execution is opt-in. CMake configure scripts, builds, tests, and applications can run arbitrary project code or cause external side effects; enable them only for trusted projects and controlled CI environments.
+
+The parser oracle runs `qmldom --dump-ast` without loading the target application. Set `tools.parser_oracle.tree_sitter` to enable a second parser check. Tree-sitter support is optional: install compatible `tree-sitter` and `tree-sitter-qmljs` packages in the consuming project. The QML grammar treats grouped-property notation ambiguously, so Tree-sitter is calibration/recovery evidence rather than the authoritative Lens AST. Execution adapters support project-relative `working_directory`, string-valued `environment`, positive `timeout_ms`, and regex `redact_patterns`. Output tails are bounded, sensitive-looking command arguments are redacted, and timed-out process groups are terminated. The generated starter leaves every execution check disabled.
 
 Chrome trace exports can be converted to the normalized interchange consumed by `runtime_performance.json`:
 
@@ -219,6 +230,8 @@ qmlqualitylens audit --config qmlqualitylens.config.json \
 ```
 
 ## Next build steps
+
+Version 0.4 adds type evidence, rule-level evaluation coverage, semantic fingerprints, unknown `Connections` target checks, refresh-aware frame evidence, and optional `qmldom`/Tree-sitter parser oracles. See [`docs/migration-0.4.md`](docs/migration-0.4.md).
 
 - Expand parser recovery for malformed JavaScript blocks and uncommon QML grammar edges.
 - Add moved-finding attribution in audit mode.

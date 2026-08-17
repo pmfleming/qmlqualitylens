@@ -29,6 +29,8 @@ export const RULES: RuleDefinition[] = [
   lens("input.missing_source_root", "Missing source root", "correctness", "semantic", "high", "block"),
   lens("input.no_qml_files", "No QML input", "correctness", "semantic", "high", "block"),
   lens("parser.diagnostic", "Parser precision diagnostic", "correctness", "semantic", "medium", "warn"),
+  lens("parser.oracle_disagreement", "Parser oracle disagreement", "correctness", "tool", "medium", "review"),
+  lens("parser.oracle_failure", "Parser oracle failure", "correctness", "tool", "high", "warn"),
   lens("resolution.unresolved_import", "Unresolved import", "correctness", "semantic", "medium", "warn"),
   lens("resolution.unknown_type", "Unknown QML type", "correctness", "semantic", "medium", "warn"),
   lens("qmllint.diagnostic", "qmllint diagnostic", "correctness", "tool", "high", "warn"),
@@ -49,6 +51,7 @@ export const RULES: RuleDefinition[] = [
   qt("qml.layout_conflict.anchors_with_layout", "Anchors on a layout-managed item", "correctness", QT_BEST_PRACTICES),
   qt("qml.layout_conflict.anchors_with_geometry", "Contradictory anchors and geometry", "correctness", QT_BEST_PRACTICES, "semantic", "medium", "warn"),
   lens("qml.connection_signal_mismatch", "Connections handler mismatch", "correctness", "semantic", "high", "warn"),
+  lens("qml.connections.unknown_target", "Connections target is unknown", "correctness", "semantic", "high", "warn"),
   lens("qml.api_surface", "Broad component API", "architecture"),
   lens("qml.alias_leakage", "Internal child alias leakage", "architecture"),
   lens("qml.binding_pressure", "High binding pressure", "architecture"),
@@ -129,6 +132,7 @@ function diagnosticOverlap(kind: string, message: string): boolean {
 }
 
 function fingerprintFor(finding: Finding): string {
-  const stableMessage = finding.message.replace(/\b\d+\b/g, "#");
-  return createHash("sha256").update([finding.kind, finding.file ?? "", String(finding.line ?? 0), String(finding.column ?? 0), stableMessage].join("\u0000")).digest("hex").slice(0, 24);
+  const stableMessage = finding.message.replace(/\b\d+(?:\.\d+)?\b/g, "#");
+  const identity = finding.semantic_anchor ?? stableMessage;
+  return createHash("sha256").update([finding.kind, finding.file ?? "", identity, stableMessage].join("\u0000")).digest("hex").slice(0, 24);
 }

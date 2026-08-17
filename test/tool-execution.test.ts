@@ -38,7 +38,7 @@ test("tool execution applies redaction and terminates timed-out process groups",
 
   const pidFile = path.join(root, "child.pid");
   const sleeper = executable(root, "sleeper.sh", `sleep 30 &\necho $! > ${JSON.stringify(pidFile)}\nwait`);
-  const timedOut = executeTool(sleeper, [], root, 100);
+  const timedOut = executeTool(sleeper, [], root, 500);
   assert.equal(timedOut.status, "incomplete");
   await new Promise((resolve) => setTimeout(resolve, 100));
   const childPid = Number(fs.readFileSync(pidFile, "utf8").trim());
