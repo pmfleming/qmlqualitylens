@@ -2,11 +2,13 @@ import type { AnalysisContext } from "./analyzer.js";
 import { RULES } from "./rules.js";
 import type { Config } from "./types.js";
 import { measureArchitectureMap } from "./measures/architecture.js";
+import { measureBenchmarkPerformance } from "./measures/benchmark.js";
 import { measureBuildEvidence } from "./measures/build.js";
 import { measureCleanup } from "./measures/cleanup.js";
 import { measureClones } from "./measures/clones.js";
 import { measureQualityContract } from "./measures/contract.js";
 import { measureCorrectnessCatalog } from "./measures/correctness.js";
+import { measureCoverageEvidence } from "./measures/coverage.js";
 import { measureFormat } from "./measures/format.js";
 import { measureHotspots } from "./measures/hotspots.js";
 import { measureLeverage, measureLocality, measureQuality } from "./measures/quality.js";
@@ -153,6 +155,15 @@ export const TASKS: TaskDefinition[] = [
     handler: measureCorrectnessCatalog,
   },
   {
+    id: "testing.coverage",
+    category: "testing",
+    title: "QML coverage evidence",
+    artifact: "coverage_evidence.json",
+    description: "Imports Cobertura/Qoverage line evidence and maps observations to QML objects, bindings, and executable blocks.",
+    dependsOn: ["correctness.catalog"],
+    handler: measureCoverageEvidence,
+  },
+  {
     id: "correctness.runtime_warnings",
     category: "correctness",
     title: "Runtime QML warnings",
@@ -171,12 +182,20 @@ export const TASKS: TaskDefinition[] = [
     handler: measureRuntimePerformance,
   },
   {
+    id: "performance.benchmark",
+    category: "performance",
+    title: "QML benchmark regressions",
+    artifact: "benchmark_performance.json",
+    description: "Imports qmlbench JSON, validates noise/environment provenance, and compares matched baselines.",
+    handler: measureBenchmarkPerformance,
+  },
+  {
     id: "quality.contract",
     category: "quality",
     title: "QML quality contract",
     artifact: "quality_contract.json",
     description: "Primary CI contract separating verified, semantic, heuristic, and incomplete evidence.",
-    dependsOn: ["quality.type_evidence", "quality.parser_oracle", "quality.qmllint", "quality.build_evidence", "quality.format", "quality.semantic_rules", "correctness.catalog", "correctness.runtime_warnings", "performance.runtime"],
+    dependsOn: ["quality.type_evidence", "quality.parser_oracle", "quality.qmllint", "quality.build_evidence", "quality.format", "quality.semantic_rules", "correctness.catalog", "testing.coverage", "correctness.runtime_warnings", "performance.runtime", "performance.benchmark"],
     handler: measureQualityContract,
   },
   {
@@ -185,7 +204,7 @@ export const TASKS: TaskDefinition[] = [
     title: "QML architecture map",
     artifact: "map.json",
     description: "Builds a graph of QML files, component uses, imports, id references, roles, and risk.",
-    dependsOn: ["map.resolution", "quality.hotspots", "quality.clones", "quality.qml_health", "quality.semantic_rules", "quality.locality_dynamic", "quality.locality_leverage"],
+    dependsOn: ["map.resolution", "quality.hotspots", "quality.clones", "quality.qml_health", "quality.semantic_rules", "quality.locality_dynamic", "quality.locality_leverage", "testing.coverage"],
     handler: measureArchitectureMap,
   },
 ];

@@ -16,6 +16,16 @@
     "qmllint_command": { "type": "string" },
     "external_modules": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
     "external_types": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+    "entrypoints": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+    "dynamic_component_edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "to"],
+        "properties": { "from": { "type": "string", "minLength": 1 }, "to": { "type": "string", "minLength": 1 } }
+      }
+    },
     "policy": {
       "type": "object",
       "additionalProperties": false,
@@ -136,7 +146,19 @@
       "properties": {
         "tests": { "type": "string" },
         "runtime_warnings": { "type": "string" },
-        "qml_profiler": { "type": "string" }
+        "qml_profiler": { "type": "string" },
+        "coverage": { "type": "string" },
+        "qmlbench": { "type": "string" },
+        "qmlbench_baseline": { "type": "string" }
+      }
+    },
+    "benchmark_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_regression_percent": { "type": "number", "minimum": 0 },
+        "max_coefficient_of_variation": { "type": "number", "minimum": 0 },
+        "min_samples": { "type": "integer", "minimum": 1 }
       }
     },
     "performance_budgets": {

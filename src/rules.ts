@@ -71,6 +71,7 @@ export const RULES: RuleDefinition[] = [
   qt("qml.performance.image_without_source_size", "Potentially expensive image lacks sourceSize", "performance", QT_PERFORMANCE, "heuristic", "low", "review"),
   qt("qml.performance.loader_without_active", "Loader policy is implicit", "performance", QT_PERFORMANCE, "heuristic", "low", "review"),
   lens("correctness.no_qml_tests", "No QML tests discovered", "testing", "heuristic", "low", "review"),
+  lens("coverage.unobserved_high_risk", "High-risk QML was not observed by coverage", "testing", "tool", "medium", "review"),
   lens("tests.failure", "Test failure", "testing", "tool", "high", "block"),
   lens("tests.execution_failed", "Qt Quick Test execution failed", "testing", "tool", "high", "block"),
   lens("runtime.execution_failed", "Configured runtime smoke execution failed", "correctness", "tool", "high", "block"),
@@ -80,6 +81,8 @@ export const RULES: RuleDefinition[] = [
   lens("build.cmake_diagnostic", "CMake configure/build diagnostic", "correctness", "tool", "high", "warn"),
   lens("build.cmake_failed", "CMake configure/build failed", "correctness", "tool", "high", "block"),
   lens("runtime.performance_budget", "Runtime performance budget exceeded", "performance", "tool", "high", "warn"),
+  lens("runtime.benchmark_noise", "QML benchmark evidence is noisy", "performance", "tool", "high", "warn"),
+  lens("runtime.benchmark_regression", "QML benchmark regression", "performance", "tool", "high", "warn"),
 ];
 
 const RULE_BY_ID = new Map(RULES.map((rule) => [rule.id, rule]));

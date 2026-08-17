@@ -36,11 +36,19 @@ type ComponentUseResolution = {
   unresolved: boolean;
 };
 
+export type ReachabilityEdge = { from: string; to: string; kind: "component_use" | "loader_source" | "source_component" | "configured_dynamic"; line?: number };
+
 export type ProjectResolution = {
   componentsByName: Map<string, string>;
   ambiguousComponentNames: Map<string, string[]>;
   publicFiles: Set<string>;
   referencedFiles: Set<string>;
+  entrypoints: Set<string>;
+  reachableFiles: Set<string>;
+  unreachableFiles: Set<string>;
+  usagePaths: Map<string, string[]>;
+  reachabilityStatus: "available" | "no_entrypoints";
+  reachabilityEdges: ReachabilityEdge[];
   qmldirModules: QmldirModule[];
   imports: ImportResolution[];
   componentUses: ComponentUseResolution[];
@@ -75,11 +83,24 @@ export function buildProjectResolution(sources: SourceFile[], documents: QmlDocu
   const referencedFiles = new Set(componentUses.flatMap((use) => use.target ? [use.target] : []));
   const publicFiles = publicComponentFiles(qmldirModules, sourcePaths);
   for (const component of components) if (isShellEntrypoint(component.file)) publicFiles.add(component.file);
+  const entrypoints = discoverEntrypoints(components, config, sourcePaths);
+  const dynamicEdges = discoverDynamicEdges(documents, componentNames.unique, sourcePaths, config);
+  const reachabilityEdges: ReachabilityEdge[] = [
+    ...componentUses.flatMap((use): ReachabilityEdge[] => use.target && use.target !== use.from ? [{ from: use.from, to: use.target, kind: "component_use", line: use.line }] : []),
+    ...dynamicEdges,
+  ];
+  const reachability = computeReachability(entrypoints, components.map((component) => component.file), reachabilityEdges);
   return {
     componentsByName,
     ambiguousComponentNames: componentNames.ambiguous,
     publicFiles,
     referencedFiles,
+    entrypoints,
+    reachableFiles: reachability.reachable,
+    unreachableFiles: reachability.unreachable,
+    usagePaths: reachability.paths,
+    reachabilityStatus: entrypoints.size ? "available" : "no_entrypoints",
+    reachabilityEdges,
     qmldirModules,
     imports,
     componentUses,
@@ -263,6 +284,68 @@ function normalizeRelative(base: string, value: string): string {
 
 function isProjectTypeCandidate(typeName: string, config: Config): boolean {
   return /^[A-Z]/.test(typeName) && !BUILTIN_TYPES.has(typeName) && !config.externalTypes.includes(typeName);
+}
+
+function discoverEntrypoints(components: ComponentRecord[], config: Config, sourcePaths: Set<string>): Set<string> {
+  const configured = config.entrypoints.filter((file) => sourcePaths.has(file));
+  const automatic = components.filter((component) => {
+    const name = path.posix.basename(component.file).toLowerCase();
+    return name === "main.qml" || isShellEntrypoint(component.file) || /(?:^|\.)(?:Application)?Window$/.test(component.rootType ?? "");
+  }).map((component) => component.file);
+  return new Set([...configured, ...automatic]);
+}
+
+function discoverDynamicEdges(documents: QmlDocumentEntry[], componentsByName: Map<string, string>, sourcePaths: Set<string>, config: Config): ReachabilityEdge[] {
+  const edges: ReachabilityEdge[] = config.dynamicComponentEdges
+    .filter((edge) => sourcePaths.has(edge.from) && sourcePaths.has(edge.to))
+    .map((edge) => ({ ...edge, kind: "configured_dynamic" }));
+  for (const { file, document } of documents) {
+    for (const binding of document.bindings) {
+      if (binding.propertyPath === "source") {
+        const literal = binding.expression.trim().replace(/;$/, "").match(/^["']([^"']+\.qml)["']$/)?.[1];
+        if (literal) {
+          const target = normalizeRelative(path.posix.dirname(file), literal);
+          if (sourcePaths.has(target)) edges.push({ from: file, to: target, kind: "loader_source", line: binding.line });
+        }
+      }
+      if (binding.propertyPath === "sourceComponent") {
+        const name = binding.expression.trim().replace(/;$/, "").match(/^([A-Z][A-Za-z0-9_]*)$/)?.[1];
+        const target = name ? componentsByName.get(name) : null;
+        if (target) edges.push({ from: file, to: target, kind: "source_component", line: binding.line });
+      }
+    }
+  }
+  return uniqueEdges(edges);
+}
+
+function computeReachability(entrypoints: Set<string>, componentFiles: string[], edges: ReachabilityEdge[]): { reachable: Set<string>; unreachable: Set<string>; paths: Map<string, string[]> } {
+  if (!entrypoints.size) return { reachable: new Set(), unreachable: new Set(), paths: new Map() };
+  const outgoing = new Map<string, ReachabilityEdge[]>();
+  for (const edge of edges) outgoing.set(edge.from, [...(outgoing.get(edge.from) ?? []), edge]);
+  const reachable = new Set<string>();
+  const paths = new Map<string, string[]>();
+  const queue = [...entrypoints];
+  for (const entrypoint of entrypoints) paths.set(entrypoint, [entrypoint]);
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current || reachable.has(current)) continue;
+    reachable.add(current);
+    for (const edge of outgoing.get(current) ?? []) {
+      if (!paths.has(edge.to)) paths.set(edge.to, [...(paths.get(current) ?? [current]), edge.to]);
+      if (!reachable.has(edge.to)) queue.push(edge.to);
+    }
+  }
+  return { reachable, unreachable: new Set(componentFiles.filter((file) => !reachable.has(file))), paths };
+}
+
+function uniqueEdges(edges: ReachabilityEdge[]): ReachabilityEdge[] {
+  const seen = new Set<string>();
+  return edges.filter((edge) => {
+    const key = `${edge.from}\u0000${edge.to}\u0000${edge.kind}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function stripQmldirComment(line: string): string {

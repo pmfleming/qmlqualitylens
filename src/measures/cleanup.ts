@@ -4,7 +4,7 @@ import { baseArtifact, writeArtifact } from "./shared.js";
 
 export function measureCleanup(config: Config, command: string, context: AnalysisContext) {
   const findings: Finding[] = support.applySuppressions([
-    ...context.components.flatMap((component) => unusedComponentFinding(component, context.resolution.referencedFiles, context.resolution.publicFiles)),
+    ...context.components.flatMap((component) => unusedComponentFinding(component, context)),
     ...context.qmlDocuments.flatMap(unusedIdFindings),
   ], config);
   const active = support.activeFindings(findings);
@@ -23,16 +23,21 @@ export function measureCleanup(config: Config, command: string, context: Analysi
   return artifact;
 }
 
-function unusedComponentFinding(component: AnalysisContext["components"][number], usedComponents: Set<string>, publicFiles: Set<string>): Finding[] {
-  if (publicFiles.has(component.file) || component.useCount !== 0 || usedComponents.has(component.file)) return [];
+function unusedComponentFinding(component: AnalysisContext["components"][number], context: AnalysisContext): Finding[] {
+  const resolution = context.resolution;
+  if (resolution.publicFiles.has(component.file) || resolution.entrypoints.has(component.file)) return [];
+  const unused = resolution.reachabilityStatus === "available"
+    ? resolution.unreachableFiles.has(component.file)
+    : component.useCount === 0 && !resolution.referencedFiles.has(component.file);
+  if (!unused) return [];
   return [{
     id: `cleanup.unused_component.${component.file}`,
     kind: "cleanup.unused_component",
     severity: "low",
     file: component.file,
     line: component.line,
-    message: `${path.basename(component.file)} is not referenced by other parsed QML components`,
-    actions: ["Confirm whether this is public API; otherwise remove it or add it to qmldir."],
+    message: resolution.reachabilityStatus === "available" ? `${path.basename(component.file)} is not reachable from a configured or discovered entrypoint` : `${path.basename(component.file)} is not referenced by other parsed QML components`,
+    actions: ["Confirm whether this is public API or dynamically created; otherwise remove it, add a reachability edge, or export it through qmldir."],
   }];
 }
 

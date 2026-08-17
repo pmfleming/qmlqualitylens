@@ -19,6 +19,8 @@ const DEFAULT_THRESHOLDS: Thresholds = {
   cloneWindow: 6,
 };
 
+const DEFAULT_BENCHMARK_POLICY = { maxRegressionPercent: 5, maxCoefficientOfVariation: 0.05, minSamples: 5 };
+
 const DEFAULT_POLICY: PolicyConfig = {
   requireQmllint: false,
   newCodeOnly: true,
@@ -51,6 +53,8 @@ export function loadConfig(configPath: string | null): Config {
     qmllintCommand,
     externalModules: raw.external_modules ?? [],
     externalTypes: raw.external_types ?? [],
+    entrypoints: (raw.entrypoints ?? []).map(normalizeProjectPath),
+    dynamicComponentEdges: (raw.dynamic_component_edges ?? []).map((edge) => ({ from: normalizeProjectPath(edge.from), to: normalizeProjectPath(edge.to) })),
     processBoundary: { ...DEFAULT_PROCESS_BOUNDARY, ...(raw.process_boundary ?? {}) },
     policy: {
       requireQmllint: raw.policy?.require_qmllint ?? DEFAULT_POLICY.requireQmllint,
@@ -113,6 +117,14 @@ export function loadConfig(configPath: string | null): Config {
       tests: raw.reports?.tests ? resolveFrom(projectRoot, raw.reports.tests) : raw.tools?.qmltestrunner?.check ? path.join(outputDir, "qmltestrunner.junit.xml") : null,
       runtimeWarnings: raw.reports?.runtime_warnings ? resolveFrom(projectRoot, raw.reports.runtime_warnings) : null,
       qmlProfiler: raw.reports?.qml_profiler ? resolveFrom(projectRoot, raw.reports.qml_profiler) : raw.tools?.qml_profiler?.check ? path.join(outputDir, "qml-profiler.normalized.json") : null,
+      coverage: raw.reports?.coverage ? resolveFrom(projectRoot, raw.reports.coverage) : null,
+      qmlbench: raw.reports?.qmlbench ? resolveFrom(projectRoot, raw.reports.qmlbench) : null,
+      qmlbenchBaseline: raw.reports?.qmlbench_baseline ? resolveFrom(projectRoot, raw.reports.qmlbench_baseline) : null,
+    },
+    benchmarkPolicy: {
+      maxRegressionPercent: raw.benchmark_policy?.max_regression_percent ?? DEFAULT_BENCHMARK_POLICY.maxRegressionPercent,
+      maxCoefficientOfVariation: raw.benchmark_policy?.max_coefficient_of_variation ?? DEFAULT_BENCHMARK_POLICY.maxCoefficientOfVariation,
+      minSamples: raw.benchmark_policy?.min_samples ?? DEFAULT_BENCHMARK_POLICY.minSamples,
     },
     performanceBudgets: (raw.performance_budgets ?? []).map((budget) => ({ scenario: budget.scenario, platform: budget.platform, frameP95Ms: budget.frame_p95_ms, maxEventMs: budget.max_event_ms })),
     rules: raw.rules ?? {},
@@ -143,10 +155,13 @@ export function starterConfig(): RawConfig {
     },
     type_roles: { interactive_types: [], layout_types: [], delegate_owner_types: [] },
     reports: {},
+    benchmark_policy: { max_regression_percent: 5, max_coefficient_of_variation: 0.05, min_samples: 5 },
     performance_budgets: [],
     rules: {},
     external_modules: [],
     external_types: [],
+    entrypoints: [],
+    dynamic_component_edges: [],
     process_boundary: DEFAULT_PROCESS_BOUNDARY,
     exclude: ["node_modules", ".git", "dist", "target", "build", ".direnv"],
     thresholds: DEFAULT_THRESHOLDS,
@@ -165,7 +180,7 @@ function matchesConfiguredPattern(value: string, pattern: string): boolean {
   }
 }
 
-const CONFIG_KEYS = new Set(["$schema", "project_name", "project_root", "source_roots", "output_dir", "exclude", "profile", "qmllint_report", "qmllint_command", "external_modules", "external_types", "process_boundary", "policy", "tools", "type_roles", "reports", "performance_budgets", "rules", "suppressions", "thresholds"]);
+const CONFIG_KEYS = new Set(["$schema", "project_name", "project_root", "source_roots", "output_dir", "exclude", "profile", "qmllint_report", "qmllint_command", "external_modules", "external_types", "entrypoints", "dynamic_component_edges", "process_boundary", "policy", "tools", "type_roles", "reports", "benchmark_policy", "performance_budgets", "rules", "suppressions", "thresholds"]);
 const THRESHOLD_KEYS = new Set(Object.keys(DEFAULT_THRESHOLDS));
 const PROCESS_BOUNDARY_KEYS = new Set(Object.keys(DEFAULT_PROCESS_BOUNDARY));
 
@@ -188,6 +203,7 @@ function validateConfigSections(value: Record<string, unknown>): string[] {
   validateTools(value.tools, errors);
   validateTypeRoles(value.type_roles, errors);
   validateReports(value.reports, errors);
+  validateBenchmarkPolicy(value.benchmark_policy, errors);
   validatePerformanceBudgets(value.performance_budgets, errors);
   validateRules(value.rules, errors);
   validateThresholds(value.thresholds, errors);
@@ -199,7 +215,8 @@ function validateCoreFields(value: Record<string, unknown>, errors: string[]): v
   for (const key of Object.keys(value)) if (!CONFIG_KEYS.has(key)) errors.push(`unknown property '${key}'`);
   for (const key of ["$schema", "project_name", "project_root", "output_dir", "qmllint_report", "qmllint_command"]) if (value[key] !== undefined && typeof value[key] !== "string") errors.push(`${key} must be a string`);
   if (value.profile !== undefined && !isOneOf(value.profile, ["generic", "qtquick", "kirigami", "quickshell", "custom"] satisfies ProjectProfile[])) errors.push("profile must be one of: generic, qtquick, kirigami, quickshell, custom");
-  for (const key of ["source_roots", "exclude", "external_modules", "external_types"]) validateStringArray(value[key], key, errors);
+  for (const key of ["source_roots", "exclude", "external_modules", "external_types", "entrypoints"]) validateStringArray(value[key], key, errors);
+  validateDynamicEdges(value.dynamic_component_edges, errors);
   if (Array.isArray(value.source_roots) && value.source_roots.length === 0) errors.push("source_roots must not be empty");
 }
 
@@ -340,9 +357,24 @@ function validateTypeRoles(value: unknown, errors: string[]): void {
 }
 
 function validateReports(value: unknown, errors: string[]): void {
-  validateObjectKeys(value, "reports", new Set(["tests", "runtime_warnings", "qml_profiler"]), errors);
+  validateObjectKeys(value, "reports", new Set(["tests", "runtime_warnings", "qml_profiler", "coverage", "qmlbench", "qmlbench_baseline"]), errors);
   if (!isRecord(value)) return;
-  for (const key of ["tests", "runtime_warnings", "qml_profiler"]) if (value[key] !== undefined && typeof value[key] !== "string") errors.push(`reports.${key} must be a string`);
+  for (const key of ["tests", "runtime_warnings", "qml_profiler", "coverage", "qmlbench", "qmlbench_baseline"]) if (value[key] !== undefined && typeof value[key] !== "string") errors.push(`reports.${key} must be a string`);
+}
+
+function validateBenchmarkPolicy(value: unknown, errors: string[]): void {
+  validateObjectKeys(value, "benchmark_policy", new Set(["max_regression_percent", "max_coefficient_of_variation", "min_samples"]), errors);
+  if (!isRecord(value)) return;
+  for (const key of ["max_regression_percent", "max_coefficient_of_variation"]) if (value[key] !== undefined && (typeof value[key] !== "number" || !Number.isFinite(value[key]) || value[key] < 0)) errors.push(`benchmark_policy.${key} must be a non-negative number`);
+  if (value.min_samples !== undefined && (typeof value.min_samples !== "number" || !Number.isInteger(value.min_samples) || value.min_samples < 1)) errors.push("benchmark_policy.min_samples must be a positive integer");
+}
+
+function validateDynamicEdges(value: unknown, errors: string[]): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value)) { errors.push("dynamic_component_edges must be an array"); return; }
+  value.forEach((edge, index) => {
+    if (!isRecord(edge) || Object.keys(edge).some((key) => !["from", "to"].includes(key)) || !isNonEmptyString(edge.from) || !isNonEmptyString(edge.to)) errors.push(`dynamic_component_edges[${index}] must contain non-empty from and to strings`);
+  });
 }
 
 function validatePerformanceBudgets(value: unknown, errors: string[]): void {
@@ -400,6 +432,10 @@ function typeRolesForProfile(profile: ProjectProfile): Config["typeRoles"] {
 
 function isOneOf<T>(value: unknown, allowed: readonly T[]): boolean {
   return allowed.some((item) => item === value);
+}
+
+function normalizeProjectPath(value: string): string {
+  return value.replace(/\\/g, "/").replace(/^\.\//, "");
 }
 
 function resolveFrom(base: string, value: string): string {

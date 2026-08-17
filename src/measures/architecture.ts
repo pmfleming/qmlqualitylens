@@ -1,13 +1,15 @@
+import fs from "node:fs";
 import path from "node:path";
 import { isShellEntrypoint } from "../qml-model.js";
 import type { MeasureConfig as Config, MeasureContext as AnalysisContext } from "./foundation.js";
 import { baseArtifact, writeArtifact } from "./shared.js";
 
 export function measureArchitectureMap(config: Config, command: string, context: AnalysisContext) {
-  const nodes = context.files.map(architectureNode);
+  const observed = observedCoverageFiles(config);
+  const nodes = context.files.map((file) => architectureNode(file, context, observed));
   const idEdges = context.qmlDocuments.flatMap(({ file, document }) => document.idReferences.filter((item) => item.external).map((reference) => ({ from: file, to: `${file}#${reference.name}`, kind: "id_reference", line: reference.line })));
   const edges = [
-    ...context.resolution.componentUses.flatMap((use) => componentUseEdge(use.from, use.target, use.line)),
+    ...context.resolution.reachabilityEdges.map((edge) => ({ from: edge.from, to: edge.to, kind: edge.kind, line: edge.line })),
     ...context.resolution.imports.map((item) => ({ from: item.from, to: item.target ?? item.module, kind: importEdgeKind(item.kind), line: item.line })),
     ...idEdges,
   ];
@@ -25,16 +27,33 @@ export function measureArchitectureMap(config: Config, command: string, context:
   return artifact;
 }
 
-function architectureNode(file: AnalysisContext["files"][number]) {
+function architectureNode(file: AnalysisContext["files"][number], context: AnalysisContext, observed: Set<string>) {
   const component = file.qmlComponent;
   return {
     id: file.path,
     label: path.basename(file.path),
     kind: file.kind === "qml" ? roleFor(file.path, component?.rootType ?? null) : file.kind,
-    entrypoint: isShellEntrypoint(file.path),
+    entrypoint: context.resolution.entrypoints.has(file.path),
+    reachable: context.resolution.reachabilityStatus === "available" ? context.resolution.reachableFiles.has(file.path) : null,
+    usage_path: context.resolution.usagePaths.get(file.path) ?? null,
+    observed_in_coverage: configCoverageState(context.config, observed, file.path),
     metrics: component ? componentMetrics(component) : { source_lines: file.loc.source },
     risk: riskFor(component),
   };
+}
+
+function observedCoverageFiles(config: Config): Set<string> {
+  const file = path.join(config.outputDir, "coverage_evidence.json");
+  if (!fs.existsSync(file)) return new Set();
+  try {
+    const value: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (!value || typeof value !== "object" || !("files" in value) || !Array.isArray(value.files)) return new Set();
+    return new Set(value.files.flatMap((record) => record && typeof record === "object" && "file" in record && typeof record.file === "string" && "covered_lines" in record && typeof record.covered_lines === "number" && record.covered_lines > 0 ? [record.file] : []));
+  } catch { return new Set(); }
+}
+
+function configCoverageState(config: Config, observed: Set<string>, file: string): boolean | null {
+  return config.reports.coverage ? observed.has(file) : null;
 }
 
 function componentMetrics(component: AnalysisContext["components"][number]) {

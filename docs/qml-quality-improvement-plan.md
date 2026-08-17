@@ -2,7 +2,7 @@
 
 This plan turns the findings in [QML code quality research](qml-quality-research.md) into an implementation sequence. The central change is conceptual: **qmlqualitylens should distinguish verified correctness gates from project policy and heuristic review signals**. It should not imply that one composite score defines good QML.
 
-**Implementation status (v0.3.0):** the end-to-end baseline for all milestones is implemented, with opt-in CMake/Qt Quick Test/runtime execution, Chrome-trace normalization, hardened process controls, and real-project integration evidence added in v0.3: evidence metadata and policy gating, first-class Qt tool evidence, parser/model extensions and official-guidance rules, test/runtime report ingestion, accessibility/i18n/theming checks, runtime performance scenarios and budgets, framework profiles/custom type roles, SARIF, and a pinned external calibration harness. Deeper framework-specific rules and native binary QML Profiler adapters remain calibration-driven extensions; unsupported profiler formats are reported as incomplete rather than guessed.
+**Implementation status (v0.5.0):** the end-to-end baseline for all milestones is implemented. Version 0.3 added opt-in CMake/Qt Quick Test/runtime execution, Chrome-trace normalization, hardened process controls, evidence metadata and policy gating, Qt tool evidence, UX/performance rules, profiles, SARIF, and external calibration. Version 0.4 added type/parser precision evidence; v0.5 adds coverage, benchmark, reachability, and GitLab report integration. Deeper framework-specific rules and native binary QML Profiler adapters remain calibration-driven extensions; unsupported profiler formats are reported as incomplete rather than guessed.
 
 ## Product goal
 

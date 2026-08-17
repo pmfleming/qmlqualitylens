@@ -30,9 +30,11 @@ The v0.3 analyzer retains a small QML lexer and parser implemented across `src/q
 - `leverage_metrics.json`: component reuse/centrality relative to effort
 - `cleanup.json`: unused components and unused id candidates
 - `correctness_review.json`, `test_catalog.json`, and `test_evidence.json`: QML test discovery, optional `qmltestrunner` execution, and JUnit/JSON evidence
+- `coverage_evidence.json`: Cobertura/Qoverage observations mapped separately to QML objects, bindings, and executable blocks
 - `runtime_warnings.json`: optional imported warnings or captured output from an explicit runtime smoke command
 - `runtime_performance.json`: optional profiler-adapter execution and provenance-bearing frame/event scenarios
-- `map.json`: dashboard-ready architecture graph with nodes, edges, roles, and risk
+- `benchmark_performance.json`: qmlbench samples, noise checks, environment matching, and baseline-relative regressions
+- `map.json`: entrypoint reachability, dynamic edges, usage paths, coverage observations, and architecture risk dashboard-ready architecture graph with nodes, edges, roles, and risk
 
 `measure all` writes the contract and artifacts but does not turn a failing contract verdict into a nonzero process exit. Use `audit` to gate CI: it exits with status 1 when its verdict is `fail`. A `warn` or `incomplete` verdict exits successfully unless the selected `fail_on` or `incomplete` policy converts it to `fail`.
 
@@ -90,6 +92,8 @@ npm run analyze:shelllist
   "project_name": "my-qml-project",
   "project_root": ".",
   "source_roots": ["."],
+  "entrypoints": ["Main.qml"],
+  "dynamic_component_edges": [],
   "output_dir": "target/qmlqualitylens",
   "profile": "qtquick",
   "qmllint_report": "target/qmllint.json",
@@ -150,8 +154,16 @@ npm run analyze:shelllist
   },
   "reports": {
     "tests": "target/qml-tests.xml",
+    "coverage": "target/coverage.xml",
     "runtime_warnings": "target/qml-runtime.log",
-    "qml_profiler": "target/qml-profile.json"
+    "qml_profiler": "target/qml-profile.json",
+    "qmlbench": "target/qmlbench.json",
+    "qmlbench_baseline": "benchmarks/baseline.json"
+  },
+  "benchmark_policy": {
+    "max_regression_percent": 5,
+    "max_coefficient_of_variation": 0.05,
+    "min_samples": 5
   },
   "performance_budgets": [
     { "scenario": "startup", "platform": "linux-x86_64", "frame_p95_ms": 16.67, "max_event_ms": 8 }
@@ -182,6 +194,8 @@ npm run analyze:shelllist
 }
 ```
 
+`entrypoints` and `dynamic_component_edges` are project-relative QML paths. Lens also discovers `Main.qml`, `shell.qml`, and Window/ApplicationWindow roots, follows resolved component uses, literal Loader `.qml` sources, and simple `sourceComponent` references, and reports unknown reachability separately when no root exists.
+
 `project_root` is resolved relative to the config file. Source, output, `qmllint_report`, import/type paths, and imported report paths are resolved relative to `project_root`. If `qmllint_report` exists it is ingested; otherwise the legacy `qmllint_command` is run when configured; otherwise `tools.qmllint.check` can run the standard tool directly. Native integration invokes `qmllint --json -` with every discovered QML/JavaScript file, uses argument arrays rather than a shell, records source-file coverage, and supports `-I`, `-i`, and opt-in `-E` through the fields shown above. Keep `check` disabled until the real build/module import paths and generated `.qmltypes` inputs are available. For CMake projects, ingesting output from the generated `all_qmllint`/`*_qmllint` target remains preferable when it exactly matches the production build.
 
 `qmllint_command` remains available for project-specific scripts. It must supply file arguments—`qmllint` does not accept a directory such as `qmllint .`. Because arbitrary commands cannot prove their file scope, their coverage is reported as unknown.
@@ -193,6 +207,10 @@ npm run analyze:shelllist
 All execution is opt-in. CMake configure scripts, builds, tests, and applications can run arbitrary project code or cause external side effects; enable them only for trusted projects and controlled CI environments.
 
 The parser oracle runs `qmldom --dump-ast` without loading the target application. Set `tools.parser_oracle.tree_sitter` to enable a second parser check. Tree-sitter support is optional: install compatible `tree-sitter` and `tree-sitter-qmljs` packages in the consuming project. The QML grammar treats grouped-property notation ambiguously, so Tree-sitter is calibration/recovery evidence rather than the authoritative Lens AST. Execution adapters support project-relative `working_directory`, string-valued `environment`, positive `timeout_ms`, and regex `redact_patterns`. Output tails are bounded, sensitive-looking command arguments are redacted, and timed-out process groups are terminated. The generated starter leaves every execution check disabled.
+
+Cobertura reports, including those produced by `qoverage collect`, can be configured through `reports.coverage`. Lens preserves the distinction between a QML object declaration being instantiated, a binding being evaluated, and JavaScript being executed. Unobserved code is scenario evidence rather than proof that code is dead.
+
+`reports.qmlbench` accepts qmlbench JSON output. When `qmlbench_baseline` is also configured, Lens compares only matching benchmark names in matching Qt/OS/QPA/OpenGL/window environments and rejects noisy or undersampled evidence according to `benchmark_policy`.
 
 Chrome trace exports can be converted to the normalized interchange consumed by `runtime_performance.json`:
 
@@ -210,13 +228,13 @@ node scripts/normalize-qml-profile.mjs \
 ```text
 qmlqualitylens init [--config qmlqualitylens.config.json] [--force]
 qmlqualitylens catalog [--config qmlqualitylens.config.json]
-qmlqualitylens analyze [--config qmlqualitylens.config.json] [--format summary|json|markdown|sarif]
+qmlqualitylens analyze [--config qmlqualitylens.config.json] [--format summary|json|markdown|sarif|codeclimate]
 qmlqualitylens measure [all|task-id] [--config qmlqualitylens.config.json]
-qmlqualitylens audit [--config qmlqualitylens.config.json] [--baseline file] [--save-baseline file] [--base git-ref] [--fail-on block|warn|review] [--incomplete fail|warn|pass] [--format json|markdown|sarif]
+qmlqualitylens audit [--config qmlqualitylens.config.json] [--baseline file] [--save-baseline file] [--base git-ref] [--fail-on block|warn|review] [--incomplete fail|warn|pass] [--format json|markdown|sarif|codeclimate]
 ```
 
 - `catalog` lists every task id, artifact, dependency, rule, and per-task command.
-- `measure task-id` runs one task plus its dependencies; `measure all` runs all 17 tasks and currently writes 19 artifacts because the correctness catalog also emits `test_catalog.json` and `test_evidence.json`.
+- `measure task-id` runs one task plus its dependencies; `measure all` runs all 21 tasks and currently writes 23 artifacts because the correctness catalog also emits `test_catalog.json` and `test_evidence.json`.
 - `audit --base <git-ref>` compares the current tree with a base worktree and, when `policy.new_code_only` is enabled, gates introduced findings in changed code.
 - `--save-baseline <file>` records current finding identities; `--baseline <file>` suppresses matching existing findings in a later audit.
 - `--fail-on` and `--incomplete` override their configured policies for that invocation.
@@ -231,7 +249,7 @@ qmlqualitylens audit --config qmlqualitylens.config.json \
 
 ## Next build steps
 
-Version 0.4 adds type evidence, rule-level evaluation coverage, semantic fingerprints, unknown `Connections` target checks, refresh-aware frame evidence, and optional `qmldom`/Tree-sitter parser oracles. See [`docs/migration-0.4.md`](docs/migration-0.4.md).
+Version 0.5 adds Cobertura/Qoverage import, qmlbench regression evidence, GitLab Code Quality output, and configurable entrypoint/dynamic-component reachability. See [`docs/migration-0.5.md`](docs/migration-0.5.md). Version 0.4 migration guidance remains in [`docs/migration-0.4.md`](docs/migration-0.4.md).
 
 - Expand parser recovery for malformed JavaScript blocks and uncommon QML grammar edges.
 - Add moved-finding attribution in audit mode.

@@ -3,8 +3,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createAnalysisContext } from "./analyzer.js";
+import { measureBenchmarkPerformance } from "./measures/benchmark.js";
 import { measureBuildEvidence } from "./measures/build.js";
 import { measureCorrectnessCatalog } from "./measures/correctness.js";
+import { measureCoverageEvidence } from "./measures/coverage.js";
 import { measureFormat } from "./measures/format.js";
 import { measureParserOracle } from "./measures/parser-oracle.js";
 import { measureRuntimePerformance, measureRuntimeWarnings } from "./measures/runtime.js";
@@ -80,8 +82,10 @@ export function runAudit(config: Config, command: string, options: AuditOptions)
     measureBuildEvidence(config, command, context),
     measureFormat(config, command, context),
     measureCorrectnessCatalog(config, command, context),
+    measureCoverageEvidence(config, command, context),
     measureRuntimeWarnings(config, command, context),
     measureRuntimePerformance(config, command, context),
+    measureBenchmarkPerformance(config, command, context),
   ];
   const evidenceFindings = evidenceArtifacts.flatMap(findingsFromArtifact);
   const allFindings = [...new Map([...context.findings, ...evidenceFindings].map((finding) => [finding.fingerprint ?? finding.id, finding])).values()];
@@ -178,8 +182,10 @@ function configuredEvidenceFailures(config: Config, artifacts: unknown[]): strin
     ...(config.tools.qmlformatCheck ? unusableArtifact(byTask.get("quality.format"), "status", ["pass", "warn"], "qmlformat check") : []),
     ...(config.tools.cmakeCheck ? unusableArtifact(byTask.get("quality.build_evidence"), "status", ["pass", "warn", "failed"], "CMake configure/build") : []),
     ...(config.reports.tests ? unusableArtifact(byTask.get("correctness.catalog"), "execution_status", ["complete", "failed"], "test report") : []),
+    ...(config.reports.coverage ? unusableArtifact(byTask.get("testing.coverage"), "status", ["complete"], "coverage report") : []),
     ...(config.reports.runtimeWarnings || config.tools.runtimeCheck ? unusableArtifact(byTask.get("correctness.runtime_warnings"), "status", ["complete", "failed"], "runtime warning evidence") : []),
     ...(config.reports.qmlProfiler ? unusableArtifact(byTask.get("performance.runtime"), "status", ["complete"], "runtime performance report") : []),
+    ...(config.reports.qmlbench ? unusableArtifact(byTask.get("performance.benchmark"), "status", ["complete", "warn"], "qmlbench report") : []),
   ];
 }
 
@@ -280,7 +286,7 @@ function configForWorktree(config: Config, worktree: string, temp: string): Conf
     qmllintReport: null,
     qmllintCommand: null,
     tools: { ...config.tools, parserOracleCheck: false, cmakeCheck: false, qmllintCheck: false, qmlformatCheck: false, qmltestrunnerCheck: false, runtimeCheck: false, qmlProfilerCheck: false },
-    reports: { tests: null, runtimeWarnings: null, qmlProfiler: null },
+    reports: { tests: null, runtimeWarnings: null, qmlProfiler: null, coverage: null, qmlbench: null, qmlbenchBaseline: null },
   };
 }
 

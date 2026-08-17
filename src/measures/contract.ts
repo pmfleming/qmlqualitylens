@@ -4,7 +4,7 @@ import { support, type MeasureConfig as Config, type MeasureContext as AnalysisC
 import { baseArtifact, writeArtifact } from "./shared.js";
 
 export function measureQualityContract(config: Config, command: string, context: AnalysisContext) {
-  const imported = ["parser_oracle.json", "formatting.json", "build_evidence.json", "test_evidence.json", "runtime_warnings.json", "runtime_performance.json"].flatMap((file) => artifactFindings(config, file));
+  const imported = ["parser_oracle.json", "formatting.json", "build_evidence.json", "test_evidence.json", "coverage_evidence.json", "runtime_warnings.json", "runtime_performance.json", "benchmark_performance.json"].flatMap((file) => artifactFindings(config, file));
   const active = [...new Map([...context.findings, ...imported].filter((finding) => !finding.suppressed).map((finding) => [finding.fingerprint ?? finding.id, finding])).values()];
   const checks = contractChecks(config, context);
   const incomplete = checks.filter((item) => item.status === "skipped" || item.status === "incomplete");
@@ -39,13 +39,15 @@ function contractChecks(config: Config, context: AnalysisContext) {
     artifactCheck(config, "tool.qmlformat", "qmlformat", "formatting.json"),
     cmakeCheck(config),
     artifactCheck(config, "tests.execution", "Test execution", "test_evidence.json"),
+    artifactCheck(config, "tests.coverage", "QML coverage", "coverage_evidence.json"),
     artifactCheck(config, "runtime.warnings", "Runtime QML warnings", "runtime_warnings.json"),
     artifactCheck(config, "runtime.performance", "Runtime performance", "runtime_performance.json"),
+    artifactCheck(config, "runtime.benchmark", "QML benchmark", "benchmark_performance.json"),
   ];
 }
 
 function isRequired(id: string, config: Config): boolean {
-  const required: Record<string, boolean> = { "tool.parser_oracle": config.tools.parserOracleCheck, "tool.qmllint": config.policy.requireQmllint, "tool.qmlformat": config.tools.qmlformatCheck, "tool.cmake": config.tools.cmakeCheck, "tests.execution": Boolean(config.reports.tests) || config.tools.qmltestrunnerCheck, "runtime.warnings": Boolean(config.reports.runtimeWarnings) || config.tools.runtimeCheck, "runtime.performance": Boolean(config.reports.qmlProfiler) || config.tools.qmlProfilerCheck };
+  const required: Record<string, boolean> = { "tool.parser_oracle": config.tools.parserOracleCheck, "tool.qmllint": config.policy.requireQmllint, "tool.qmlformat": config.tools.qmlformatCheck, "tool.cmake": config.tools.cmakeCheck, "tests.execution": Boolean(config.reports.tests) || config.tools.qmltestrunnerCheck, "tests.coverage": Boolean(config.reports.coverage), "runtime.warnings": Boolean(config.reports.runtimeWarnings) || config.tools.runtimeCheck, "runtime.performance": Boolean(config.reports.qmlProfiler) || config.tools.qmlProfilerCheck, "runtime.benchmark": Boolean(config.reports.qmlbench) };
   return required[id] ?? false;
 }
 

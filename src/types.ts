@@ -57,7 +57,9 @@ type ToolsConfig = {
   qmlProfilerRedactPatterns: string[];
 };
 type RuntimeBudget = { scenario: string; platform?: string; frameP95Ms?: number; maxEventMs?: number };
-type ReportsConfig = { tests: string | null; runtimeWarnings: string | null; qmlProfiler: string | null };
+type ReportsConfig = { tests: string | null; runtimeWarnings: string | null; qmlProfiler: string | null; coverage: string | null; qmlbench: string | null; qmlbenchBaseline: string | null };
+export type BenchmarkPolicy = { maxRegressionPercent: number; maxCoefficientOfVariation: number; minSamples: number };
+export type DynamicComponentEdge = { from: string; to: string };
 
 export type RawConfig = {
   $schema?: string;
@@ -71,6 +73,8 @@ export type RawConfig = {
   qmllint_command?: string;
   external_modules?: string[];
   external_types?: string[];
+  entrypoints?: string[];
+  dynamic_component_edges?: DynamicComponentEdge[];
   process_boundary?: Partial<ProcessBoundaryConfig>;
   policy?: { require_qmllint?: boolean; new_code_only?: boolean; fail_on?: Enforcement[]; incomplete?: "fail" | "warn" | "pass" };
   tools?: {
@@ -83,7 +87,8 @@ export type RawConfig = {
     qml_profiler?: { command?: string; check?: boolean; arguments?: string[]; timeout_ms?: number; working_directory?: string; environment?: Record<string, string>; redact_patterns?: string[] };
   };
   type_roles?: { interactive_types?: string[]; layout_types?: string[]; delegate_owner_types?: string[] };
-  reports?: { tests?: string; runtime_warnings?: string; qml_profiler?: string };
+  reports?: { tests?: string; runtime_warnings?: string; qml_profiler?: string; coverage?: string; qmlbench?: string; qmlbench_baseline?: string };
+  benchmark_policy?: { max_regression_percent?: number; max_coefficient_of_variation?: number; min_samples?: number };
   performance_budgets?: Array<{ scenario: string; platform?: string; frame_p95_ms?: number; max_event_ms?: number }>;
   rules?: Record<string, RuleOverride>;
   suppressions?: Suppression[];
@@ -116,11 +121,14 @@ export type Config = {
   qmllintCommand: string | null;
   externalModules: string[];
   externalTypes: string[];
+  entrypoints: string[];
+  dynamicComponentEdges: DynamicComponentEdge[];
   processBoundary: ProcessBoundaryConfig;
   policy: PolicyConfig;
   tools: ToolsConfig;
   typeRoles: TypeRolesConfig;
   reports: ReportsConfig;
+  benchmarkPolicy: BenchmarkPolicy;
   performanceBudgets: RuntimeBudget[];
   rules: Record<string, RuleOverride>;
   suppressions: Suppression[];

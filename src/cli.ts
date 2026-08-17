@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { analyzeProject, createAnalysisContext } from "./analyzer.js";
 import { auditMarkdown, runAudit } from "./audit.js";
+import { codeClimateForFindings } from "./codeclimate.js";
 import { loadConfig, starterConfig } from "./config.js";
 import { markdownReport, summaryReport } from "./report.js";
 import { sarifForFindings } from "./sarif.js";
@@ -12,7 +13,7 @@ import { isRecord } from "./value-utils.js";
 type ParsedArgs = {
   command: string | null;
   config: string | null;
-  format: "json" | "summary" | "markdown" | "sarif";
+  format: "json" | "summary" | "markdown" | "sarif" | "codeclimate";
   force: boolean;
   help: boolean;
   positionals: string[];
@@ -34,7 +35,7 @@ const FLAG_HANDLERS: Record<string, FlagHandler> = {
   "--force": (parsed) => { parsed.force = true; },
   "--config": (parsed, args, flag) => { parsed.config = requireValue(flag, args); },
   "-c": (parsed, args, flag) => { parsed.config = requireValue(flag, args); },
-  "--format": (parsed, args, flag) => { parsed.format = oneOf(flag, requireValue(flag, args), ["json", "summary", "markdown", "sarif"]); },
+  "--format": (parsed, args, flag) => { parsed.format = oneOf(flag, requireValue(flag, args), ["json", "summary", "markdown", "sarif", "codeclimate"]); },
   "--baseline": (parsed, args, flag) => { parsed.baseline = requireValue(flag, args); },
   "--save-baseline": (parsed, args, flag) => { parsed.saveBaseline = requireValue(flag, args); },
   "--base": (parsed, args, flag) => { parsed.base = requireValue(flag, args); },
@@ -85,6 +86,7 @@ function runAuditCommand(args: ParsedArgs): void {
   const artifact = runAudit(config, `qmlqualitylens audit --config ${config.configPath}`, { baseline: args.baseline, saveBaseline: args.saveBaseline, base: args.base });
   if (args.format === "markdown") console.log(auditMarkdown(artifact));
   else if (args.format === "sarif") console.log(JSON.stringify(sarifForFindings(artifact.findings), null, 2));
+  else if (args.format === "codeclimate") console.log(JSON.stringify(codeClimateForFindings(artifact.findings), null, 2));
   else console.log(JSON.stringify(artifact, null, 2));
   if (artifact.summary.verdict === "fail") process.exitCode = 1;
 }
@@ -123,6 +125,7 @@ function printArtifact(artifact: AnalysisArtifact, format: ParsedArgs["format"])
   if (format === "json") console.log(JSON.stringify(artifact, null, 2));
   else if (format === "markdown") console.log(markdownReport(artifact));
   else if (format === "sarif") console.log(JSON.stringify(sarifForFindings(artifact.findings), null, 2));
+  else if (format === "codeclimate") console.log(JSON.stringify(codeClimateForFindings(artifact.findings), null, 2));
   else console.log(summaryReport(artifact));
 }
 
@@ -163,9 +166,9 @@ function printHelp(): void {
 Usage:
   qmlqualitylens init [--config qmlqualitylens.config.json] [--force]
   qmlqualitylens catalog [--config qmlqualitylens.config.json]
-  qmlqualitylens analyze [--config qmlqualitylens.config.json] [--format summary|json|markdown|sarif]
+  qmlqualitylens analyze [--config qmlqualitylens.config.json] [--format summary|json|markdown|sarif|codeclimate]
   qmlqualitylens measure [all|task-id] [--config qmlqualitylens.config.json]
-  qmlqualitylens audit [--config qmlqualitylens.config.json] [--baseline file] [--save-baseline file] [--base git-ref] [--fail-on block|warn|review] [--incomplete fail|warn|pass] [--format json|markdown|sarif]
+  qmlqualitylens audit [--config qmlqualitylens.config.json] [--baseline file] [--save-baseline file] [--base git-ref] [--fail-on block|warn|review] [--incomplete fail|warn|pass] [--format json|markdown|sarif|codeclimate]
 
 Important task ids:
   ${TASKS.map((task) => task.id).join("\n  ")}

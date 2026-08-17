@@ -1,6 +1,6 @@
 # QML Quality Lens Roadmap
 
-Version 0.4 adds project/`.qmltypes` type evidence, parser-oracle calibration, rule evaluation coverage, semantic moved-finding identities, inherited type roles, and refresh-aware frame evidence.
+Version 0.4 adds project/`.qmltypes` type evidence, parser-oracle calibration, rule evaluation coverage, semantic moved-finding identities, inherited type roles, and refresh-aware frame evidence. Version 0.5 adds entrypoint/dynamic reachability, Cobertura/Qoverage mapping, qmlbench baseline regression evidence, and GitLab Code Quality output.
 
 The implemented v0.2 research plan is in [`docs/qml-quality-improvement-plan.md`](docs/qml-quality-improvement-plan.md). Version 0.3 adds opt-in CMake builds, Qt Quick Test and runtime-smoke execution, hardened process controls, Chrome-trace normalization, a real Qt integration fixture, and a documented Shelllist trial. It introduced evidence classification, correct `qmllint` gating, incomplete-check reporting, policy-based audit verdicts, report ingestion, UX/performance checks, profiles, SARIF, and calibration. This checklist remains the historical feature roadmap and identifies areas for deeper calibration.
 
@@ -23,6 +23,7 @@ The implemented v0.2 research plan is in [`docs/qml-quality-improvement-plan.md`
 - [x] Add correctness catalog discovery.
 - [x] Add managed `qmltestrunner` execution and runtime-smoke warning capture.
 - [x] Add cleanup/dead-component detection.
+- [x] Add entrypoint-rooted reachability with Loader/sourceComponent and configured dynamic edges.
 
 ## Phase 2: QML precision
 
@@ -40,6 +41,8 @@ The implemented v0.2 research plan is in [`docs/qml-quality-improvement-plan.md`
 - [x] Initial accessibility checks for icon-only controls and pointer-only custom interaction.
 - [x] Recalibrated Loader/Image/delegate performance smells plus provenance-bearing runtime performance import.
 - [x] Add a provenance-requiring Chrome trace normalization adapter and source-located runtime hotspots.
+- [x] Import Cobertura/Qoverage evidence without conflating declarative object, binding, and JavaScript coverage.
+- [x] Import qmlbench JSON with environment/noise validation and baseline-relative regression policy.
 - [x] Initial theming/i18n checks for semantic colors and untranslated user-facing strings.
 - [x] Boundary hygiene for side effects, Process placement, and configurable boundary types/patterns.
 - Deepen focus traps, Escape behavior, semantic token coverage, protocol parsing, secret handling, and command construction.
@@ -48,6 +51,7 @@ The implemented v0.2 research plan is in [`docs/qml-quality-improvement-plan.md`
 
 - [x] Changed-file and changed-hunk gating with `audit --base`.
 - [x] Base-worktree comparison for introduced finding detection.
+- [x] GitLab Code Quality/Code Climate output alongside SARIF.
 - [x] Configurable thresholds for size, complexity, binding, and clone-window rules.
 - [x] Optional `qmllint` oracle calibration tier with labeled benchmark fixtures.
 - [x] Optional CI job for Qt/qmllint oracle calibration.
