@@ -48,7 +48,8 @@ function connectionRuleCoverage(rule: string, context: AnalysisContext): RuleCov
       applicable += 1;
       const target = targetExpression(connection)?.match(/^([A-Za-z_]\w*)$/)?.[1];
       if (!target) increment(reasons, "dynamic_target");
-      else if (!ids.has(target)) rule === "qml.connections.unknown_target" ? evaluated += 1 : increment(reasons, "unknown_target");
+      else if (!ids.has(target) && isLikelyLocalId(target)) rule === "qml.connections.unknown_target" ? evaluated += 1 : increment(reasons, "unknown_target");
+      else if (!ids.has(target)) increment(reasons, "external_or_singleton_target");
       else evaluated += 1;
     }
   }
@@ -247,7 +248,7 @@ function connectionMismatchFindings(entry: AnalysisContext["qmlDocuments"][numbe
     .filter((object) => baseTypeName(object.typeName) === "Connections")
     .flatMap((connection) => {
       const targetId = targetExpression(connection)?.match(/^([A-Za-z_]\w*)$/)?.[1];
-      if (targetId && !idToObject.has(targetId)) return [finding(`qml.connections.unknown_target.${entry.file}.${connection.line}.${targetId}`, "qml.connections.unknown_target", "high", entry.file, connection.line, `Connections target '${targetId}' is not declared in this component`, "Correct the target id or expose the intended target explicitly; use a suppression only for a documented injected context object.")];
+      if (targetId && !idToObject.has(targetId) && isLikelyLocalId(targetId)) return [finding(`qml.connections.unknown_target.${entry.file}.${connection.line}.${targetId}`, "qml.connections.unknown_target", "high", entry.file, connection.line, `Connections target '${targetId}' is not declared in this component`, "Correct the target id or expose the intended target explicitly; use a suppression only for a documented injected context object.")];
       const targetObject = targetId ? idToObject.get(targetId) : null;
       if (!targetObject) return [];
       const targetFile = resolvedTargetForObject(context, entry.file, targetObject.typeName, targetObject.line);
@@ -493,6 +494,10 @@ function connectionHandlerEntries(object: AnalysisContext["qmlDocuments"][number
     ...object.handlers,
     ...object.functions.filter((fn) => /^on[A-Z]/.test(fn.name)),
   ].map((item) => ({ name: item.name, line: item.line }));
+}
+
+function isLikelyLocalId(name: string): boolean {
+  return /^[a-z_]/.test(name);
 }
 
 function targetExpression(object: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number]): string | null {

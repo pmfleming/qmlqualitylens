@@ -29,6 +29,11 @@ test("v0.4 reports unknown Connections targets and rule evaluation coverage", ()
   assert.equal(coverage?.skip_reasons.unknown_target, 1);
 });
 
+test("v0.4 does not classify imported singleton targets as missing local ids", () => {
+  const { context } = fixture({ "Main.qml": `import Quickshell\nItem { Connections { target: Quickshell; function onScreensChanged() {} } }\n` });
+  assert.ok(!context.findings.some((finding) => finding.kind === "qml.connections.unknown_target"));
+});
+
 test("v0.4 type evidence propagates inherited interactive roles and imports qmltypes", () => {
   const qmltypes = `import QtQuick.tooling 1.2\nModule { Component { name: "Backend"; prototype: "QObject"; Signal { name: "ready" } Property { name: "state"; type: "int" } } }\n`;
   const { config, context } = fixture({
