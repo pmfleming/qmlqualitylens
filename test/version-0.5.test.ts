@@ -38,6 +38,12 @@ test("v0.5 computes entrypoint reachability through static, Loader, and configur
   assert.ok(cleanup.findings.some((finding) => finding.kind === "cleanup.unused_component" && finding.file === "Orphan.qml"));
 });
 
+test("v0.5 cleanup retains ids used as property-alias targets", () => {
+  const { context } = fixture({ "Main.qml": `import QtQuick\nItem { default property alias content: body.data; Item { id: body } }\n` });
+  const cleanup = measureCleanup(context.config, "test", context) as { findings: Array<{ kind: string; message: string }> };
+  assert.ok(!cleanup.findings.some((finding) => finding.kind === "cleanup.unused_id" && finding.message.includes("body")));
+});
+
 test("v0.5 imports Cobertura QML observations without conflating object and binding coverage", () => {
   const { root, config, context } = fixture({ "Main.qml": `import QtQuick\nItem {\n  property int answer: 42\n  Component.onCompleted: console.log(answer)\n}\n` }, { reports: { coverage: "coverage.xml" } });
   fs.writeFileSync(path.join(root, "coverage.xml"), `<?xml version="1.0"?><coverage><packages><package><classes><class filename="Main.qml" line-rate="0.5"><lines><line number="2" hits="1"/><line number="3" hits="1"/><line number="4" hits="0"/></lines></class></classes></package></packages></coverage>`);

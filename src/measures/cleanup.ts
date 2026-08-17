@@ -43,7 +43,8 @@ function unusedComponentFinding(component: AnalysisContext["components"][number]
 
 function unusedIdFindings({ file, document }: AnalysisContext["qmlDocuments"][number]): Finding[] {
   const referencedObjectIds = new Set(document.idReferences.flatMap((reference) => reference.targetObjectId ? [reference.targetObjectId] : []));
-  return document.objects.flatMap((object) => object.idName && object.idName !== "root" && !referencedObjectIds.has(object.objectId) ? [{
+  const aliasTargetIds = new Set(document.objects.flatMap((object) => object.properties.flatMap((property) => property.aliasTarget?.match(/^([A-Za-z_]\w*)\./)?.[1] ?? [])));
+  return document.objects.flatMap((object) => object.idName && object.idName !== "root" && !referencedObjectIds.has(object.objectId) && !aliasTargetIds.has(object.idName) ? [{
     id: `cleanup.unused_id.${file}.${object.idName}`,
     kind: "cleanup.unused_id",
     severity: "low",
