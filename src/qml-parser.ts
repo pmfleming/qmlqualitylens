@@ -457,8 +457,9 @@ class Parser {
   }
 
   private isPropertyDeclaration(index: number): boolean {
-    const value = this.tokens[index]?.value;
-    return value === "property" || (value === "readonly" && this.tokens[index + 1]?.value === "property") || (value === "required" && this.tokens[index + 1]?.value === "property");
+    let cursor = index;
+    while (["default", "readonly", "required"].includes(this.tokens[cursor]?.value ?? "")) cursor += 1;
+    return this.tokens[cursor]?.value === "property";
   }
 
   private isHandlerBinding(index: number): boolean {

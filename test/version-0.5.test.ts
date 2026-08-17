@@ -40,6 +40,7 @@ test("v0.5 computes entrypoint reachability through static, Loader, and configur
 
 test("v0.5 cleanup retains ids used as property-alias targets", () => {
   const { context } = fixture({ "Main.qml": `import QtQuick\nItem { default property alias content: body.data; Item { id: body } }\n` });
+  assert.equal(context.qmlDocuments[0]?.document.root?.properties[0]?.aliasTarget, "body.data");
   const cleanup = measureCleanup(context.config, "test", context) as { findings: Array<{ kind: string; message: string }> };
   assert.ok(!cleanup.findings.some((finding) => finding.kind === "cleanup.unused_id" && finding.message.includes("body")));
 });
