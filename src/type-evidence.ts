@@ -5,7 +5,7 @@ import { parseQmlDocument } from "./qml-parser.js";
 import type { QmlDocument, QmlObjectNode } from "./qml-parser-types.js";
 import type { Config } from "./types.js";
 
-export type QmlTypeRecord = {
+type QmlTypeRecord = {
   name: string;
   parent: string | null;
   properties: Record<string, string | null>;

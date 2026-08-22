@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { isShellEntrypoint } from "../qml-model.js";
-import type { MeasureConfig as Config, MeasureContext as AnalysisContext } from "./foundation.js";
+import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureJsonValue as JsonValue } from "./foundation.js";
 import { baseArtifact, writeArtifact } from "./shared.js";
 
 export function measureArchitectureMap(config: Config, command: string, context: AnalysisContext) {
@@ -46,10 +46,17 @@ function observedCoverageFiles(config: Config): Set<string> {
   const file = path.join(config.outputDir, "coverage_evidence.json");
   if (!fs.existsSync(file)) return new Set();
   try {
-    const value: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
-    if (!value || typeof value !== "object" || !("files" in value) || !Array.isArray(value.files)) return new Set();
-    return new Set(value.files.flatMap((record) => record && typeof record === "object" && "file" in record && typeof record.file === "string" && "covered_lines" in record && typeof record.covered_lines === "number" && record.covered_lines > 0 ? [record.file] : []));
+    const value = support.parseJson(fs.readFileSync(file, "utf8"));
+    if (!support.isJsonRecord(value) || !Array.isArray(value.files)) return new Set();
+    return new Set(value.files.flatMap(observedFile));
   } catch { return new Set(); }
+}
+
+function observedFile(value: JsonValue): string[] {
+  if (!support.isJsonRecord(value)) return [];
+  const file = support.stringValue(value.file);
+  const coveredLines = support.numberValue(value.covered_lines);
+  return file && coveredLines !== null && coveredLines > 0 ? [file] : [];
 }
 
 function configCoverageState(config: Config, observed: Set<string>, file: string): boolean | null {
@@ -68,10 +75,6 @@ function componentMetrics(component: AnalysisContext["components"][number]) {
   };
 }
 
-function componentUseEdge(from: string, to: string | null, line: number) {
-  return to && to !== from ? [{ from, to, kind: "component_use", line }] : [];
-}
-
 function importEdgeKind(kind: AnalysisContext["resolution"]["imports"][number]["kind"]): string {
   return kind === "external" ? "external_import" : kind === "unresolved" ? "unresolved_import" : "local_import";
 }
@@ -87,12 +90,6 @@ function roleFor(file: string, rootType: string | null): string {
 
 function riskFor(component: AnalysisContext["components"][number] | undefined): { score: number; level: "low" | "medium" | "high" } {
   if (!component) return { score: 0, level: "low" };
-  const score = Math.round(
-    component.effort * 0.25 +
-      component.distinctIdReferences * 5 +
-      component.processBoundaryViolations * 15 +
-      Math.max(0, component.objectCount - 20) * 2 +
-      Math.max(0, component.loc.source - 200) * 0.1,
-  );
+  const score = support.componentRiskScore(component);
   return { score, level: score >= 120 ? "high" : score >= 60 ? "medium" : "low" };
 }

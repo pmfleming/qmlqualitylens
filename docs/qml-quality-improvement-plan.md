@@ -1,8 +1,8 @@
-# Plan to improve qmlqualitylens
+# QML Quality Lens implementation plan
 
-This plan turns the findings in [QML code quality research](qml-quality-research.md) into an implementation sequence. The central change is conceptual: **qmlqualitylens should distinguish verified correctness gates from project policy and heuristic review signals**. It should not imply that one composite score defines good QML.
+This historical plan turns the [QML quality research](qml-quality-research.md) into an implementation sequence. Its central principle is that verified correctness, project policy, and heuristic review are distinct. One composite score cannot define good QML.
 
-**Implementation status (v0.5.0):** the end-to-end baseline for all milestones is implemented. Version 0.3 added opt-in CMake/Qt Quick Test/runtime execution, Chrome-trace normalization, hardened process controls, evidence metadata and policy gating, Qt tool evidence, UX/performance rules, profiles, SARIF, and external calibration. Version 0.4 added type/parser precision evidence; v0.5 adds coverage, benchmark, reachability, and GitLab report integration. Deeper framework-specific rules and native binary QML Profiler adapters remain calibration-driven extensions; unsupported profiler formats are reported as incomplete rather than guessed.
+> **Status:** The baseline for every milestone was implemented by 0.5. Version 0.3 added execution and evidence policy; 0.4 added type and parser precision; 0.5 added coverage, benchmarks, reachability, and GitLab output. The [roadmap](../ROADMAP.md) tracks remaining calibration and framework work.
 
 ## Product goal
 
@@ -14,7 +14,7 @@ Make qmlqualitylens the orchestration and architecture layer around Qt's own too
 - support incremental adoption through changed-code gating, baselines, and justified suppressions;
 - remain useful in dependency-free static mode without pretending that heuristic output is equivalent to Qt type information or runtime measurement.
 
-## Current position
+## Baseline when this plan was written
 
 ### Capabilities to preserve
 
@@ -29,16 +29,18 @@ The project already has a useful foundation:
 - changed-file/hunk audit support with base-worktree comparison;
 - an opt-in `qmllint` calibration tier.
 
-### Highest-priority gaps
+### Original gaps
 
-1. **`audit` does not currently gate `qmllint` diagnostics.** They are added to `qml_health.json`, but `runAudit()` gates `context.findings`, which does not include `context.qmllintFindings`.
-2. **Severity, confidence, and authority are conflated.** A high-severity heuristic can fail CI while an authoritative tool can be absent without failing or clearly marking the run incomplete.
-3. **The overall score is too prominent.** It combines maintainability heuristics and findings without making clear which values are official rules, measured facts, or configurable opinions.
-4. **Tool provenance is incomplete.** A clean `qmllint` run is not distinguished strongly enough from no run, a failed parse, incomplete imports, or a disabled warning category.
-5. **Several static performance rules are noisy.** Every `Loader` without `active` and every `Image` without `sourceSize` is reported despite valid small/eager cases.
-6. **Test discovery is not test evidence.** The current catalog finds likely tests but does not ingest execution results, runtime warnings, coverage, or test-to-component relationships.
-7. **The parser model lacks details needed by official-guidance rules:** property type/modifiers, function parameter/return types, member order, string context, and richer delegate/layout relationships.
-8. **Accessibility, keyboard/focus, translation, style customization, and runtime performance evidence are not yet covered.**
+These gaps motivated the plan; they do not describe current behavior.
+
+1. `audit` excluded normalized `qmllint` diagnostics.
+2. Severity, confidence, authority, and enforcement were conflated.
+3. The composite score obscured the difference between rules, facts, and policy.
+4. Tool provenance did not distinguish a clean run from missing or incomplete evidence.
+5. Broad `Loader` and `Image` heuristics produced noise.
+6. Test discovery was presented without execution evidence.
+7. The parser lacked types, modifiers, source order, string context, and richer relationships.
+8. Accessibility, interaction, translation, theming, and runtime performance lacked evidence.
 
 ## Design principles
 
@@ -90,7 +92,7 @@ File size, object count, complexity, clone, API-surface, and coupling limits rem
 
 ## Target artifact model
 
-Add a top-level `quality_contract.json` that answers CI questions directly:
+The plan introduced `quality_contract.json` to answer CI questions directly:
 
 ```json
 {
@@ -371,9 +373,9 @@ Do not encode QGroundControl's domain architecture as generic QML rules; use it 
 - Profile-specific findings do not appear when the profile/framework is absent.
 - Calibration is reproducible and does not require runtime execution of untrusted project code.
 
-## Proposed implementation slices
+## Implementation slices
 
-Keep changes reviewable by landing the roadmap as focused pull requests:
+The work was divided into focused changes:
 
 1. **Finding metadata and rule registry** — types, serialization, registry validation, backward-compatible defaults.
 2. **Audit policy fix** — include `qmllint`, add incomplete verdict, policy-based gating, regression tests.
@@ -392,43 +394,7 @@ Keep changes reviewable by landing the roadmap as focused pull requests:
 
 ## Configuration evolution
 
-A possible additive configuration shape is:
-
-```json
-{
-  "profile": "qtquick",
-  "policy": {
-    "require_qmllint": true,
-    "new_code_only": true,
-    "fail_on": ["block"],
-    "incomplete": "fail"
-  },
-  "tools": {
-    "qmllint": {
-      "report": "target/qmllint.json",
-      "command": "qmllint --json - .",
-      "required": true
-    },
-    "qmlformat": {
-      "command": "qmlformat",
-      "check": true
-    }
-  },
-  "reports": {
-    "tests": "target/qml-tests.xml",
-    "runtime_warnings": "target/qml-runtime.log",
-    "qml_profiler": "target/qml-profile.json"
-  },
-  "rules": {
-    "qml.performance.image_without_source_size": {
-      "enabled": true,
-      "enforcement": "review"
-    }
-  }
-}
-```
-
-Finalize names only after implementing and testing the policy model. Continue accepting the current `qmllint_report` and `qmllint_command` keys through a deprecation window.
+The implemented configuration differs from early sketches in this plan. See the [README configuration reference](../README.md#config) and [`qmlqualitylens.schema.json`](../qmlqualitylens.schema.json) for current field names. Legacy `qmllint_report` and `qmllint_command` remain supported.
 
 ## Documentation deliverables
 
@@ -457,6 +423,13 @@ Track these separately rather than optimizing the legacy score:
 
 Do not set arbitrary target percentages until the first external calibration establishes a baseline. For default blocker rules, require the strictest standard: no known false positive in the maintained negative corpus and successful review on representative projects.
 
-## Recommended immediate next step
+## Remaining work
 
-Implement **Milestone 0** before adding more QML rules. In particular, fix audit ingestion of `qmllint`, introduce evidence/enforcement metadata, and add an incomplete verdict. Those changes correct the current trust model and provide the foundation needed to add official guidance, tests, accessibility, and runtime evidence safely.
+The trust-model foundation in Milestone 0 is complete. Remaining work is calibration-driven:
+
+- deepen framework-specific interaction and boundary rules;
+- improve malformed and uncommon QML recovery;
+- add calibrated native QML Profiler adapters;
+- continue representative-project labeling before strengthening default enforcement.
+
+See the [roadmap](../ROADMAP.md) for the current list.

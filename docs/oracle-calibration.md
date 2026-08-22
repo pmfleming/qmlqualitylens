@@ -1,8 +1,8 @@
 # Optional QML oracle calibration
 
-The shipped `qmlqualitylens` analyzer stays static and dependency-free. Qt tools are used only as optional test oracles for calibrating heuristics offline.
+The default analyzer stays static and requires no Qt installation. Optional Qt tools calibrate heuristics offline.
 
-## Plan
+## Principles
 
 1. **Start with `qmllint` / `qmlcompiler`-style static oracles.** Use type-aware Qt diagnostics to calibrate parser structure, import/type resolution, and signal/property rules without executing UI code.
 2. **Keep runtime execution out of the default suite.** The default `npm test` remains hermetic. Oracle tests are opt-in and skip when the Qt toolchain is not installed.
@@ -29,7 +29,7 @@ npm run oracle:qmllint:nix
 # direnv allow
 ```
 
-The Nix shell provides `node`, `qmllint`, `qml`, `qmltestrunner`, Qt QML import paths, and `QT_QPA_PLATFORM=offscreen` for future loader/runtime experiments.
+The Nix shell provides Node.js, Qt tools, QML import paths, and `QT_QPA_PLATFORM=offscreen`.
 
 The script:
 
@@ -39,4 +39,4 @@ The script:
 - checks expected `qmllint` category/file labels when the tool is available;
 - prints per-rule precision/recall-style counts for the labeled heuristic corpus plus grouped `qmllint` oracle diagnostics.
 
-The oracle tier is intended for calibration and CI jobs that opt in to Qt tooling. `.github/workflows/ci.yml` requires both the default dependency-free suite and the labeled heuristic benchmark. The Qt diagnostic portion skips when `qmllint` is unavailable, so Qt remains optional for normal package installation and `npm test`.
+The oracle tier is for calibration and opt-in CI. The workflow runs both the default suite and labeled heuristic benchmark. Qt diagnostics skip when `qmllint` is unavailable, so normal installation and `npm test` do not require Qt.

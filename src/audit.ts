@@ -14,7 +14,7 @@ import { findingSummary } from "./measures/shared.js";
 import { confidence, provenance } from "./provenance.js";
 import { isFindingRecord } from "./rules.js";
 import type { Config, Finding } from "./types.js";
-import { isRecord } from "./value-utils.js";
+import { errorMessage, isRecord, parseJson } from "./value-utils.js";
 import { ARTIFACT_SCHEMA_VERSION } from "./version.js";
 
 type AuditOptions = {
@@ -50,8 +50,8 @@ type AuditArtifact = {
   schema_version: string;
   task_id: "audit";
   project: { name: string; root: string };
-  provenance: Record<string, unknown>;
-  confidence: Record<string, unknown>;
+  provenance: ReturnType<typeof provenance>;
+  confidence: ReturnType<typeof confidence>;
   summary: {
     verdict: "pass" | "warn" | "fail" | "incomplete";
     base: string | null;
@@ -156,12 +156,12 @@ export function auditMarkdown(artifact: AuditArtifact): string {
   return `${lines.join("\n")}\n`;
 }
 
-function findingsFromArtifact(value: unknown): Finding[] {
+function findingsFromArtifact(value: object): Finding[] {
   if (!isRecord(value) || !Array.isArray(value.findings)) return [];
   return value.findings.filter(isFindingRecord);
 }
 
-function requiredCheckFailures(config: Config, context: ReturnType<typeof createAnalysisContext>, artifacts: unknown[]): string[] {
+function requiredCheckFailures(config: Config, context: ReturnType<typeof createAnalysisContext>, artifacts: object[]): string[] {
   return [
     ...qmllintFailures(config, context),
     ...configuredEvidenceFailures(config, artifacts),
@@ -175,7 +175,7 @@ function qmllintFailures(config: Config, context: ReturnType<typeof createAnalys
   return [];
 }
 
-function configuredEvidenceFailures(config: Config, artifacts: unknown[]): string[] {
+function configuredEvidenceFailures(config: Config, artifacts: object[]): string[] {
   const byTask = new Map(artifacts.flatMap((artifact) => isRecord(artifact) && typeof artifact.task_id === "string" ? [[artifact.task_id, artifact]] : []));
   return [
     ...(config.tools.parserOracleCheck ? unusableArtifact(byTask.get("quality.parser_oracle"), "status", ["pass", "warn"], "parser oracle") : []),
@@ -189,7 +189,7 @@ function configuredEvidenceFailures(config: Config, artifacts: unknown[]): strin
   ];
 }
 
-function unusableArtifact(artifact: unknown, statusKey: string, accepted: string[], name: string): string[] {
+function unusableArtifact(artifact: object | undefined, statusKey: string, accepted: string[], name: string): string[] {
   if (!isRecord(artifact) || !isRecord(artifact.summary)) return [`${name} did not produce usable evidence`];
   const status = String(artifact.summary[statusKey] ?? "missing");
   if (accepted.includes(status)) return [];
@@ -262,18 +262,17 @@ function parseDiff(diff: string, base: string): DiffContext {
 
 function baseSnapshot(config: Config, base: string | null): BaseSnapshot {
   if (!base) return { findingIds: new Set(), status: "disabled" };
-  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-audit-"));
-  const worktree = path.join(temp, "base");
+  using temp = fs.mkdtempDisposableSync(path.join(os.tmpdir(), "qmlqualitylens-audit-"));
+  const worktree = path.join(temp.path, "base");
   try {
     const add = spawnSync("git", ["-C", config.projectRoot, "worktree", "add", "--detach", "--quiet", worktree, base], { encoding: "utf8", maxBuffer: 10 * 1024 * 1024 });
     if (add.status !== 0) return { findingIds: new Set(), status: "unavailable", reason: add.stderr || add.error?.message || "git worktree add failed" };
-    const baseConfig = configForWorktree(config, worktree, temp);
+    const baseConfig = configForWorktree(config, worktree, temp.path);
     return { findingIds: new Set(createAnalysisContext(baseConfig).findings.map(findingKey)), status: "available" };
   } catch (error) {
-    return { findingIds: new Set(), status: "unavailable", reason: error instanceof Error ? error.message : String(error) };
+    return { findingIds: new Set(), status: "unavailable", reason: errorMessage(error) };
   } finally {
     spawnSync("git", ["-C", config.projectRoot, "worktree", "remove", "--force", worktree], { encoding: "utf8" });
-    fs.rmSync(temp, { recursive: true, force: true });
   }
 }
 
@@ -292,7 +291,7 @@ function configForWorktree(config: Config, worktree: string, temp: string): Conf
 
 function readBaseline(file: string | null): Set<string> {
   if (!file || !fs.existsSync(file)) return new Set();
-  const parsed: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
+  const parsed = parseJson(fs.readFileSync(file, "utf8"));
   if (!isRecord(parsed) || !Array.isArray(parsed.findings)) return new Set();
   const keys = parsed.findings.flatMap((finding) => isRecord(finding) ? [finding.fingerprint, finding.id] : []).filter((key): key is string => typeof key === "string");
   return new Set(keys);

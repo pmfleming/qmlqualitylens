@@ -64,6 +64,9 @@ export function parseQmlDocument(text: string, file: string): QmlDocument {
 }
 
 class Parser {
+  private readonly text: string;
+  private readonly file: string;
+  private readonly tokens: QmlToken[];
   private index = 0;
   private nextObjectId = 1;
   private readonly objects: QmlObjectNode[] = [];
@@ -72,7 +75,11 @@ class Parser {
   private readonly imports: ImportRecord[] = [];
   private readonly diagnostics: QmlParserDiagnostic[] = [];
 
-  constructor(private readonly text: string, private readonly file: string, private readonly tokens: QmlToken[]) {}
+  constructor(text: string, file: string, tokens: QmlToken[]) {
+    this.text = text;
+    this.file = file;
+    this.tokens = tokens;
+  }
 
   parse(): QmlDocument {
     this.parseImports();

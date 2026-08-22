@@ -22,7 +22,7 @@ The rule registry in [`src/rules.ts`](../src/rules.ts) supplies defaults. `qmlqu
 
 ## What a pass means
 
-A `pass` means that all checks which actually ran satisfied the configured enforcement policy. It does **not** mean that optional or unconfigured tools ran.
+A `pass` means every completed check satisfied the configured policy. It does **not** mean optional or unconfigured tools ran.
 
 `quality_contract.json` lists every core check as:
 
@@ -31,13 +31,13 @@ A `pass` means that all checks which actually ran satisfied the configured enfor
 - `skipped`: the check was optional and did not run;
 - `incomplete`: the check was requested but its evidence could not be trusted or parsed.
 
-When `policy.require_qmllint` is true, missing or unusable `qmllint` evidence affects the contract/audit according to `policy.incomplete`. Structured reports that enumerate files are checked against discovered QML/JavaScript inputs; partial coverage is incomplete. `tools.qmllint.check` provides a shell-free native adapter that passes all discovered files to `qmllint --json -` and records import paths, qmltypes, version, exit status, and coverage. Project-specific command coverage is marked unknown rather than guessed.
+When `policy.require_qmllint` is true, missing or unusable evidence follows `policy.incomplete`. Structured reports are checked against discovered QML/JavaScript inputs; partial coverage is incomplete. The shell-free native adapter passes every discovered file to `qmllint --json -` and records import paths, `.qmltypes`, version, exit status, and coverage. Coverage from project-specific commands is unknown unless the report identifies its files.
 
 ## Profiles
 
 - `generic`: framework-neutral parsing and architecture rules.
 - `qtquick`: Qt Quick Controls/layout/lifecycle conventions.
-- `kirigami`: Qt Quick plus KDE/Kirigami import classification and future profile-specific rules.
+- `kirigami`: Qt Quick plus KDE/Kirigami imports and conventions.
 - `quickshell`: Quickshell import classification and process/service boundary checks.
 - `custom`: project-defined policy and rule overrides.
 
@@ -45,14 +45,16 @@ Profiles do not make project contribution policy automatic. The contributor rema
 
 ## Opt-in execution
 
-The default remains static and side-effect free. Trusted projects can explicitly enable:
+The default remains static and side-effect free. Trusted projects can enable:
 
-- `tools.cmake.check` to configure and/or build selected CMake targets;
-- `tools.qmltestrunner.check` to execute Qt Quick Test and produce managed JUnit evidence;
-- `tools.runtime.check` to execute a smoke scenario and inspect captured QML warnings;
-- `tools.qml_profiler.check` to execute a project-specific adapter which exports normalized profiler evidence.
+- `tools.parser_oracle.check`: compare the internal parser with `qmldom` and optional Tree-sitter;
+- `tools.cmake.check`: configure or build selected CMake targets;
+- `tools.qmllint.check` and `tools.qmlformat.check`: run Qt static tools;
+- `tools.qmltestrunner.check`: run Qt Quick Test and produce JUnit evidence;
+- `tools.runtime.check`: run a smoke scenario and inspect QML warnings;
+- `tools.qml_profiler.check`: run an adapter that exports normalized profiler evidence.
 
-Commands are invoked as executable/argument arrays without a shell, support controlled working directories/environments and redaction patterns, have configured timeouts, terminate timed-out process groups, retain bounded output tails, redact sensitive-looking arguments, and record exit status. They can still execute arbitrary project code, tests, applications, CMake scripts, or build hooks, so they must only be enabled for trusted repositories in controlled environments.
+Commands use executable/argument arrays rather than a shell. Adapters support controlled working directories, environments, redaction, and timeouts. They terminate timed-out process groups, retain bounded output tails, and record exit status. Because they can execute project code or build hooks, enable them only for trusted repositories in controlled environments.
 
 ## Imported reports
 
@@ -89,7 +91,17 @@ Discovery, execution, and passing are represented separately. Malformed reports,
 }
 ```
 
-The importer requires a named scenario, Qt version, platform, and at least one measured frame or event. `tools.qml_profiler.check` may run an explicitly configured export adapter; it receives the target normalized report path in `QMLQUALITYLENS_REPORT`. It reports frame percentiles, scenario-relative frames over budget, and event totals/maxima. A scenario supplies `environment.frame_budget_ms` or `environment.refresh_hz`; without either, over-budget frame counts remain unknown. Configured budgets are incomplete when their scenario or required measurement is absent. Chrome trace JSON can be converted with `scripts/normalize-qml-profile.mjs`. Native binary QML Profiler formats should normalize into this interchange only after format-specific calibration.
+Each scenario needs a name, Qt version, platform, and at least one frame or event. A configured export adapter receives the target report path in `QMLQUALITYLENS_REPORT`.
+
+Reports include frame percentiles, frames over budget, and event totals/maxima. Supply `environment.frame_budget_ms` or `environment.refresh_hz`; otherwise over-budget counts are unknown. A configured budget is incomplete when its scenario or measurement is absent. Convert Chrome traces with `scripts/normalize-qml-profile.mjs`. Native profiler formats require a calibrated adapter.
+
+### Coverage
+
+`reports.coverage` accepts Cobertura/Qoverage XML. Lens maps observations separately to QML objects, bindings, and executable JavaScript. Partial scope remains visible, and unobserved code is not treated as dead.
+
+### Benchmarks
+
+`reports.qmlbench` accepts qmlbench JSON. With `reports.qmlbench_baseline`, Lens compares matching benchmark names only when Qt, OS/QPA, OpenGL, and window environments match. Noise and sample-count limits come from `benchmark_policy`.
 
 ## CI examples
 

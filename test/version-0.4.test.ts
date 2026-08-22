@@ -65,11 +65,18 @@ test("v0.4 derives frame overruns from scenario refresh rate instead of assuming
 });
 
 test("v0.4 parser oracle supports qmldom-compatible and optional tree-sitter evidence", () => {
-  const script = `#!/usr/bin/env node\nif (process.argv.includes('--version')) console.log('fake qmldom 1'); else console.log('<UiProgram><UiImport/><UiObjectDefinition/></UiProgram>');\n`;
-  const { root, config, context } = fixture({ "Main.qml": `import QtQuick\nItem {}\n`, "fake-qmldom.mjs": script }, { tools: { parser_oracle: { check: true, qmldom_command: "./fake-qmldom.mjs", tree_sitter: true } } });
+  const script = `#!/usr/bin/env node\nif (process.argv.includes('--version')) console.log('fake qmldom 1'); else console.log('<UiProgram><UiImport/><UiObjectDefinition/><UiPublicMember type="Property"/><UiScriptBinding/><UiScriptBinding/></UiProgram>');\n`;
+  const { root, config, context } = fixture({ "Main.qml": `import QtQuick\nItem { property int answer: 42; width: answer }\n`, "fake-qmldom.mjs": script }, { tools: { parser_oracle: { check: true, qmldom_command: "./fake-qmldom.mjs", tree_sitter: true } } });
   fs.chmodSync(path.join(root, "fake-qmldom.mjs"), 0o755);
-  const artifact = measureParserOracle(config, "test", context) as { summary: { status: string; tree_sitter_available: boolean }; records: Array<{ tree_sitter: { status: string } }> };
+  const artifact = measureParserOracle(config, "test", context) as {
+    summary: { status: string; tree_sitter_available: boolean };
+    records: Array<{ tree_sitter: { status: string; counts: { imports: number; objects: number; properties: number; bindings: number }; named_nodes: number; total_nodes: number; error_nodes: number; missing_nodes: number } }>;
+  };
   assert.equal(artifact.summary.tree_sitter_available, true);
   assert.equal(artifact.records[0]?.tree_sitter.status, "pass");
+  assert.deepEqual(artifact.records[0]?.tree_sitter.counts, { imports: 1, objects: 1, properties: 1, bindings: 2 });
+  assert.ok(artifact.records[0]?.tree_sitter.total_nodes > artifact.records[0]?.tree_sitter.named_nodes);
+  assert.equal(artifact.records[0]?.tree_sitter.error_nodes, 0);
+  assert.equal(artifact.records[0]?.tree_sitter.missing_nodes, 0);
   assert.equal(artifact.summary.status, "pass");
 });

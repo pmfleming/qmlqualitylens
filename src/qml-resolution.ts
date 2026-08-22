@@ -36,7 +36,7 @@ type ComponentUseResolution = {
   unresolved: boolean;
 };
 
-export type ReachabilityEdge = { from: string; to: string; kind: "component_use" | "loader_source" | "source_component" | "configured_dynamic"; line?: number };
+type ReachabilityEdge = { from: string; to: string; kind: "component_use" | "loader_source" | "source_component" | "configured_dynamic"; line?: number };
 
 export type ProjectResolution = {
   componentsByName: Map<string, string>;
@@ -296,26 +296,24 @@ function discoverEntrypoints(components: ComponentRecord[], config: Config, sour
 }
 
 function discoverDynamicEdges(documents: QmlDocumentEntry[], componentsByName: Map<string, string>, sourcePaths: Set<string>, config: Config): ReachabilityEdge[] {
-  const edges: ReachabilityEdge[] = config.dynamicComponentEdges
+  const configured: ReachabilityEdge[] = config.dynamicComponentEdges
     .filter((edge) => sourcePaths.has(edge.from) && sourcePaths.has(edge.to))
     .map((edge) => ({ ...edge, kind: "configured_dynamic" }));
-  for (const { file, document } of documents) {
-    for (const binding of document.bindings) {
-      if (binding.propertyPath === "source") {
-        const literal = binding.expression.trim().replace(/;$/, "").match(/^["']([^"']+\.qml)["']$/)?.[1];
-        if (literal) {
-          const target = normalizeRelative(path.posix.dirname(file), literal);
-          if (sourcePaths.has(target)) edges.push({ from: file, to: target, kind: "loader_source", line: binding.line });
-        }
-      }
-      if (binding.propertyPath === "sourceComponent") {
-        const name = binding.expression.trim().replace(/;$/, "").match(/^([A-Z][A-Za-z0-9_]*)$/)?.[1];
-        const target = name ? componentsByName.get(name) : null;
-        if (target) edges.push({ from: file, to: target, kind: "source_component", line: binding.line });
-      }
-    }
+  const discovered = documents.flatMap(({ file, document }) => document.bindings.flatMap((binding) => dynamicEdge(file, binding, componentsByName, sourcePaths)));
+  return uniqueEdges([...configured, ...discovered]);
+}
+
+function dynamicEdge(file: string, binding: QmlDocument["bindings"][number], componentsByName: Map<string, string>, sourcePaths: Set<string>): ReachabilityEdge[] {
+  const expression = binding.expression.trim().replace(/;$/, "");
+  if (binding.propertyPath === "source") {
+    const literal = expression.match(/^["']([^"']+\.qml)["']$/)?.[1];
+    const target = literal ? normalizeRelative(path.posix.dirname(file), literal) : null;
+    return target && sourcePaths.has(target) ? [{ from: file, to: target, kind: "loader_source", line: binding.line }] : [];
   }
-  return uniqueEdges(edges);
+  if (binding.propertyPath !== "sourceComponent") return [];
+  const name = expression.match(/^([A-Z][A-Za-z0-9_]*)$/)?.[1];
+  const target = name ? componentsByName.get(name) : null;
+  return target ? [{ from: file, to: target, kind: "source_component", line: binding.line }] : [];
 }
 
 function computeReachability(entrypoints: Set<string>, componentFiles: string[], edges: ReachabilityEdge[]): { reachable: Set<string>; unreachable: Set<string>; paths: Map<string, string[]> } {

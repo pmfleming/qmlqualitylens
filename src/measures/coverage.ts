@@ -65,7 +65,7 @@ function lineAtOffset(context: AnalysisContext, file: string, offset: number): n
 }
 
 function highRiskUnobserved(component: AnalysisContext["components"][number], observed: Set<string>): Finding[] {
-  const risk = Math.round(component.effort * 0.25 + component.distinctIdReferences * 5 + component.processBoundaryViolations * 15 + Math.max(0, component.objectCount - 20) * 2 + Math.max(0, component.loc.source - 200) * 0.1);
+  const risk = support.componentRiskScore(component);
   if (risk < 120 || observed.has(component.file)) return [];
   return [{ id: `coverage.unobserved_high_risk.${component.file}`, kind: "coverage.unobserved_high_risk", severity: "medium", file: component.file, line: component.line, message: `High-risk component ${component.name} was not observed in the imported coverage scenarios`, metric: risk, actions: ["Add a representative QML test or runtime scenario, or document why this component is outside the report scope."] }];
 }
@@ -120,7 +120,7 @@ function decodeXml(value: string): string {
   return value.replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
 }
 
-function writeCoverage(config: Config, artifact: unknown) {
+function writeCoverage<T extends object>(config: Config, artifact: T): T {
   writeArtifact(config, "coverage_evidence.json", artifact);
   return artifact;
 }

@@ -1,8 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { executeTool, publicToolExecution, toolVersion, type ToolExecution } from "../tool-execution.js";
-import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding } from "./foundation.js";
 import { ARTIFACT_SCHEMA_VERSION } from "../version.js";
+import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding, type MeasureToolExecution as ToolExecution } from "./foundation.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 
 export function measureCorrectnessCatalog(config: Config, command: string, context: AnalysisContext) {
@@ -20,13 +19,13 @@ export function measureCorrectnessCatalog(config: Config, command: string, conte
       execution_status: toolExecution?.status === "incomplete" ? "incomplete" : toolExecution?.status === "failed" && execution.failures.length === 0 ? "failed" : execution.status,
       execution_reason: toolExecution?.error ?? execution.reason,
       tool_status: toolExecution?.status ?? "not_configured",
-      tool_version: config.tools.qmltestrunnerCheck ? toolVersion(config.tools.qmltestrunnerCommand, config.tools.qmltestrunnerWorkingDirectory) : null,
+      tool_version: config.tools.qmltestrunnerCheck ? support.toolVersion(config.tools.qmltestrunnerCommand, config.tools.qmltestrunnerWorkingDirectory) : null,
       executed: execution.tests,
       failures: execution.failures.length,
       ...findingSummary(findings),
     },
     tests,
-    execution: { report: execution, tool: toolExecution ? publicToolExecution(toolExecution) : null },
+    execution: { report: execution, tool: toolExecution ? support.publicToolExecution(toolExecution) : null },
     findings,
   };
   writeArtifact(config, "correctness_review.json", artifact);
@@ -62,7 +61,7 @@ function runQmlTests(config: Config): ToolExecution | null {
   if (!report) return null;
   fs.mkdirSync(path.dirname(report), { recursive: true });
   fs.rmSync(report, { force: true });
-  return executeTool(
+  return support.executeTool(
     config.tools.qmltestrunnerCommand,
     [...config.tools.qmltestrunnerArguments, "-o", `${report},junitxml`],
     config.tools.qmltestrunnerWorkingDirectory,
@@ -98,12 +97,12 @@ function loadTestEvidence(file: string | null): TestEvidence {
     if (text.trim().startsWith("{") || text.trim().startsWith("[")) return parseJsonTestEvidence(text, file);
     return parseJunitEvidence(text, file);
   } catch (error) {
-    return { status: "incomplete", reason: `Unable to parse test report: ${error instanceof Error ? error.message : String(error)}`, report: file, format: null, tests: 0, duration: null, failures: [] };
+    return { status: "incomplete", reason: `Unable to parse test report: ${support.errorMessage(error)}`, report: file, format: null, tests: 0, duration: null, failures: [] };
   }
 }
 
 function parseJsonTestEvidence(text: string, report: string): TestEvidence {
-  const value: unknown = JSON.parse(text);
+  const value = support.parseJson(text);
   const root = support.isRecord(value) ? value : {};
   const cases = Array.isArray(value) ? value : Array.isArray(root.tests) ? root.tests : Array.isArray(root.testCases) ? root.testCases : null;
   if (!cases) return { status: "incomplete", reason: "JSON test report has no tests or testCases array.", report, format: "json", tests: 0, duration: support.numberValue(root.duration), failures: [] };

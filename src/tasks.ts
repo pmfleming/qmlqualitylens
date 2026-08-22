@@ -28,7 +28,7 @@ type TaskDefinition = {
   artifact: string;
   description: string;
   dependsOn?: string[];
-  handler: (config: Config, command: string, context: AnalysisContext) => unknown;
+  handler: (config: Config, command: string, context: AnalysisContext) => object;
 };
 
 export const TASKS: TaskDefinition[] = [

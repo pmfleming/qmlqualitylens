@@ -1,8 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-export type ToolExecution = {
+type ToolExecution = {
   status: "pass" | "failed" | "incomplete";
   command: string;
   exit_code: number | null;
@@ -17,7 +16,7 @@ export type ToolExecution = {
 
 export function executeTool(executable: string, args: string[], cwd: string, timeoutMs: number, environment: NodeJS.ProcessEnv = process.env, redactPatterns: string[] = []): ToolExecution {
   const started = Date.now();
-  const runner = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../bin/tool-process-runner.js");
+  const runner = path.resolve(import.meta.dirname, "../bin/tool-process-runner.js");
   const result = spawnSync(process.execPath, [runner, executable, ...args], { cwd, env: environment, timeout: timeoutMs, killSignal: "SIGTERM", encoding: "utf8", maxBuffer: 20 * 1024 * 1024 });
   const stdout = redact(result.stdout ?? "", redactPatterns);
   const stderr = redact(result.stderr ?? "", redactPatterns);

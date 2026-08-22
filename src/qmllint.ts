@@ -2,8 +2,8 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { commandDisplay, projectRelativePath } from "./tool-execution.js";
-import type { Config, Finding, QmllintFinding, QmllintSource } from "./types.js";
-import { hasCaptures, isRecord, numberValue, stringValue } from "./value-utils.js";
+import type { Config, Finding, JsonValue, QmllintFinding, QmllintSource } from "./types.js";
+import { errorMessage, hasCaptures, isJsonRecord, isRecord, numberValue, parseJson, stringValue } from "./value-utils.js";
 
 export type QmllintResult = {
   source: QmllintSource;
@@ -129,14 +129,14 @@ function safeParseQmllintOutput(text: string, config: Config): { findings: Qmlli
     if (trimmed && findings.length === 0 && !structuredEmpty) return { findings, error: "qmllint produced non-empty output with no parseable diagnostics" };
     return { findings, error: null };
   } catch (error) {
-    return { findings: [], error: `Unable to parse qmllint output: ${error instanceof Error ? error.message : String(error)}` };
+    return { findings: [], error: `Unable to parse qmllint output: ${errorMessage(error)}` };
   }
 }
 
 function isStructuredQmllintJson(text: string): boolean {
   if (!text.startsWith("{") && !text.startsWith("[")) return false;
   try {
-    const value: unknown = JSON.parse(text);
+    const value = parseJson(text);
     return Array.isArray(value) || (isRecord(value) && ["diagnostics", "messages", "issues", "files"].some((key) => Array.isArray(value[key]))) || (isRecord(value) && Object.keys(value).length === 0);
   } catch {
     return false;
@@ -151,20 +151,20 @@ export function parseQmllintOutput(text: string, config: Config): QmllintFinding
 }
 
 function parseJsonQmllint(text: string, config: Config): QmllintFinding[] {
-  const value: unknown = JSON.parse(text);
+  const value = parseJson(text);
   return walkJsonDiagnostics(value, config, null);
 }
 
-function walkJsonDiagnostics(value: unknown, config: Config, inheritedFile: string | null): QmllintFinding[] {
+function walkJsonDiagnostics(value: JsonValue, config: Config, inheritedFile: string | null): QmllintFinding[] {
   if (Array.isArray(value)) return value.flatMap((item) => walkJsonDiagnostics(item, config, inheritedFile));
-  if (!isRecord(value)) return [];
+  if (!isJsonRecord(value)) return [];
   const file = stringValue(value.file) ?? stringValue(value.path) ?? stringValue(value.url) ?? stringValue(value.filename) ?? inheritedFile;
   const direct = normalizeJsonFinding(value, file, config);
   if (direct.length) return direct;
   return Object.values(value).flatMap((child) => typeof child === "object" && child !== null ? walkJsonDiagnostics(child, config, file) : []);
 }
 
-function normalizeJsonFinding(item: Record<string, unknown>, file: string | null, config: Config): QmllintFinding[] {
+function normalizeJsonFinding(item: Record<string, JsonValue>, file: string | null, config: Config): QmllintFinding[] {
   const message = stringValue(item.message) ?? stringValue(item.description) ?? stringValue(item.text);
   if (!file || !message) return [];
   const location = isRecord(item.location) ? item.location : isRecord(item.loc) ? item.loc : {};
@@ -252,7 +252,7 @@ function normalizedExpectedFiles(files: string[]): string[] {
 
 function filesFromStructuredReport(text: string, config: Config): string[] {
   try {
-    const value: unknown = JSON.parse(text);
+    const value = parseJson(text);
     const records = isRecord(value) && Array.isArray(value.files) ? value.files : Array.isArray(value) ? value : [];
     return [...new Set(records.flatMap((item) => {
       if (!isRecord(item)) return [];
@@ -266,7 +266,7 @@ function filesFromStructuredReport(text: string, config: Config): string[] {
 
 function hasStructuredFileManifest(text: string): boolean {
   try {
-    const value: unknown = JSON.parse(text);
+    const value = parseJson(text);
     return (isRecord(value) && Array.isArray(value.files)) || Array.isArray(value);
   } catch {
     return false;
@@ -281,7 +281,7 @@ function reportCoverage(expectedFiles: string[], reportedFiles: string[], hasMan
 
 function versionFromReport(text: string): string | null {
   try {
-    const value: unknown = JSON.parse(text);
+    const value = parseJson(text);
     if (!isRecord(value)) return null;
     return stringValue(value.version) ?? stringValue(value.qtVersion) ?? stringValue(value.toolVersion) ?? null;
   } catch {

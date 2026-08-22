@@ -1,8 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { executeTool, publicToolExecution, type ToolExecution } from "../tool-execution.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
-import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding } from "./foundation.js";
+import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding, type MeasureJsonValue as JsonValue, type MeasureToolExecution as ToolExecution } from "./foundation.js";
 
 export function measureRuntimeWarnings(config: Config, command: string, context: AnalysisContext) {
   const report = config.reports.runtimeWarnings;
@@ -23,7 +22,7 @@ export function measureRuntimeWarnings(config: Config, command: string, context:
   const artifact = {
     ...baseArtifact(context, "correctness.runtime_warnings", command),
     summary: { status, reason: execution?.error ?? null, report, tool_status: execution?.status ?? "not_configured", ...findingSummary(findings) },
-    execution: execution ? publicToolExecution(execution) : null,
+    execution: execution ? support.publicToolExecution(execution) : null,
     findings,
   };
   writeArtifact(config, "runtime_warnings.json", artifact);
@@ -34,16 +33,14 @@ export function measureRuntimePerformance(config: Config, command: string, conte
   const report = config.reports.qmlProfiler;
   const execution = runProfilerProducer(config, report);
   if (!report || !fs.existsSync(report)) return writeEmptyPerformanceArtifact(config, command, context, report, execution);
-  let parsed: unknown;
-  try { parsed = JSON.parse(fs.readFileSync(report, "utf8")); } catch { parsed = null; }
-  const normalized = normalizePerformanceReport(parsed);
+  const normalized = normalizePerformanceReport(readJsonReport(report));
   const budgetReason = performanceBudgetCoverageReason(normalized.scenarios, config);
   const complete = normalized.complete && !budgetReason;
   const findings = support.applySuppressions(support.enrichFindings(performanceBudgetFindings(normalized.scenarios, config), config), config);
   const artifact = {
     ...baseArtifact(context, "performance.runtime", command),
     summary: { status: performanceReportStatus(complete, execution), report, reason: [producerFailureReason(execution), normalized.reason, budgetReason].filter(Boolean).join("; ") || null, scenarios: normalized.scenarios.length, ...findingSummary(findings) },
-    execution: execution ? publicToolExecution(execution) : null,
+    execution: execution ? support.publicToolExecution(execution) : null,
     scenarios: normalized.scenarios,
     findings,
   };
@@ -58,7 +55,7 @@ function runtimeExecutionStatus(execution: ToolExecution | null): "not_configure
 
 function writeEmptyPerformanceArtifact(config: Config, command: string, context: AnalysisContext, report: string | null, execution: ToolExecution | null) {
   const status = execution?.status === "incomplete" || execution?.status === "failed" ? "incomplete" : report ? "missing" : "not_configured";
-  const artifact = { ...baseArtifact(context, "performance.runtime", command), summary: { status, reason: producerFailureReason(execution), report }, execution: execution ? publicToolExecution(execution) : null, scenarios: [], findings: [] };
+  const artifact = { ...baseArtifact(context, "performance.runtime", command), summary: { status, reason: producerFailureReason(execution), report }, execution: execution ? support.publicToolExecution(execution) : null, scenarios: [], findings: [] };
   writeArtifact(config, "runtime_performance.json", artifact);
   return artifact;
 }
@@ -72,16 +69,18 @@ function producerFailureReason(execution: ToolExecution | null): string | null {
   return execution?.status === "failed" ? `Profiler producer exited with ${execution.exit_code}` : null;
 }
 
+function readJsonReport(file: string) { try { return support.parseJson(fs.readFileSync(file, "utf8")); } catch { return null; } }
+
 function runRuntimeSmoke(config: Config): ToolExecution | null {
   if (!config.tools.runtimeCheck || !config.tools.runtimeCommand) return null;
-  return executeTool(config.tools.runtimeCommand, config.tools.runtimeArguments, config.tools.runtimeWorkingDirectory, config.tools.runtimeTimeoutMs, { ...process.env, ...config.tools.runtimeEnvironment }, config.tools.runtimeRedactPatterns);
+  return support.executeTool(config.tools.runtimeCommand, config.tools.runtimeArguments, config.tools.runtimeWorkingDirectory, config.tools.runtimeTimeoutMs, { ...process.env, ...config.tools.runtimeEnvironment }, config.tools.runtimeRedactPatterns);
 }
 
 function runProfilerProducer(config: Config, report: string | null): ToolExecution | null {
   if (!config.tools.qmlProfilerCheck || !config.tools.qmlProfilerCommand || !report) return null;
   fs.mkdirSync(path.dirname(report), { recursive: true });
   fs.rmSync(report, { force: true });
-  return executeTool(config.tools.qmlProfilerCommand, config.tools.qmlProfilerArguments, config.tools.qmlProfilerWorkingDirectory, config.tools.qmlProfilerTimeoutMs, { ...process.env, ...config.tools.qmlProfilerEnvironment, QMLQUALITYLENS_REPORT: report }, config.tools.qmlProfilerRedactPatterns);
+  return support.executeTool(config.tools.qmlProfilerCommand, config.tools.qmlProfilerArguments, config.tools.qmlProfilerWorkingDirectory, config.tools.qmlProfilerTimeoutMs, { ...process.env, ...config.tools.qmlProfilerEnvironment, QMLQUALITYLENS_REPORT: report }, config.tools.qmlProfilerRedactPatterns);
 }
 
 function parseRuntimeWarnings(text: string, config: Config): Finding[] {
@@ -99,7 +98,7 @@ function parseRuntimeWarnings(text: string, config: Config): Finding[] {
 
 type RuntimeScenario = {
   scenario: string;
-  environment: Record<string, unknown>;
+  environment: Record<string, JsonValue>;
   frame_count: number;
   frame_time_ms: { p50: number | null; p95: number | null; p99: number | null; max: number | null };
   frame_budget_ms: number | null;
@@ -108,16 +107,22 @@ type RuntimeScenario = {
   hotspots: Array<{ category: string; duration_ms: number; file?: string; line?: number }>;
 };
 
-function normalizePerformanceReport(value: unknown): { complete: boolean; reason: string | null; scenarios: RuntimeScenario[] } {
-  const roots = Array.isArray(value) ? value : support.isRecord(value) && Array.isArray(value.scenarios) ? value.scenarios : value ? [value] : [];
+function normalizePerformanceReport(value: JsonValue | null): { complete: boolean; reason: string | null; scenarios: RuntimeScenario[] } {
+  const roots = scenarioRoots(value);
   const scenarios = roots.flatMap((item) => normalizeScenario(item));
   if (!scenarios.length) return { complete: false, reason: "No supported scenario with Qt/platform provenance and measured frames or events was found.", scenarios: [] };
   if (scenarios.length !== roots.length) return { complete: false, reason: `${roots.length - scenarios.length} scenario(s) were rejected because provenance or measurements were missing.`, scenarios };
   return { complete: true, reason: null, scenarios };
 }
 
-function normalizeScenario(value: unknown): RuntimeScenario[] {
-  if (!support.isRecord(value) || typeof value.scenario !== "string" || !value.scenario.trim() || !support.isRecord(value.environment)) return [];
+function scenarioRoots(value: JsonValue | null): JsonValue[] {
+  if (value === null) return [];
+  if (Array.isArray(value)) return value;
+  return support.isJsonRecord(value) && Array.isArray(value.scenarios) ? value.scenarios : [value];
+}
+
+function normalizeScenario(value: JsonValue): RuntimeScenario[] {
+  if (!support.isJsonRecord(value) || typeof value.scenario !== "string" || !value.scenario.trim() || !support.isJsonRecord(value.environment)) return [];
   const qt = value.environment.qt ?? value.environment.qt_version ?? value.environment.qtVersion;
   if (typeof qt !== "string" || !qt.trim() || typeof value.environment.platform !== "string" || !value.environment.platform.trim()) return [];
   const traceEvents = Array.isArray(value.traceEvents) ? value.traceEvents : [];
@@ -129,19 +134,19 @@ function normalizeScenario(value: unknown): RuntimeScenario[] {
   return [{ scenario: value.scenario, environment: value.environment, frame_count: frames.length, frame_time_ms: { p50: percentile(frames, 0.5), p95: percentile(frames, 0.95), p99: percentile(frames, 0.99), max: frames.at(-1) ?? null }, frame_budget_ms: frameBudget, frames_over_budget: frameBudget === null ? null : frames.filter((duration) => duration > frameBudget).length, events, hotspots: eventHotspots(measuredEvents) }];
 }
 
-function scenarioFrameBudget(environment: Record<string, unknown>): number | null {
+function scenarioFrameBudget(environment: Record<string, JsonValue>): number | null {
   const explicit = support.numberValue(environment.frame_budget_ms) ?? support.numberValue(environment.frameBudgetMs);
   if (explicit !== null && explicit > 0) return explicit;
   const refresh = support.numberValue(environment.refresh_hz) ?? support.numberValue(environment.refreshHz);
   return refresh !== null && refresh > 0 ? round(1000 / refresh) : null;
 }
 
-function frameDurations(frames: unknown, traceEvents: unknown[]): number[] {
-  const input = Array.isArray(frames) ? frames : traceEvents.filter((event) => support.isRecord(event) && /frame/i.test(String(event.name ?? event.cat ?? "")));
+function frameDurations(frames: JsonValue | undefined, traceEvents: JsonValue[]): number[] {
+  const input = Array.isArray(frames) ? frames : traceEvents.filter((event) => support.isJsonRecord(event) && /frame/i.test(String(event.name ?? event.cat ?? "")));
   return input.map((frame) => typeof frame === "number" ? frame : durationMs(frame)).filter((duration): duration is number => duration !== null && Number.isFinite(duration) && duration >= 0);
 }
 
-function eventSummaries(input: unknown[]): RuntimeScenario["events"] {
+function eventSummaries(input: JsonValue[]): RuntimeScenario["events"] {
   const events = new Map<string, number[]>();
   for (const event of input) {
     const category = eventCategory(event);
@@ -152,27 +157,27 @@ function eventSummaries(input: unknown[]): RuntimeScenario["events"] {
   return Object.fromEntries([...events].map(([category, durations]) => [category, { count: durations.length, total_ms: round(durations.reduce((sum, duration) => sum + duration, 0)), max_ms: round(Math.max(...durations)) }]));
 }
 
-function eventHotspots(input: unknown[]): RuntimeScenario["hotspots"] {
+function eventHotspots(input: JsonValue[]): RuntimeScenario["hotspots"] {
   return input.flatMap((event) => {
     const category = eventCategory(event);
     const duration = durationMs(event);
-    if (!category || /frame/i.test(category) || duration === null || !Number.isFinite(duration) || duration < 0 || !support.isRecord(event)) return [];
-    const args = support.isRecord(event.args) ? event.args : {};
-    const data = support.isRecord(args.data) ? args.data : {};
+    if (!category || /frame/i.test(category) || duration === null || !Number.isFinite(duration) || duration < 0 || !support.isJsonRecord(event)) return [];
+    const args = support.isJsonRecord(event.args) ? event.args : {};
+    const data = support.isJsonRecord(args.data) ? args.data : {};
     const file = support.stringValue(event.file) ?? support.stringValue(args.file) ?? support.stringValue(data.file) ?? undefined;
     const line = support.numberValue(event.line) ?? support.numberValue(args.line) ?? support.numberValue(data.line) ?? undefined;
     return [{ category, duration_ms: round(duration), ...(file ? { file } : {}), ...(line ? { line } : {}) }];
   }).sort((left, right) => right.duration_ms - left.duration_ms).slice(0, 50);
 }
 
-function eventCategory(value: unknown): string | null {
-  if (!support.isRecord(value)) return null;
+function eventCategory(value: JsonValue): string | null {
+  if (!support.isJsonRecord(value)) return null;
   for (const key of ["category", "cat", "name"]) if (typeof value[key] === "string") return value[key];
   return null;
 }
 
-function durationMs(value: unknown): number | null {
-  if (!support.isRecord(value)) return null;
+function durationMs(value: JsonValue): number | null {
+  if (!support.isJsonRecord(value)) return null;
   if (typeof value.duration_ms === "number") return value.duration_ms;
   return typeof value.dur === "number" ? value.dur / 1000 : null;
 }

@@ -5,7 +5,7 @@ import { discoverSourceFiles } from "./file-walk.js";
 import { attachSemanticAnchors } from "./finding-identity.js";
 import { boundedScore, complexityForCode, countMatches, lineNumberAt, locFor, stripComments, stripCommentsAndStrings } from "./metrics.js";
 import { isProcessBoundaryFile } from "./config.js";
-import { baseTypeName, matchesAnyConfiguredTypeName } from "./qml-model.js";
+import { matchesAnyConfiguredTypeName } from "./qml-model.js";
 import { parseQmlDocument } from "./qml-parser.js";
 import type { QmlDocument, QmlExecutableNode } from "./qml-parser-types.js";
 import { buildProjectResolution, type ProjectResolution } from "./qml-resolution.js";

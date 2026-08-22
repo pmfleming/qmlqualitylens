@@ -69,7 +69,7 @@ function artifactFindings(config: Config, filename: string): Finding[] {
   const file = path.join(config.outputDir, filename);
   if (!fs.existsSync(file)) return [];
   try {
-    const value: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
+    const value = support.parseJson(fs.readFileSync(file, "utf8"));
     return support.isRecord(value) && Array.isArray(value.findings) ? value.findings.filter(support.isFindingRecord) : [];
   } catch {
     return [];
@@ -85,7 +85,7 @@ function artifactCheck(config: Config, id: string, name: string, filename: strin
   const file = path.join(config.outputDir, filename);
   if (!fs.existsSync(file)) return check(id, name, "skipped", 0, `${filename} was not produced.`);
   try {
-    const value: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
+    const value = support.parseJson(fs.readFileSync(file, "utf8"));
     if (!support.isRecord(value)) return check(id, name, "incomplete", 0, `${filename} has an invalid shape.`);
     const summary = support.isRecord(value.summary) ? value.summary : {};
     const status = normalizeStatus(String(summary.status ?? summary.execution_status ?? "pass"));

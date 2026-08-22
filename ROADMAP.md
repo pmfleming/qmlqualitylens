@@ -1,8 +1,14 @@
 # QML Quality Lens Roadmap
 
-Version 0.4 adds project/`.qmltypes` type evidence, parser-oracle calibration, rule evaluation coverage, semantic moved-finding identities, inherited type roles, and refresh-aware frame evidence. Version 0.5 adds entrypoint/dynamic reachability, Cobertura/Qoverage mapping, qmlbench baseline regression evidence, and GitLab Code Quality output.
+This checklist records completed work and remaining calibration.
 
-The implemented v0.2 research plan is in [`docs/qml-quality-improvement-plan.md`](docs/qml-quality-improvement-plan.md). Version 0.3 adds opt-in CMake builds, Qt Quick Test and runtime-smoke execution, hardened process controls, Chrome-trace normalization, a real Qt integration fixture, and a documented Shelllist trial. It introduced evidence classification, correct `qmllint` gating, incomplete-check reporting, policy-based audit verdicts, report ingestion, UX/performance checks, profiles, SARIF, and calibration. This checklist remains the historical feature roadmap and identifies areas for deeper calibration.
+## Release summary
+
+- **0.3:** opt-in CMake, Qt Quick Test, runtime smoke, Chrome-trace normalization, hardened process controls, evidence policy, profiles, SARIF, and external calibration.
+- **0.4:** `.qmltypes` evidence, parser-oracle calibration, rule coverage, semantic finding identities, inherited type roles, and refresh-aware frame evidence.
+- **0.5:** reachability, Cobertura/Qoverage mapping, qmlbench regression evidence, and GitLab Code Quality output.
+
+See the [historical implementation plan](docs/qml-quality-improvement-plan.md) for design rationale.
 
 ## Phase 1: MVP static artifact
 
@@ -45,7 +51,7 @@ The implemented v0.2 research plan is in [`docs/qml-quality-improvement-plan.md`
 - [x] Import qmlbench JSON with environment/noise validation and baseline-relative regression policy.
 - [x] Initial theming/i18n checks for semantic colors and untranslated user-facing strings.
 - [x] Boundary hygiene for side effects, Process placement, and configurable boundary types/patterns.
-- Deepen focus traps, Escape behavior, semantic token coverage, protocol parsing, secret handling, and command construction.
+- [ ] Deepen focus traps, Escape behavior, semantic token coverage, protocol parsing, secret handling, and command construction.
 
 ## Phase 4: Adoption workflow
 
@@ -57,7 +63,7 @@ The implemented v0.2 research plan is in [`docs/qml-quality-improvement-plan.md`
 - [x] Optional CI job for Qt/qmllint oracle calibration.
 - [x] Local Nix/direnv Qt oracle environment.
 - [x] Suppressions with stale-suppression detection.
-- Moved-finding attribution across refactors.
+- [ ] Add moved-finding attribution across refactors.
 
 ## Phase 5: Ecosystem support
 
@@ -65,4 +71,4 @@ The implemented v0.2 research plan is in [`docs/qml-quality-improvement-plan.md`
 - [x] Initial Quickshell-specific Process/service checks.
 - [x] Initial Kirigami/Qt Controls import and convention support.
 - [x] Optional `qmldom` and tree-sitter-QML parser oracle integration, while retaining the dependency-free internal parser.
-- Dashboard/project-management-board catalog compatibility.
+- [ ] Add dashboard and project-board catalog compatibility.

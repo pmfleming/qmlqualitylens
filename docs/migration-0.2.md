@@ -4,7 +4,7 @@ Version 0.2 changes the trust and CI model while retaining the 0.1 configuration
 
 ## Artifact schema
 
-New artifacts use `schema_version: "0.2.0"`. The package version and artifact schema currently advance together, but consumers should check `schema_version` rather than infer it from the package.
+New artifacts use `schema_version: "0.2.0"`. Always read this field; do not infer an artifact schema from the package version.
 
 The legacy `qml_quality_report.json` remains available. Its score is now presented as the **heuristic maintainability score**, not a compliance verdict. Use `quality_contract.json` or `audit.json` for CI decisions.
 
@@ -37,7 +37,7 @@ Without `require_qmllint`, an absent lint run is listed as skipped instead of be
 
 ## Baselines
 
-0.1 baseline entries containing only `id` continue to load. Newly saved baselines also include stable fingerprints and use schema 0.2. Regenerate a baseline after reviewing 0.2 findings so future matching is less sensitive to messages containing changed metric values.
+Baselines containing only a 0.1 `id` still load. New baselines use schema 0.2 and include stable fingerprints. After reviewing 0.2 findings, regenerate the baseline to avoid matching on changeable metric text.
 
 ## Existing configuration
 

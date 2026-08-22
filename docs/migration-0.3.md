@@ -4,7 +4,7 @@ Version 0.3 adds opt-in execution of trusted Qt project workflows and tightens e
 
 ## Artifact schema
 
-Artifacts, catalogs, baselines, SARIF tool metadata, and provenance now use version `0.3.0`. Existing 0.2 baseline files continue to load because matching accepts both stable fingerprints and legacy finding ids. Regenerate stored baselines after reviewing 0.3 results.
+Artifacts, catalogs, baselines, SARIF metadata, and provenance use version `0.3.0`. Existing 0.2 baselines still load through fingerprints and legacy finding ids. Regenerate them after reviewing 0.3 results.
 
 ## New execution adapters
 
@@ -17,7 +17,7 @@ The `tools` section now supports:
 
 Every adapter is disabled by default. Enabling an adapter executes trusted project code and should only be done in controlled development or CI environments.
 
-Execution adapters support positive `timeout_ms`, a project-relative `working_directory`, string-valued `environment`, and regular-expression `redact_patterns`. Commands use argument arrays rather than a shell. Sensitive-looking command-line values are redacted automatically, configured patterns redact captured output, output tails are bounded, and timed-out process groups are terminated.
+Adapters support positive `timeout_ms`, a project-relative `working_directory`, environment variables, and regular-expression `redact_patterns`. Commands use argument arrays rather than a shell. They redact sensitive values, bound output tails, and terminate timed-out process groups.
 
 ## Evidence changes
 

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { Config, Enforcement, PolicyConfig, ProcessBoundaryConfig, ProjectProfile, RawConfig, Thresholds } from "./types.js";
-import { isRecord } from "./value-utils.js";
+import type { Config, Enforcement, JsonValue, PolicyConfig, ProcessBoundaryConfig, ProjectProfile, RawConfig, Thresholds } from "./types.js";
+import { isJsonRecord, parseJson } from "./value-utils.js";
 
 const DEFAULT_PROCESS_BOUNDARY: ProcessBoundaryConfig = {
   objectTypes: ["Process", "ShellCommand"],
@@ -31,7 +31,7 @@ const DEFAULT_POLICY: PolicyConfig = {
 export function loadConfig(configPath: string | null): Config {
   const resolvedConfig = path.resolve(configPath ?? "qmlqualitylens.config.json");
   const configDir = path.dirname(resolvedConfig);
-  const parsed: unknown = fs.existsSync(resolvedConfig) ? JSON.parse(stripJsonComments(fs.readFileSync(resolvedConfig, "utf8"))) : {};
+  const parsed = fs.existsSync(resolvedConfig) ? parseJson(stripJsonComments(fs.readFileSync(resolvedConfig, "utf8"))) : {};
   const raw = validateRawConfig(parsed, resolvedConfig);
   const projectRoot = resolveFrom(configDir, raw.project_root ?? ".");
   const sourceRoots = (raw.source_roots && raw.source_roots.length ? raw.source_roots : ["."]).map((item) => resolveFrom(projectRoot, item));
@@ -184,18 +184,18 @@ const CONFIG_KEYS = new Set(["$schema", "project_name", "project_root", "source_
 const THRESHOLD_KEYS = new Set(Object.keys(DEFAULT_THRESHOLDS));
 const PROCESS_BOUNDARY_KEYS = new Set(Object.keys(DEFAULT_PROCESS_BOUNDARY));
 
-function validateRawConfig(value: unknown, file: string): RawConfig {
+function validateRawConfig(value: JsonValue, file: string): RawConfig {
   assertRawConfig(value, file);
   return value;
 }
 
-function assertRawConfig(value: unknown, file: string): asserts value is RawConfig {
-  if (!isRecord(value)) throw new Error(`Invalid config ${file}: expected a JSON object`);
+function assertRawConfig(value: JsonValue, file: string): asserts value is RawConfig & JsonValue {
+  if (!isJsonRecord(value)) throw new Error(`Invalid config ${file}: expected a JSON object`);
   const errors = validateConfigSections(value);
   if (errors.length) throw new Error(`Invalid config ${file}:\n- ${errors.join("\n- ")}`);
 }
 
-function validateConfigSections(value: Record<string, unknown>): string[] {
+function validateConfigSections(value: Record<string, JsonValue>): string[] {
   const errors: string[] = [];
   validateCoreFields(value, errors);
   validateProcessBoundary(value.process_boundary, errors);
@@ -211,7 +211,7 @@ function validateConfigSections(value: Record<string, unknown>): string[] {
   return errors;
 }
 
-function validateCoreFields(value: Record<string, unknown>, errors: string[]): void {
+function validateCoreFields(value: Record<string, JsonValue>, errors: string[]): void {
   for (const key of Object.keys(value)) if (!CONFIG_KEYS.has(key)) errors.push(`unknown property '${key}'`);
   for (const key of ["$schema", "project_name", "project_root", "output_dir", "qmllint_report", "qmllint_command"]) if (value[key] !== undefined && typeof value[key] !== "string") errors.push(`${key} must be a string`);
   if (value.profile !== undefined && !isOneOf(value.profile, ["generic", "qtquick", "kirigami", "quickshell", "custom"] satisfies ProjectProfile[])) errors.push("profile must be one of: generic, qtquick, kirigami, quickshell, custom");
@@ -220,38 +220,38 @@ function validateCoreFields(value: Record<string, unknown>, errors: string[]): v
   if (Array.isArray(value.source_roots) && value.source_roots.length === 0) errors.push("source_roots must not be empty");
 }
 
-function validateProcessBoundary(value: unknown, errors: string[]): void {
+function validateProcessBoundary(value: JsonValue | undefined, errors: string[]): void {
   validateObjectKeys(value, "process_boundary", PROCESS_BOUNDARY_KEYS, errors);
-  if (!isRecord(value)) return;
+  if (!isJsonRecord(value)) return;
   for (const key of PROCESS_BOUNDARY_KEYS) validateStringArray(value[key], `process_boundary.${key}`, errors);
   for (const key of ["textPatterns", "allowedFilePatterns"]) validateRegexArray(value[key], `process_boundary.${key}`, errors);
 }
 
-function validateThresholds(value: unknown, errors: string[]): void {
+function validateThresholds(value: JsonValue | undefined, errors: string[]): void {
   validateObjectKeys(value, "thresholds", THRESHOLD_KEYS, errors);
-  if (!isRecord(value)) return;
+  if (!isJsonRecord(value)) return;
   for (const [key, threshold] of Object.entries(value)) {
     if (typeof threshold !== "number" || !Number.isFinite(threshold) || threshold <= 0) errors.push(`thresholds.${key} must be a positive number`);
     else if (key === "cloneWindow" && (!Number.isInteger(threshold) || threshold < 2)) errors.push("thresholds.cloneWindow must be an integer of at least 2");
   }
 }
 
-function validateSuppressions(value: unknown, errors: string[]): void {
+function validateSuppressions(value: JsonValue | undefined, errors: string[]): void {
   if (value === undefined) return;
   if (!Array.isArray(value)) errors.push("suppressions must be an array");
   else value.forEach((item, index) => validateSuppression(item, index, errors));
 }
 
-function validateStringArray(value: unknown, name: string, errors: string[]): void {
+function validateStringArray(value: JsonValue | undefined, name: string, errors: string[]): void {
   if (value === undefined) return;
   if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) errors.push(`${name} must be an array of strings`);
 }
 
-function validateNonEmptyStrings(value: unknown, name: string, errors: string[]): void {
+function validateNonEmptyStrings(value: JsonValue | undefined, name: string, errors: string[]): void {
   if (Array.isArray(value) && value.some((item) => typeof item === "string" && !item.trim())) errors.push(`${name} must not contain empty strings`);
 }
 
-function validateRegexArray(value: unknown, name: string, errors: string[]): void {
+function validateRegexArray(value: JsonValue | undefined, name: string, errors: string[]): void {
   if (!Array.isArray(value)) return;
   value.forEach((pattern, index) => {
     if (typeof pattern !== "string") return;
@@ -259,80 +259,82 @@ function validateRegexArray(value: unknown, name: string, errors: string[]): voi
   });
 }
 
-function validateObjectKeys(value: unknown, name: string, keys: Set<string>, errors: string[]): void {
+function validateObjectKeys(value: JsonValue | undefined, name: string, keys: Set<string>, errors: string[]): void {
   if (value === undefined) return;
-  if (!isRecord(value)) {
+  if (!isJsonRecord(value)) {
     errors.push(`${name} must be an object`);
     return;
   }
   for (const key of Object.keys(value)) if (!keys.has(key)) errors.push(`unknown property '${name}.${key}'`);
 }
 
-function validatePolicy(value: unknown, errors: string[]): void {
+function validatePolicy(value: JsonValue | undefined, errors: string[]): void {
   validateObjectKeys(value, "policy", new Set(["require_qmllint", "new_code_only", "fail_on", "incomplete"]), errors);
-  if (!isRecord(value)) return;
+  if (!isJsonRecord(value)) return;
   for (const key of ["require_qmllint", "new_code_only"]) if (value[key] !== undefined && typeof value[key] !== "boolean") errors.push(`policy.${key} must be a boolean`);
   if (value.fail_on !== undefined && (!Array.isArray(value.fail_on) || value.fail_on.some((item) => !isOneOf(item, ["block", "warn", "review"] satisfies Enforcement[])))) errors.push("policy.fail_on must contain only block, warn, or review");
   if (value.incomplete !== undefined && !isOneOf(value.incomplete, ["fail", "warn", "pass"])) errors.push("policy.incomplete must be one of: fail, warn, pass");
 }
 
-function validateTools(value: unknown, errors: string[]): void {
+function validateTools(value: JsonValue | undefined, errors: string[]): void {
   validateObjectKeys(value, "tools", new Set(["parser_oracle", "cmake", "qmllint", "qmlformat", "qmltestrunner", "runtime", "qml_profiler"]), errors);
-  if (!isRecord(value)) return;
+  if (!isJsonRecord(value)) return;
   validateParserOracle(value.parser_oracle, errors);
   validateCmakeTool(value.cmake, errors);
   validateQmllintTool(value.qmllint, errors);
   validateQmlformatTool(value.qmlformat, errors);
   validateExecutableTool(value.qmltestrunner, "tools.qmltestrunner", errors, true);
-  if (isRecord(value.qmltestrunner) && Array.isArray(value.qmltestrunner.arguments) && value.qmltestrunner.arguments.some((argument) => argument === "-o" || argument.startsWith("-o="))) errors.push("tools.qmltestrunner.arguments must not set -o; qmlqualitylens manages the JUnit report");
+  if (isJsonRecord(value.qmltestrunner) && hasManagedArgument(value.qmltestrunner.arguments, /^-o(?:=|$)/)) errors.push("tools.qmltestrunner.arguments must not set -o; qmlqualitylens manages the JUnit report");
   validateExecutableTool(value.runtime, "tools.runtime", errors, false);
   validateExecutableTool(value.qml_profiler, "tools.qml_profiler", errors, false);
 }
 
-function validateParserOracle(value: unknown, errors: string[]): void {
+function validateParserOracle(value: JsonValue | undefined, errors: string[]): void {
   validateObjectKeys(value, "tools.parser_oracle", new Set(["check", "qmldom_command", "tree_sitter", "timeout_ms"]), errors);
-  if (!isRecord(value)) return;
+  if (!isJsonRecord(value)) return;
   for (const key of ["check", "tree_sitter"]) if (value[key] !== undefined && typeof value[key] !== "boolean") errors.push(`tools.parser_oracle.${key} must be a boolean`);
   if (value.qmldom_command !== undefined && !isNonEmptyString(value.qmldom_command)) errors.push("tools.parser_oracle.qmldom_command must be a non-empty string");
   if (value.timeout_ms !== undefined && (typeof value.timeout_ms !== "number" || !Number.isInteger(value.timeout_ms) || value.timeout_ms <= 0)) errors.push("tools.parser_oracle.timeout_ms must be a positive integer");
 }
 
-function validateCmakeTool(value: unknown, errors: string[]): void {
+function validateCmakeTool(value: JsonValue | undefined, errors: string[]): void {
   validateObjectKeys(value, "tools.cmake", new Set(["command", "check", "build_dir", "configure", "configure_arguments", "build_targets", "build_arguments", "timeout_ms", "working_directory", "environment", "redact_patterns"]), errors);
-  if (!isRecord(value)) return;
+  if (!isJsonRecord(value)) return;
   for (const key of ["command", "build_dir"]) if (value[key] !== undefined && !isNonEmptyString(value[key])) errors.push(`tools.cmake.${key} must be a non-empty string`);
   for (const key of ["check", "configure"]) if (value[key] !== undefined && typeof value[key] !== "boolean") errors.push(`tools.cmake.${key} must be a boolean`);
   for (const key of ["configure_arguments", "build_targets", "build_arguments"]) {
     validateStringArray(value[key], `tools.cmake.${key}`, errors);
     validateNonEmptyStrings(value[key], `tools.cmake.${key}`, errors);
   }
-  if (Array.isArray(value.configure_arguments) && value.configure_arguments.some((argument) => ["-S", "-B"].includes(argument) || argument.startsWith("--build"))) errors.push("tools.cmake.configure_arguments must not override managed -S/-B/build options");
-  if (Array.isArray(value.build_arguments) && value.build_arguments.some((argument) => ["--build", "--target", "-t"].includes(argument))) errors.push("tools.cmake.build_arguments must not override managed build/target options");
+  if (hasManagedArgument(value.configure_arguments, /^(?:(?:-S|-B)$|--build(?:=|$))/)) errors.push("tools.cmake.configure_arguments must not override managed -S/-B/build options");
+  if (hasManagedArgument(value.build_arguments, /^(?:--build|--target|-t)$/)) errors.push("tools.cmake.build_arguments must not override managed build/target options");
   validateExecutionControls(value, "tools.cmake", errors);
 }
 
-function validateQmllintTool(value: unknown, errors: string[]): void {
+function validateQmllintTool(value: JsonValue | undefined, errors: string[]): void {
   validateObjectKeys(value, "tools.qmllint", new Set(["command", "check", "arguments", "import_paths", "qmltypes", "use_environment_imports"]), errors);
-  if (!isRecord(value)) return;
+  if (!isJsonRecord(value)) return;
   if (value.command !== undefined && !isNonEmptyString(value.command)) errors.push("tools.qmllint.command must be a non-empty string");
   if (value.check !== undefined && typeof value.check !== "boolean") errors.push("tools.qmllint.check must be a boolean");
   if (value.use_environment_imports !== undefined && typeof value.use_environment_imports !== "boolean") errors.push("tools.qmllint.use_environment_imports must be a boolean");
   for (const key of ["arguments", "import_paths", "qmltypes"]) validateStringArray(value[key], `tools.qmllint.${key}`, errors);
   for (const key of ["import_paths", "qmltypes"]) validateNonEmptyStrings(value[key], `tools.qmllint.${key}`, errors);
-  if (Array.isArray(value.arguments) && value.arguments.some((argument) => argument === "--json" || argument.startsWith("--json="))) errors.push("tools.qmllint.arguments must not set --json; qmlqualitylens manages structured output");
+  if (hasManagedArgument(value.arguments, /^--json(?:=|$)/)) errors.push("tools.qmllint.arguments must not set --json; qmlqualitylens manages structured output");
 }
 
-function validateQmlformatTool(value: unknown, errors: string[]): void {
+function hasManagedArgument(value: JsonValue | undefined, pattern: RegExp): boolean { return Array.isArray(value) && value.some((argument) => typeof argument === "string" && pattern.test(argument)); }
+
+function validateQmlformatTool(value: JsonValue | undefined, errors: string[]): void {
   validateObjectKeys(value, "tools.qmlformat", new Set(["command", "check"]), errors);
-  if (!isRecord(value)) return;
+  if (!isJsonRecord(value)) return;
   if (value.command !== undefined && typeof value.command !== "string") errors.push("tools.qmlformat.command must be a string");
   if (typeof value.command === "string" && /(?:^|\s)(?:-i|--inplace|-F|--files|--write-defaults)(?:\s|=|$)/.test(value.command)) errors.push("tools.qmlformat.command must not contain mutating qmlformat options (-i, --inplace, -F, --files, --write-defaults)");
   if (value.check !== undefined && typeof value.check !== "boolean") errors.push("tools.qmlformat.check must be a boolean");
 }
 
-function validateExecutableTool(value: unknown, name: string, errors: string[], defaultCommand: boolean): void {
+function validateExecutableTool(value: JsonValue | undefined, name: string, errors: string[], defaultCommand: boolean): void {
   validateObjectKeys(value, name, new Set(["command", "check", "arguments", "timeout_ms", "working_directory", "environment", "redact_patterns"]), errors);
-  if (!isRecord(value)) return;
+  if (!isJsonRecord(value)) return;
   if (value.command !== undefined && !isNonEmptyString(value.command)) errors.push(`${name}.command must be a non-empty string`);
   if (value.check !== undefined && typeof value.check !== "boolean") errors.push(`${name}.check must be a boolean`);
   validateStringArray(value.arguments, `${name}.arguments`, errors);
@@ -341,80 +343,76 @@ function validateExecutableTool(value: unknown, name: string, errors: string[], 
   if (value.check === true && !defaultCommand && !isNonEmptyString(value.command)) errors.push(`${name}.command is required when check is true`);
 }
 
-function validateExecutionControls(value: Record<string, unknown>, name: string, errors: string[]): void {
+function validateExecutionControls(value: Record<string, JsonValue>, name: string, errors: string[]): void {
   if (value.timeout_ms !== undefined && (typeof value.timeout_ms !== "number" || !Number.isInteger(value.timeout_ms) || value.timeout_ms <= 0)) errors.push(`${name}.timeout_ms must be a positive integer`);
   if (value.working_directory !== undefined && !isNonEmptyString(value.working_directory)) errors.push(`${name}.working_directory must be a non-empty string`);
-  if (value.environment !== undefined && (!isRecord(value.environment) || Object.values(value.environment).some((item) => typeof item !== "string"))) errors.push(`${name}.environment must be an object of string values`);
+  if (value.environment !== undefined && (!isJsonRecord(value.environment) || Object.values(value.environment).some((item) => typeof item !== "string"))) errors.push(`${name}.environment must be an object of string values`);
   validateStringArray(value.redact_patterns, `${name}.redact_patterns`, errors);
   validateNonEmptyStrings(value.redact_patterns, `${name}.redact_patterns`, errors);
   validateRegexArray(value.redact_patterns, `${name}.redact_patterns`, errors);
 }
 
-function validateTypeRoles(value: unknown, errors: string[]): void {
+function validateTypeRoles(value: JsonValue | undefined, errors: string[]): void {
   validateObjectKeys(value, "type_roles", new Set(["interactive_types", "layout_types", "delegate_owner_types"]), errors);
-  if (!isRecord(value)) return;
+  if (!isJsonRecord(value)) return;
   for (const key of ["interactive_types", "layout_types", "delegate_owner_types"]) validateStringArray(value[key], `type_roles.${key}`, errors);
 }
 
-function validateReports(value: unknown, errors: string[]): void {
+function validateReports(value: JsonValue | undefined, errors: string[]): void {
   validateObjectKeys(value, "reports", new Set(["tests", "runtime_warnings", "qml_profiler", "coverage", "qmlbench", "qmlbench_baseline"]), errors);
-  if (!isRecord(value)) return;
+  if (!isJsonRecord(value)) return;
   for (const key of ["tests", "runtime_warnings", "qml_profiler", "coverage", "qmlbench", "qmlbench_baseline"]) if (value[key] !== undefined && typeof value[key] !== "string") errors.push(`reports.${key} must be a string`);
 }
 
-function validateBenchmarkPolicy(value: unknown, errors: string[]): void {
+function validateBenchmarkPolicy(value: JsonValue | undefined, errors: string[]): void {
   validateObjectKeys(value, "benchmark_policy", new Set(["max_regression_percent", "max_coefficient_of_variation", "min_samples"]), errors);
-  if (!isRecord(value)) return;
+  if (!isJsonRecord(value)) return;
   for (const key of ["max_regression_percent", "max_coefficient_of_variation"]) if (value[key] !== undefined && (typeof value[key] !== "number" || !Number.isFinite(value[key]) || value[key] < 0)) errors.push(`benchmark_policy.${key} must be a non-negative number`);
   if (value.min_samples !== undefined && (typeof value.min_samples !== "number" || !Number.isInteger(value.min_samples) || value.min_samples < 1)) errors.push("benchmark_policy.min_samples must be a positive integer");
 }
 
-function validateDynamicEdges(value: unknown, errors: string[]): void {
+function validateDynamicEdges(value: JsonValue | undefined, errors: string[]): void {
   if (value === undefined) return;
   if (!Array.isArray(value)) { errors.push("dynamic_component_edges must be an array"); return; }
   value.forEach((edge, index) => {
-    if (!isRecord(edge) || Object.keys(edge).some((key) => !["from", "to"].includes(key)) || !isNonEmptyString(edge.from) || !isNonEmptyString(edge.to)) errors.push(`dynamic_component_edges[${index}] must contain non-empty from and to strings`);
+    if (!isJsonRecord(edge) || Object.keys(edge).some((key) => !["from", "to"].includes(key)) || !isNonEmptyString(edge.from) || !isNonEmptyString(edge.to)) errors.push(`dynamic_component_edges[${index}] must contain non-empty from and to strings`);
   });
 }
 
-function validatePerformanceBudgets(value: unknown, errors: string[]): void {
+function validatePerformanceBudgets(value: JsonValue | undefined, errors: string[]): void {
   if (value === undefined) return;
   if (!Array.isArray(value)) { errors.push("performance_budgets must be an array"); return; }
   value.forEach((budget, index) => validatePerformanceBudget(budget, index, errors));
 }
 
-function validatePerformanceBudget(value: unknown, index: number, errors: string[]): void {
+function validatePerformanceBudget(value: JsonValue, index: number, errors: string[]): void {
   const name = `performance_budgets[${index}]`;
   validateObjectKeys(value, name, new Set(["scenario", "platform", "frame_p95_ms", "max_event_ms"]), errors);
-  if (!isRecord(value)) return;
+  if (!isJsonRecord(value)) return;
   if (typeof value.scenario !== "string" || !value.scenario) errors.push(`${name}.scenario must be a non-empty string`);
   if (value.platform !== undefined && typeof value.platform !== "string") errors.push(`${name}.platform must be a string`);
   for (const key of ["frame_p95_ms", "max_event_ms"]) validatePositiveNumber(value[key], `${name}.${key}`, errors);
 }
 
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && Boolean(value.trim());
-}
+function isNonEmptyString(value: JsonValue | undefined): value is string { return typeof value === "string" && Boolean(value.trim()); }
 
-function validatePositiveNumber(value: unknown, name: string, errors: string[]): void {
-  if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value) || value <= 0)) errors.push(`${name} must be a positive number`);
-}
+function validatePositiveNumber(value: JsonValue | undefined, name: string, errors: string[]): void { if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value) || value <= 0)) errors.push(`${name} must be a positive number`); }
 
-function validateRules(value: unknown, errors: string[]): void {
+function validateRules(value: JsonValue | undefined, errors: string[]): void {
   if (value === undefined) return;
-  if (!isRecord(value)) { errors.push("rules must be an object"); return; }
+  if (!isJsonRecord(value)) { errors.push("rules must be an object"); return; }
   for (const [rule, override] of Object.entries(value)) validateRule(rule, override, errors);
 }
 
-function validateRule(rule: string, value: unknown, errors: string[]): void {
+function validateRule(rule: string, value: JsonValue, errors: string[]): void {
   validateObjectKeys(value, `rules.${rule}`, new Set(["enabled", "enforcement"]), errors);
-  if (!isRecord(value)) return;
+  if (!isJsonRecord(value)) return;
   if (value.enabled !== undefined && typeof value.enabled !== "boolean") errors.push(`rules.${rule}.enabled must be a boolean`);
   if (value.enforcement !== undefined && !isOneOf(value.enforcement, ["block", "warn", "review"] satisfies Enforcement[])) errors.push(`rules.${rule}.enforcement must be block, warn, or review`);
 }
 
-function validateSuppression(value: unknown, index: number, errors: string[]): void {
-  if (!isRecord(value)) {
+function validateSuppression(value: JsonValue, index: number, errors: string[]): void {
+  if (!isJsonRecord(value)) {
     errors.push(`suppressions[${index}] must be an object`);
     return;
   }
@@ -430,17 +428,10 @@ function typeRolesForProfile(profile: ProjectProfile): Config["typeRoles"] {
   return { interactiveTypes, layoutTypes: ["RowLayout", "ColumnLayout", "GridLayout", "StackLayout"], delegateOwnerTypes: ["ListView", "GridView", "TableView", "PathView", "Repeater", "Instantiator"] };
 }
 
-function isOneOf<T>(value: unknown, allowed: readonly T[]): boolean {
-  return allowed.some((item) => item === value);
-}
+function isOneOf<T>(value: JsonValue | undefined, allowed: readonly T[]): boolean { return allowed.some((item) => item === value); }
 
-function normalizeProjectPath(value: string): string {
-  return value.replace(/\\/g, "/").replace(/^\.\//, "");
-}
-
-function resolveFrom(base: string, value: string): string {
-  return path.isAbsolute(value) ? path.normalize(value) : path.resolve(base, value);
-}
+function normalizeProjectPath(value: string): string { return value.replace(/\\/g, "/").replace(/^\.\//, ""); }
+function resolveFrom(base: string, value: string): string { return path.isAbsolute(value) ? path.normalize(value) : path.resolve(base, value); }
 
 function stripJsonComments(text: string): string {
   const state: JsonStringState = { inString: false, escaped: false };

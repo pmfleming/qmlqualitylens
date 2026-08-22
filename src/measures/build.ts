@@ -1,8 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { executeTool, projectRelativePath, toolVersion } from "../tool-execution.js";
-import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding } from "./foundation.js";
 import { hasCaptures } from "../value-utils.js";
+import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding } from "./foundation.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 
 type CmakeDiagnostic = {
@@ -89,11 +88,11 @@ function runCmake(config: Config): CmakeExecution {
   const reason = status === "incomplete" ? steps.find((step) => step.status === "incomplete")?.error ?? "CMake execution was incomplete."
     : status === "failed" ? "A configured CMake configure/build step failed."
       : null;
-  return { enabled: true, status, version: toolVersion(config.tools.cmakeCommand, config.projectRoot), build_dir: config.tools.cmakeBuildDir, reason, steps };
+  return { enabled: true, status, version: support.toolVersion(config.tools.cmakeCommand, config.projectRoot), build_dir: config.tools.cmakeBuildDir, reason, steps };
 }
 
 function runCmakeStep(config: Config, phase: CmakeStep["phase"], args: string[]): CmakeStep {
-  const result = executeTool(config.tools.cmakeCommand, args, config.tools.cmakeWorkingDirectory, config.tools.cmakeTimeoutMs, { ...process.env, ...config.tools.cmakeEnvironment }, config.tools.cmakeRedactPatterns);
+  const result = support.executeTool(config.tools.cmakeCommand, args, config.tools.cmakeWorkingDirectory, config.tools.cmakeTimeoutMs, { ...process.env, ...config.tools.cmakeEnvironment }, config.tools.cmakeRedactPatterns);
   const diagnostics = parseCmakeDiagnostics(`${result.stdout}\n${result.stderr}`, phase, config);
   const error = result.error;
   const status = error ? "incomplete"
@@ -138,7 +137,7 @@ function diagnostic(phase: CmakeStep["phase"], severity: string, message: string
   return {
     phase,
     severity: /error|fatal/i.test(severity) ? "error" : "warning",
-    ...(file ? { file: projectRelativePath(file, config.projectRoot) } : {}),
+    ...(file ? { file: support.projectRelativePath(file, config.projectRoot) } : {}),
     ...(line ? { line: Number(line) } : {}),
     ...(column ? { column: Number(column) } : {}),
     message: message.trim(),

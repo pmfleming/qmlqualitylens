@@ -1,8 +1,8 @@
 # Shelllist v0.3 trial
 
-Project: local sibling `../shelllist` checkout, `main`
+> Historical snapshot from the local `../shelllist` checkout on `main`.
 
-The trial ran inside Shelllist's Nix development environment so its pinned Qt 6.11.1 and Quickshell type information were available. Shelllist has no CMake project; its Nix checks are the authoritative build integration, so the CMake adapter was correctly reported as not applicable.
+The trial used Shelllist's Nix environment with Qt 6.11.1 and Quickshell type information. Shelllist uses Nix checks rather than CMake, so the CMake adapter correctly reported `not_applicable`.
 
 ## Evidence executed
 
@@ -12,7 +12,7 @@ The trial ran inside Shelllist's Nix development environment so its pinned Qt 6.
 - Shelllist's `tests/run-qml-tests.sh` as an offscreen runtime-smoke scenario: exit 0, no recognized runtime QML warnings.
 - Static analysis over 160 source files, including 131 QML files and 20 JavaScript files.
 
-No representative QML Profiler trace exists in the checkout, so runtime performance was left unconfigured rather than fabricating evidence. The checked-in Qt integration fixture separately exercises the Chrome-trace adapter and performance-budget path.
+No representative QML Profiler trace was available, so runtime performance remained unconfigured. The repository's Qt fixture tests the Chrome-trace and performance-budget paths separately.
 
 ## Results
 
@@ -28,14 +28,14 @@ No representative QML Profiler trace exists in the checkout, so runtime performa
 | Quality-contract verdict | warn |
 | Audit | 0 blocking, 122 warning, 684 review, 0 incomplete |
 
-The resolver initially reported `MultiEffect`, `Controls.ItemDelegate`, and an owning-module `JsonlDaemonClient` as unresolved. Manual review showed all three were false positives. The v0.3 resolver was corrected to understand externally qualified aliases, owning `qmldir` module scope, and `MultiEffect`; the rerun produced zero unresolved types.
+The resolver initially misclassified `MultiEffect`, `Controls.ItemDelegate`, and the owning-module `JsonlDaemonClient`. Version 0.3 added qualified-alias and owning-`qmldir` scope support; the rerun produced no unresolved types.
 
 ## Manual finding review
 
-- **Formatting:** 122 drift records are credible, but Shelllist has no checked-in `.qmlformat.ini` and has not adopted repository-wide `qmlformat`. Keep this as warning evidence until the project deliberately pins formatting; do not create unrelated formatting churn.
+- **Formatting:** 122 drift records are credible. Without a checked-in `.qmlformat.ini` or repository-wide formatter policy, they remain warnings rather than a reason for unrelated churn.
 - **Internationalization:** the sampled untranslated strings are user-facing and useful production-readiness findings. They remain review-level because Shelllist has not yet adopted translation infrastructure.
 - **Function annotations:** 234 findings reflect Qt's recommendation but are too numerous for an immediate gate. Apply annotations to changed/reused functions first.
-- **Unused public API:** 233 property/signal candidates need component-owner review because QML module APIs and dynamic use can be difficult to prove statically. They remain cleanup review candidates, not defects.
+- **Unused public API:** 233 property/signal candidates need owner review because static analysis cannot always prove QML module and dynamic use. They are cleanup candidates, not defects.
 - **Accessibility:** two pointer-without-keyboard findings in `launcher/ApplicationDetails.qml` require manual interaction review against the surrounding list keyboard actions.
 - **Hotspots:** `BluetoothAdapterSettings.qml`, `ClipboardDetailCards.qml`, and `ApplicationDetails.qml` are credible review priorities because of binding pressure, depth, or size. No universal threshold violation is implied.
 - **Component contract:** `DaemonBackend.active` is a credible `required` candidate because every resolved user supplies it.

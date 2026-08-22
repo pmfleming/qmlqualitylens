@@ -1,6 +1,8 @@
 # TypeScript quality-lens review
 
-The locally installed `ts-react-quality-lens` 0.1.0 was run against production sources in `src`, `bin`, and `scripts`, with tests in `test`. The checked-in configuration is [`ts-react-quality-lens.config.json`](../ts-react-quality-lens.config.json).
+> Historical refactoring snapshot; counts and test totals are not current project metrics.
+
+The local `ts-react-quality-lens` 0.1.0 analyzed production sources in `src`, `bin`, and `scripts`, with tests in `test`. See [`ts-react-quality-lens.config.json`](../ts-react-quality-lens.config.json).
 
 ## Results
 
@@ -22,7 +24,7 @@ The locally installed `ts-react-quality-lens` 0.1.0 was run against production s
 | Type assertions | 33 | 1 | -97.0% |
 | High-risk architecture-map nodes | 29 | 24 | -17.2% |
 
-The source-file and hotspot-record counts increased because shared measure support and value utilities were extracted as independently measured modules. The proportion of high-risk hotspot records nevertheless fell.
+Source-file and hotspot counts increased because shared support and value utilities became separate modules. The proportion of high-risk hotspots still fell.
 
 ## Refactoring performed
 
@@ -37,9 +39,9 @@ The source-file and hotspot-record counts increased because shared measure suppo
 
 ## Remaining review hotspots
 
-The highest remaining functions are the Tarjan strongly-connected-component implementation, binding graph construction, audit orchestration, and structural-clone analysis. These algorithms are branch-heavy by nature and are covered by focused tests. They remain candidates for later extraction or algorithm-specific abstractions, but were not replaced with opaque helpers merely to lower a score.
+The largest remaining functions implement Tarjan components, binding graphs, audit orchestration, and structural clones. These branch-heavy algorithms have focused tests. Further extraction remains possible, but opaque helpers were not introduced merely to lower a score.
 
-The final changed-code audit still reports a failing verdict because the 0.1.0 lens gates broad file/type findings and attributes all uncommitted refactoring to the current diff. The aggregate artifacts above are the useful before/after comparison; no suppressions were added to manufacture a passing audit.
+The snapshot's changed-code audit failed because Lens 0.1.0 gated broad file/type findings and attributed all uncommitted refactoring to the diff. The aggregate artifacts provide the useful comparison; no suppressions were added to force a pass.
 
 ## Validation
 

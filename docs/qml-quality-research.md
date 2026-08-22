@@ -1,6 +1,6 @@
 # QML code quality: official guidance, project expectations, and tools
 
-This is a research snapshot for **Qt 6 QML/Qt Quick**. It separates documented Qt guidance from conventions inferred from major projects. That distinction matters: there is no universal QML quality score or official maximum file size, object count, binding complexity, or cyclomatic-complexity threshold.
+This research snapshot covers **Qt 6 QML/Qt Quick**. It separates documented Qt guidance from conventions inferred from major projects. Qt defines no universal QML quality score or official size and complexity limits.
 
 ## Executive summary
 
@@ -23,11 +23,11 @@ A strong default project gate is:
 - profiling and UI review for performance-sensitive changes;
 - changed-code gating for heuristic maintainability findings.
 
-## Who publishes the official guidance?
+## Official sources
 
-No official QML standards organization commonly known as the **“QML Foundation”** was identified. QML is developed as part of Qt. The primary sources are the [Qt Project](https://www.qt-project.org/) and the [Qt documentation](https://doc.qt.io/qt-6/).
+QML is developed as part of Qt; there is no separate official “QML Foundation.” Primary sources are the [Qt Project](https://www.qt-project.org/) and [Qt documentation](https://doc.qt.io/qt-6/).
 
-The official conventions page says that its rules are followed in Qt documentation and examples and are recommended for others. They are recommendations, not a complete contribution policy and not a quantitative quality model.
+Qt's conventions guide documents recommendations used by Qt examples and documentation. It is neither a complete contribution policy nor a quantitative quality model.
 
 ## Official Qt recommendations
 
@@ -71,7 +71,7 @@ Practical implications:
 
 ### Components, resources, and layouts
 
-Qt recommends using CMake QML modules and bundling resources. With `qt_add_qml_module()`, QML files listed in `QML_FILES` are compiled ahead of time. Qt warns that QML files should normally be in the same directory as the module's `CMakeLists.txt`; otherwise implicit imports can differ from the module to which the files belong.
+Qt recommends CMake QML modules and bundled resources. `qt_add_qml_module()` compiles files listed in `QML_FILES` ahead of time. Keep those files beside the module's `CMakeLists.txt`; moving them elsewhere can change implicit imports.
 
 For layout code:
 
@@ -143,7 +143,7 @@ QGroundControl is a large production Qt/QML application. Its [contribution guide
 - testing on applicable desktop/mobile platforms and PX4/ArduPilot configurations;
 - Conventional Commits and compatibility with its Apache-2.0/GPL-3.0 dual-license policy.
 
-Its configuration also illustrates an important limitation: projects sometimes disable valid `qmllint` categories when their custom modules or context properties are not fully visible to the tool. A quality report must distinguish a clean result from an incomplete type/import environment.
+Its configuration also shows a key limitation: projects may disable valid `qmllint` categories when custom modules or context properties are invisible to the tool. Reports must distinguish a clean result from an incomplete type/import environment.
 
 ### Quickshell
 
@@ -204,7 +204,7 @@ There is no evidence of a common industry gate such as “QML files must be belo
 
 ## Recommended quality model for qmlqualitylens
 
-The lens should report separate evidence dimensions rather than imply that one score defines “best QML.”
+Lens should report separate evidence dimensions; one score cannot define “best QML.”
 
 ### Hard or high-confidence gates
 
@@ -226,9 +226,9 @@ The lens should report separate evidence dimensions rather than imply that one s
 
 These are hotspot signals. They need project-specific thresholds, suppressions with reasons, and changed-code baselines; they should not be presented as Qt rules.
 
-### Runtime evidence to add separately
+### Runtime evidence to keep separate
 
-If runtime import is added later, retain raw provenance and report:
+Runtime imports should retain raw provenance and report:
 
 - frame-time percentiles and dropped frames, not only average FPS;
 - binding/handler count, total time, maximum time, and callers/callees;
@@ -263,7 +263,7 @@ node dist/bin/qmlqualitylens.js audit \
   --format markdown
 ```
 
-Configure `.qmllint.ini`, `.qmlformat.ini`, import paths, build directories, and warning severities in version control. Prefer failing on newly introduced findings first; ratchet existing debt down rather than requiring a noisy repository-wide cleanup in an unrelated change.
+Version `.qmllint.ini`, `.qmlformat.ini`, import paths, build directories, and warning policy. Gate newly introduced findings first, then ratchet down existing debt without unrelated repository-wide cleanup.
 
 ## Primary sources
 

@@ -11,7 +11,7 @@ The static calibration harness was run against the pinned revisions in [`benchma
 | QGroundControl `src` | 444 | 50,772 | 0 |
 | Quickshell `src` QML/manual tests | 26 | 1,785 | 0 |
 
-The parser handled all 939 sampled QML files without recovery diagnostics. Local resolution was intentionally incomplete because calibration uses sparse source checkouts and does not build generated QML type information. Consequently, unresolved external types/imports in this run are **not** precision measurements.
+The parser handled all 939 sampled QML files without recovery diagnostics. Resolution was intentionally incomplete: calibration uses sparse checkouts and does not generate QML type information. Unresolved external types and imports are therefore **not** precision measurements.
 
 ## Findings from calibration
 
@@ -28,7 +28,7 @@ Corrective actions applied:
 4. the CMake module detector now recognizes KDE's `ecm_add_qml_module` as well as `qt_add_qml_module`;
 5. accessibility, i18n, function-typing, image, Loader, size, cleanup, and coupling findings remain review evidence rather than blockers.
 
-The calibration also confirmed that a framework source tree is not equivalent to a fully configured application build. `qmllint` type information and project-specific external module declarations are required before unresolved-import/type data can be treated as complete.
+A framework source tree is not equivalent to a configured application build. Treat unresolved imports and types as complete only when `qmllint` type information and project-specific external modules are available.
 
 ## Reproducing
 
@@ -51,4 +51,4 @@ For each rule, sample findings across projects and label them:
 - duplicate of `qmllint`;
 - cannot determine without runtime/build context.
 
-No heuristic or home-grown semantic rule should become a default blocker solely because it has synthetic positive fixtures. Default blockers require no known false positive in maintained negative fixtures and representative-project review.
+Synthetic positive fixtures alone cannot justify a default blocker. A blocker needs no known false positive in maintained negative fixtures and must pass representative-project review.

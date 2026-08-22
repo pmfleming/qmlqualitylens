@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
-import { executeTool, publicToolExecution, toolVersion } from "../tool-execution.js";
+import type Parser from "tree-sitter";
+import type qmljs from "tree-sitter-qmljs";
 import type { QmlDocument } from "../qml-parser-types.js";
 import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding } from "./foundation.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
@@ -11,13 +12,13 @@ type OracleRecord = {
   file: string;
   internal: OracleCounts;
   qmldom?: { status: "pass" | "failed" | "incomplete"; counts?: OracleCounts; reason?: string };
-  tree_sitter?: { status: "pass" | "failed" | "unavailable"; has_errors?: boolean; named_nodes?: number; reason?: string };
+  tree_sitter?: { status: "pass" | "failed" | "unavailable"; counts?: OracleCounts; has_errors?: boolean; named_nodes?: number; total_nodes?: number; error_nodes?: number; missing_nodes?: number; reason?: string };
 };
 
-type TreeNode = { hasError: boolean; namedChildCount: number; namedChildren: TreeNode[] };
-type Tree = { rootNode: TreeNode };
-type ParserInstance = { setLanguage(language: unknown): void; parse(source: string): Tree };
-type ParserConstructor = new () => ParserInstance;
+type TreeSitterOracle = { parser: Parser; query: Parser.Query };
+type LoadableModule = object | null | undefined;
+const COUNT_KEYS: Array<keyof OracleCounts> = ["imports", "objects", "properties", "bindings"];
+const TREE_SITTER_STRUCTURE_QUERY = "(ui_import) @imports (ui_object_definition) @objects (ui_property) @properties (ui_binding) @bindings (ui_property value: (_) @bindings)";
 
 export function measureParserOracle(config: Config, command: string, context: AnalysisContext) {
   if (!config.tools.parserOracleCheck) return skipped(config, command, context);
@@ -28,32 +29,8 @@ export function measureParserOracle(config: Config, command: string, context: An
     const source = context.sources.find((item) => item.relativePath === entry.file);
     if (!source) continue;
     const record: OracleRecord = { file: entry.file, internal: internalCounts(entry.document) };
-    const qmlDom = executeTool(config.tools.parserOracleQmldomCommand, ["--dump-ast", source.path], config.projectRoot, config.tools.parserOracleTimeoutMs);
-    if (qmlDom.status === "pass" && /<UiProgram\b/.test(qmlDom.stdout)) {
-      const counts = qmlDomCounts(qmlDom.stdout);
-      record.qmldom = { status: "pass", counts };
-      if (counts.imports !== record.internal.imports) rawFindings.push(disagreement(entry.file, `import count differs: internal=${record.internal.imports}, qmldom=${counts.imports}`));
-    } else {
-      const reason = qmlDom.error ?? qmlDom.stderr_tail.at(-1) ?? `qmldom exited with ${qmlDom.exit_code ?? "unknown"}`;
-      record.qmldom = { status: qmlDom.status, reason };
-      rawFindings.push(failure(entry.file, "qmldom", reason));
-    }
-    if (config.tools.parserOracleTreeSitter) {
-      if (!treeSitter) {
-        record.tree_sitter = { status: "unavailable", reason: "Optional tree-sitter and tree-sitter-qmljs packages are not installed or could not load." };
-      } else {
-        try {
-          const tree = treeSitter.parse(source.text);
-          const namedNodes = countNamedNodes(tree.rootNode);
-          record.tree_sitter = { status: tree.rootNode.hasError ? "failed" : "pass", has_errors: tree.rootNode.hasError, named_nodes: namedNodes };
-          if (tree.rootNode.hasError) rawFindings.push(failure(entry.file, "tree-sitter-qmljs", "Tree-sitter returned an ERROR or missing node."));
-        } catch (error) {
-          const reason = error instanceof Error ? error.message : String(error);
-          record.tree_sitter = { status: "failed", reason };
-          rawFindings.push(failure(entry.file, "tree-sitter-qmljs", reason));
-        }
-      }
-    }
+    rawFindings.push(...inspectQmlDom(config, source.path, record));
+    if (config.tools.parserOracleTreeSitter) rawFindings.push(...inspectTreeSitter(config, source.text, record, treeSitter));
     records.push(record);
   }
   const findings = support.applySuppressions(support.enrichFindings(rawFindings, config), config);
@@ -64,7 +41,7 @@ export function measureParserOracle(config: Config, command: string, context: An
     summary: {
       status: unavailableTreeSitter ? "incomplete" : failed ? "warn" : "pass",
       files: records.length,
-      qmldom_version: toolVersion(config.tools.parserOracleQmldomCommand, config.projectRoot),
+      qmldom_version: support.toolVersion(config.tools.parserOracleQmldomCommand, config.projectRoot),
       tree_sitter_enabled: config.tools.parserOracleTreeSitter,
       tree_sitter_available: Boolean(treeSitter),
       ...findingSummary(findings),
@@ -77,52 +54,111 @@ export function measureParserOracle(config: Config, command: string, context: An
   return artifact;
 }
 
+function inspectQmlDom(config: Config, source: string, record: OracleRecord): Finding[] {
+  const execution = support.executeTool(config.tools.parserOracleQmldomCommand, ["--dump-ast", source], config.projectRoot, config.tools.parserOracleTimeoutMs);
+  if (execution.status === "pass" && /<UiProgram\b/.test(execution.stdout)) {
+    const counts = qmlDomCounts(execution.stdout);
+    record.qmldom = { status: "pass", counts };
+    return countDisagreements(record.file, record.internal, counts, "qmldom");
+  }
+  const reason = execution.error ?? execution.stderr_tail.at(-1) ?? `qmldom exited with ${execution.exit_code ?? "unknown"}`;
+  record.qmldom = { status: execution.status, reason };
+  return [failure(record.file, "qmldom", reason)];
+}
+
+function inspectTreeSitter(config: Config, source: string, record: OracleRecord, oracle: TreeSitterOracle | null): Finding[] {
+  if (!oracle) {
+    record.tree_sitter = { status: "unavailable", reason: "Optional tree-sitter and tree-sitter-qmljs packages are not installed or could not load." };
+    return [];
+  }
+  try {
+    const tree = parseTreeSitter(oracle, source, config.tools.parserOracleTimeoutMs);
+    if (!tree) throw new Error(`Tree-sitter parse exceeded ${config.tools.parserOracleTimeoutMs} ms`);
+    const counts = treeSitterCounts(oracle.query, tree.rootNode);
+    const stats = treeSitterStats(tree.rootNode);
+    const hasErrors = tree.rootNode.hasError || stats.error_nodes > 0 || stats.missing_nodes > 0;
+    record.tree_sitter = { status: hasErrors ? "failed" : "pass", counts, has_errors: hasErrors, ...stats };
+    const findings = countDisagreements(record.file, record.internal, counts, "tree-sitter");
+    if (hasErrors) findings.push(failure(record.file, "tree-sitter-qmljs", `Tree-sitter returned ${stats.error_nodes} error and ${stats.missing_nodes} missing node(s).`));
+    return findings;
+  } catch (error) {
+    const reason = support.errorMessage(error);
+    record.tree_sitter = { status: "failed", reason };
+    return [failure(record.file, "tree-sitter-qmljs", reason)];
+  }
+}
+
+function countDisagreements(file: string, internal: OracleCounts, observed: OracleCounts, oracle: string): Finding[] { return COUNT_KEYS.flatMap((key) => internal[key] === observed[key] ? [] : [disagreement(file, `${key} count differs: internal=${internal[key]}, ${oracle}=${observed[key]}`)]); }
+
 function skipped(config: Config, command: string, context: AnalysisContext) {
   const artifact = { ...baseArtifact(context, "quality.parser_oracle", command), summary: { status: "not_configured", files: 0, reason: "tools.parser_oracle.check is disabled." }, records: [], findings: [] };
   writeArtifact(config, "parser_oracle.json", artifact);
   return artifact;
 }
 
-function internalCounts(document: QmlDocument): OracleCounts {
-  return { imports: document.imports.length, objects: document.objects.length, properties: document.objects.reduce((sum, object) => sum + object.properties.length, 0), bindings: document.bindings.length };
-}
+function internalCounts(document: QmlDocument): OracleCounts { return { imports: document.imports.length, objects: document.objects.length, properties: document.objects.reduce((sum, object) => sum + object.properties.length, 0), bindings: document.bindings.length }; }
 
-function qmlDomCounts(xml: string): OracleCounts {
-  return {
-    imports: matches(xml, /<UiImport\b/g),
-    objects: matches(xml, /<UiObjectDefinition\b/g),
-    properties: matches(xml, /<UiPublicMember\b[^>]*\btype="Property"/g),
-    bindings: matches(xml, /<UiScriptBinding\b/g),
-  };
-}
+function qmlDomCounts(xml: string): OracleCounts { return { imports: matches(xml, /<UiImport\b/g), objects: matches(xml, /<UiObjectDefinition\b/g), properties: matches(xml, /<UiPublicMember\b[^>]*\btype="Property"/g), bindings: matches(xml, /<UiScriptBinding\b/g) }; }
 
-function matches(value: string, regex: RegExp): number {
-  return value.match(regex)?.length ?? 0;
-}
+function matches(value: string, regex: RegExp): number { return value.match(regex)?.length ?? 0; }
 
-function loadTreeSitter(): ParserInstance | null {
+function loadTreeSitter(): TreeSitterOracle | null {
   try {
-    const parserModule = require("tree-sitter") as { default?: ParserConstructor } | ParserConstructor;
-    const grammarModule = require("tree-sitter-qmljs") as { default?: unknown } | unknown;
-    const Parser = typeof parserModule === "function" ? parserModule : parserModule.default;
-    const grammar = typeof grammarModule === "object" && grammarModule !== null && "default" in grammarModule ? grammarModule.default : grammarModule;
-    if (!Parser || !grammar) return null;
-    const parser = new Parser();
+    const ParserConstructor = parserConstructor(require("tree-sitter"));
+    const grammar = treeSitterLanguage(require("tree-sitter-qmljs"));
+    if (!ParserConstructor || !grammar) return null;
+    const parser = new ParserConstructor();
     parser.setLanguage(grammar);
-    return parser;
+    return { parser, query: new ParserConstructor.Query(grammar, TREE_SITTER_STRUCTURE_QUERY) };
   } catch {
     return null;
   }
 }
 
-function countNamedNodes(node: TreeNode): number {
-  return 1 + (node.namedChildren ?? []).reduce((sum, child) => sum + countNamedNodes(child), 0);
+function parserConstructor(value: LoadableModule): typeof Parser | null { const candidate = defaultExport(value); return isParserConstructor(candidate) ? candidate : null; }
+
+function isParserConstructor(value: object | null): value is typeof Parser { return typeof value === "function" && "Query" in value; }
+
+function treeSitterLanguage(value: LoadableModule): typeof qmljs | null { const candidate = defaultExport(value); return isTreeSitterLanguage(candidate) ? candidate : null; }
+
+function isTreeSitterLanguage(value: object | null): value is typeof qmljs { return support.isRecord(value) && "language" in value && Array.isArray(value.nodeTypeInfo); }
+function defaultExport(value: LoadableModule): object | null {
+  if (!support.isRecord(value) || !("default" in value)) return value ?? null;
+  const candidate = value.default;
+  return (typeof candidate === "object" && candidate !== null) || typeof candidate === "function" ? candidate : null;
 }
 
-function disagreement(file: string, detail: string): Finding {
-  return { id: `parser.oracle_disagreement.${file}.${detail}`, kind: "parser.oracle_disagreement", severity: "low", file, line: 1, message: `Parser oracle disagreement: ${detail}`, actions: ["Inspect the oracle output and add a parser recovery fixture before relying on affected semantic rules."] };
+function parseTreeSitter(oracle: TreeSitterOracle, source: string, timeoutMs: number): Parser.Tree | null {
+  const deadline = performance.now() + timeoutMs;
+  const tree: Parser.Tree | null = oracle.parser.parse(source, null, { progressCallback: () => performance.now() >= deadline });
+  if (!tree) oracle.parser.reset();
+  return tree;
 }
 
-function failure(file: string, oracle: string, detail: string): Finding {
-  return { id: `parser.oracle_failure.${oracle}.${file}`, kind: "parser.oracle_failure", severity: "medium", file, line: 1, message: `${oracle} could not parse or inspect ${file}: ${detail}`, actions: ["Check the oracle installation and inspect this QML syntax with the Qt parser before changing Lens parser behavior."] };
+function treeSitterCounts(query: Parser.Query, root: Parser.SyntaxNode): OracleCounts {
+  const counts: OracleCounts = { imports: 0, objects: 0, properties: 0, bindings: 0 };
+  for (const { name } of query.captures(root)) {
+    if (name === "imports") counts.imports += 1;
+    else if (name === "objects") counts.objects += 1;
+    else if (name === "properties") counts.properties += 1;
+    else if (name === "bindings") counts.bindings += 1;
+  }
+  return counts;
 }
+
+function treeSitterStats(root: Parser.SyntaxNode): { named_nodes: number; total_nodes: number; error_nodes: number; missing_nodes: number } {
+  const stats = { named_nodes: 0, total_nodes: 0, error_nodes: 0, missing_nodes: 0 };
+  const cursor = root.walk();
+  while (true) {
+    const node = cursor.currentNode;
+    stats.total_nodes += 1;
+    if (node.isNamed) stats.named_nodes += 1;
+    if (node.isError) stats.error_nodes += 1;
+    if (node.isMissing) stats.missing_nodes += 1;
+    if (cursor.gotoFirstChild()) continue;
+    while (!cursor.gotoNextSibling()) if (!cursor.gotoParent()) return stats;
+  }
+}
+
+function disagreement(file: string, detail: string): Finding { return { id: `parser.oracle_disagreement.${file}.${detail}`, kind: "parser.oracle_disagreement", severity: "low", file, line: 1, message: `Parser oracle disagreement: ${detail}`, actions: ["Inspect the oracle output and add a parser recovery fixture before relying on affected semantic rules."] }; }
+function failure(file: string, oracle: string, detail: string): Finding { return { id: `parser.oracle_failure.${oracle}.${file}`, kind: "parser.oracle_failure", severity: "medium", file, line: 1, message: `${oracle} could not parse or inspect ${file}: ${detail}`, actions: ["Check the oracle installation and inspect this QML syntax with the Qt parser before changing Lens parser behavior."] }; }

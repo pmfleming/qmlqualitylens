@@ -58,8 +58,8 @@ type ToolsConfig = {
 };
 type RuntimeBudget = { scenario: string; platform?: string; frameP95Ms?: number; maxEventMs?: number };
 type ReportsConfig = { tests: string | null; runtimeWarnings: string | null; qmlProfiler: string | null; coverage: string | null; qmlbench: string | null; qmlbenchBaseline: string | null };
-export type BenchmarkPolicy = { maxRegressionPercent: number; maxCoefficientOfVariation: number; minSamples: number };
-export type DynamicComponentEdge = { from: string; to: string };
+type BenchmarkPolicy = { maxRegressionPercent: number; maxCoefficientOfVariation: number; minSamples: number };
+type DynamicComponentEdge = { from: string; to: string };
 
 export type RawConfig = {
   $schema?: string;

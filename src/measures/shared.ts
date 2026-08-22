@@ -18,7 +18,7 @@ export function baseArtifact(context: AnalysisContext, taskId: string, command: 
   };
 }
 
-export function writeArtifact(config: Config, filename: string, artifact: unknown): void {
+export function writeArtifact(config: Config, filename: string, artifact: object): void {
   fs.mkdirSync(config.outputDir, { recursive: true });
   fs.writeFileSync(path.join(config.outputDir, filename), `${JSON.stringify(artifact, null, 2)}\n`);
 }

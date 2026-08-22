@@ -1,7 +1,9 @@
 import type { AnalysisContext } from "../analyzer.js";
-export { measureSupport as support } from "../measure-support.js";
+import { measureSupport } from "../measure-support.js";
 import type { CloneGroup, Config, Finding, JsonValue, Thresholds } from "../types.js";
 
+export { measureSupport as support };
+export type MeasureToolExecution = ReturnType<typeof measureSupport.executeTool>;
 export type MeasureContext = AnalysisContext;
 export type MeasureConfig = Config;
 export type MeasureFinding = Finding;

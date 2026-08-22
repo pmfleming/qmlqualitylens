@@ -6,11 +6,14 @@ export function lexQml(text: string): QmlToken[] {
 
 class QmlLexer {
   private readonly tokens: QmlToken[] = [];
+  private readonly text: string;
   private index = 0;
   private line = 1;
   private column = 1;
 
-  constructor(private readonly text: string) {}
+  constructor(text: string) {
+    this.text = text;
+  }
 
   lex(): QmlToken[] {
     while (this.index < this.text.length) this.scanNext();
