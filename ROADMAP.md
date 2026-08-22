@@ -1,74 +1,39 @@
-# QML Quality Lens Roadmap
+# QML Quality Lens roadmap
 
-This checklist records completed work and remaining calibration.
+Current work is calibration-driven; the baseline product milestones are complete. See the [historical implementation plan](docs/qml-quality-improvement-plan.md) for design rationale.
 
-## Release summary
+## Releases
 
-- **0.3:** opt-in CMake, Qt Quick Test, runtime smoke, Chrome-trace normalization, hardened process controls, evidence policy, profiles, SARIF, and external calibration.
-- **0.4:** `.qmltypes` evidence, parser-oracle calibration, rule coverage, semantic finding identities, inherited type roles, and refresh-aware frame evidence.
-- **0.5:** reachability, Cobertura/Qoverage mapping, qmlbench regression evidence, and GitLab Code Quality output.
+- **0.3:** opt-in CMake, Qt Quick Test, runtime smoke, trace normalization, process controls, evidence policy, profiles, SARIF, and external calibration.
+- **0.4:** `.qmltypes` evidence, parser oracles, rule coverage, semantic identities, inherited roles, and refresh-aware frame evidence.
+- **0.5:** reachability, Cobertura/Qoverage mapping, qmlbench comparisons, and GitLab Code Quality output.
 
-See the [historical implementation plan](docs/qml-quality-improvement-plan.md) for design rationale.
+## Delivered foundation
 
-## Phase 1: MVP static artifact
+- Dependency-free QML lexer/parser with scopes, grouped/attached properties, handlers, functions, bindings, ids, references, and recovery diagnostics.
+- Project-wide imports, qmldir modules, type evidence, component uses, entrypoint reachability, Loader/sourceComponent edges, and configured dynamic edges.
+- Complexity, effort, locality, leverage, styling, boundary, clone, cleanup, semantic, accessibility, i18n, and performance-review artifacts.
+- Optional qmllint, qmlformat, qmldom, Tree-sitter, CMake, qmltestrunner, runtime-smoke, profiler-adapter, coverage, and qmlbench evidence.
+- Policy-based audit, base-worktree comparison, stable identities, baselines, suppressions, SARIF, and Code Climate output.
+- QtQuick, Kirigami, Quickshell, generic, and custom profile scaffolding.
+- Labeled qmllint fixtures, representative-project calibration, and Nix/direnv tooling.
 
-- [x] Discover `.qml`, `.js`, and `qmldir` files.
-- [x] Emit legacy artifact: `qml_quality_report.json`.
-- [x] Compute LOC, component size, function/handler complexity, cognitive complexity, effort, locality, leverage, styling, boundary, and clone metrics.
-- [x] Provide `summary`, `json`, and `markdown` CLI formats.
-- [x] Add a Shelllist example config.
-- [x] Introduce shared `AnalysisContext`.
-- [x] Split measurements into task producers and catalog entries.
-- [x] Add `quality.hotspots`.
-- [x] Add `map.architecture`.
-- [x] Add provenance/confidence to split artifacts.
-- [x] Add initial audit/baseline mode.
-- [x] Add QML structural clone detection.
-- [x] Add optional CMake configure/build evidence with normalized diagnostics.
-- [x] Add QML/Quickshell health rules.
-- [x] Add correctness catalog discovery.
-- [x] Add managed `qmltestrunner` execution and runtime-smoke warning capture.
-- [x] Add cleanup/dead-component detection.
-- [x] Add entrypoint-rooted reachability with Loader/sourceComponent and configured dynamic edges.
+## Current priorities
 
-## Phase 2: QML precision
+### Parser and semantic precision
 
-- [x] Replace regex object detection with a small QML lexer/parser.
-- [x] Track object scopes so id coupling distinguishes same-object use from cross-object reach-through.
-- [x] Improve bindings that span common multiline JavaScript expressions.
-- [x] Separate grouped property scopes from visual object scopes.
-- [x] Parse attached property scopes and attached signal handlers.
-- [x] Parse qualified object type paths.
-- [x] Surface parser diagnostics in artifacts and findings.
-- [x] Classify imports as Qt, Quickshell, Kirigami, local module, external module, or JavaScript helper.
+- [ ] Improve recovery for malformed JavaScript blocks and uncommon QML grammar.
+- [ ] Deepen focus traps, Escape behavior, accessible-role propagation, and keyboard checks.
+- [ ] Expand semantic-token, protocol-parsing, secret-handling, and command-construction checks.
 
-## Phase 3: Rule depth
+### Adoption workflow
 
-- [x] Initial accessibility checks for icon-only controls and pointer-only custom interaction.
-- [x] Recalibrated Loader/Image/delegate performance smells plus provenance-bearing runtime performance import.
-- [x] Add a provenance-requiring Chrome trace normalization adapter and source-located runtime hotspots.
-- [x] Import Cobertura/Qoverage evidence without conflating declarative object, binding, and JavaScript coverage.
-- [x] Import qmlbench JSON with environment/noise validation and baseline-relative regression policy.
-- [x] Initial theming/i18n checks for semantic colors and untranslated user-facing strings.
-- [x] Boundary hygiene for side effects, Process placement, and configurable boundary types/patterns.
-- [ ] Deepen focus traps, Escape behavior, semantic token coverage, protocol parsing, secret handling, and command construction.
+- [ ] Attribute moved findings across refactors.
+- [ ] Continue rule-by-rule precision/noise labeling before strengthening enforcement.
+- [ ] Add project-board/dashboard integrations beyond the existing machine-readable catalog.
 
-## Phase 4: Adoption workflow
+### Runtime and ecosystem evidence
 
-- [x] Changed-file and changed-hunk gating with `audit --base`.
-- [x] Base-worktree comparison for introduced finding detection.
-- [x] GitLab Code Quality/Code Climate output alongside SARIF.
-- [x] Configurable thresholds for size, complexity, binding, and clone-window rules.
-- [x] Optional `qmllint` oracle calibration tier with labeled benchmark fixtures.
-- [x] Optional CI job for Qt/qmllint oracle calibration.
-- [x] Local Nix/direnv Qt oracle environment.
-- [x] Suppressions with stale-suppression detection.
-- [ ] Add moved-finding attribution across refactors.
-
-## Phase 5: Ecosystem support
-
-- [x] QtQuick, Kirigami, Quickshell, generic, and custom profile scaffolding.
-- [x] Initial Quickshell-specific Process/service checks.
-- [x] Initial Kirigami/Qt Controls import and convention support.
-- [x] Optional `qmldom` and tree-sitter-QML parser oracle integration, while retaining the dependency-free internal parser.
-- [ ] Add dashboard and project-board catalog compatibility.
+- [ ] Add calibrated native QML Profiler adapters beyond normalized JSON and Chrome traces.
+- [ ] Deepen Quickshell IPC, shell-surface, popup, and layer-shell checks.
+- [ ] Expand Kirigami and custom-profile calibration against maintained projects.

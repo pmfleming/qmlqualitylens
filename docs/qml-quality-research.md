@@ -1,284 +1,173 @@
-# QML code quality: official guidance, project expectations, and tools
+# QML quality guidance and tools
 
-This research snapshot covers **Qt 6 QML/Qt Quick**. It separates documented Qt guidance from conventions inferred from major projects. Qt defines no universal QML quality score or official size and complexity limits.
+This research snapshot covers Qt 6 QML/Qt Quick. It separates documented Qt guidance from conventions observed in major projects. Qt defines no universal QML quality score, file-size limit, or complexity threshold.
 
-## Executive summary
+## Summary
 
-High-quality QML is:
+Production-ready QML is:
 
-1. **Correct and statically understandable**: imports and types resolve, properties and functions are typed, dependencies are explicit, and `qmllint` is clean with the project's real import paths.
-2. **Declarative**: bindings express state relationships; imperative JavaScript is reserved for actions and is kept small.
-3. **Architecturally separated**: QML owns presentation and interaction, while durable state, large models, I/O, and substantial computation live in an appropriate backend/model.
-4. **Lifecycle-safe**: state is not stored in disposable delegates, bindings are not accidentally overwritten, and dynamic objects are controlled deliberately.
-5. **Responsive and measured**: delegates and bindings are cheap, blocking work does not run on the GUI thread, and optimization follows QML Profiler evidence.
-6. **Usable in production**: responsive layouts, keyboard/focus behavior, accessibility, translation, supported styles, tests, documentation, and license hygiene are included.
+1. **Correct and typed:** imports resolve, dependencies are explicit, and qmllint runs with the real import/type environment.
+2. **Declarative:** bindings express state; imperative JavaScript is small and action-oriented.
+3. **Separated:** QML owns presentation and interaction; durable state, I/O, large models, and substantial computation live in a backend/model.
+4. **Lifecycle-safe:** disposable delegates do not own durable state, bindings are not accidentally overwritten, and dynamic objects are deliberate.
+5. **Measured:** blocking work stays off the GUI thread, hot delegates and bindings remain cheap, and optimization follows profiler evidence.
+6. **Usable:** layouts, keyboard/focus behavior, accessibility, translation, supported styles, tests, documentation, and licensing are addressed.
 
-A strong default project gate is:
-
-- deterministic formatting;
-- zero `qmllint` errors and no unexplained warnings;
-- compiler-warning checks where the supported Qt version makes them reliable;
-- a clean build and relevant automated tests;
-- no new runtime QML warnings during smoke tests;
-- profiling and UI review for performance-sensitive changes;
-- changed-code gating for heuristic maintainability findings.
+A strong project gate combines deterministic formatting, a correctly configured qmllint run, clean build/tests, no new runtime warnings, measured review of performance-sensitive changes, and changed-code gating for heuristics.
 
 ## Official sources
 
-QML is developed as part of Qt; there is no separate official “QML Foundation.” Primary sources are the [Qt Project](https://www.qt-project.org/) and [Qt documentation](https://doc.qt.io/qt-6/).
+QML is part of Qt; there is no separate official “QML Foundation.” Primary authority is the [Qt Project](https://www.qt-project.org/) and [Qt documentation](https://doc.qt.io/qt-6/). Qt's conventions guide is guidance, not a complete contribution policy or quantitative quality model.
 
-Qt's conventions guide documents recommendations used by Qt examples and documentation. It is neither a complete contribution policy nor a quantitative quality model.
+## Qt recommendations
 
-## Official Qt recommendations
+### Structure and type safety
 
-### Structure and formatting
+Qt's [QML Coding Conventions](https://doc.qt.io/qt-6/qml-codingconventions.html) and [Best Practices](https://doc.qt.io/qt-6/qtquick-bestpractices.html) recommend:
 
-Qt's [QML Coding Conventions](https://doc.qt.io/qt-6/qml-codingconventions.html) recommend:
+- order and group object members consistently;
+- use grouped-property notation where clearer and one property per line;
+- move multiline scripts into functions and long/reused scripts into JavaScript files;
+- type JavaScript parameters/returns and prefer concrete properties over `var`;
+- use `required`, `readonly`, and explicit dependencies to express contracts;
+- qualify parent-component properties through an `id`;
+- name signal-handler parameters with function/arrow syntax;
+- prefer declarative bindings and review assignments that may replace them;
+- use controls before building custom equivalents;
+- keep durable state in models/backends rather than disposable delegates;
+- keep substantial computation and large/dynamic data in a typed backend;
+- make user-facing strings translatable from the start.
 
-- order object content as `id`, property declarations, signal declarations, JavaScript functions, object properties, then child objects;
-- separate those sections with blank lines and group related properties;
-- use grouped-property notation when it improves readability;
-- put each property on its own line;
-- use blocks for multiline script expressions and semicolons inside script blocks;
-- move scripts longer than a few lines into a function; move long/reused scripts into a JavaScript file;
-- add parameter and return type annotations to JavaScript functions;
-- explicitly qualify a parent component's properties through its `id`;
-- name signal-handler parameters explicitly, using function/arrow-function syntax;
-- use `required` properties for data that must be supplied externally.
+[`qmlformat`](https://doc.qt.io/qt-6/qtqml-tooling-qmlformat.html) applies Qt formatting conventions and supports `.qmlformat.ini`. Pin its version. Adopt import sorting deliberately because colliding module exports can make order significant.
 
-[`qmlformat`](https://doc.qt.io/qt-6/qtqml-tooling-qmlformat.html) is Qt's formatter for these conventions. Its defaults include four-space indentation. It can be configured through `.qmlformat.ini`. Reordering or sorting imports must be adopted deliberately because import sorting can alter semantics where modules export colliding type names.
+### Components and layouts
 
-### Declarative design and type safety
+Qt recommends CMake QML modules and bundled resources. `qt_add_qml_module()` compiles listed `QML_FILES`; moving those files away from their module can change implicit imports.
 
-Qt's [Best Practices for QML and Qt Quick](https://doc.qt.io/qt-6/qtquick-bestpractices.html) recommend:
+For layouts:
 
-- prefer built-in Qt Quick Controls before implementing a custom control;
-- prefer declarative bindings over imperative assignments;
-- use concrete property types instead of `var` whenever possible;
-- use `required` properties and explicit dependencies instead of ambient/unqualified context lookup;
-- keep C++ types unaware of QML where possible and push backend references/data into QML;
-- use QML for presentation and interaction, and a strongly typed backend for substantial computation or large/dynamic data sets;
-- keep durable state in models, not delegates, because delegates can be destroyed and recreated;
-- prefer explicit user-interaction signals such as `Slider.moved` over generic value-change signals when sending user changes back to a backend;
-- make user-facing strings translatable from the beginning.
+- size the layout relative to its non-layout parent;
+- use `Layout.*` on immediate layout children;
+- do not anchor an immediate layout child;
+- avoid redundant preferred dimensions when implicit size is sufficient;
+- keep hot delegates simple and design for varying size and DPI.
 
-Practical implications:
-
-- typed, `required`, and `readonly` properties communicate component contracts;
-- a component should have a small public API and avoid reaching deeply through unrelated `id` objects;
-- assignments in handlers deserve review if the target normally has a declarative binding, because an assignment can remove that binding;
-- a model or backend should be the source of truth; the visual tree should not become an implicit data store.
-
-### Components, resources, and layouts
-
-Qt recommends CMake QML modules and bundled resources. `qt_add_qml_module()` compiles files listed in `QML_FILES` ahead of time. Keep those files beside the module's `CMakeLists.txt`; moving them elsewhere can change implicit imports.
-
-For layout code:
-
-- size a layout relative to its non-layout parent with anchors or width/height;
-- use `Layout.*` properties on a layout's immediate children;
-- do not put anchors on an immediate child of a layout;
-- do not specify preferred dimensions when a satisfactory implicit size already exists;
-- avoid unnecessary layouts/anchors in hot delegates when simple geometry bindings suffice;
-- design for varying sizes and DPI rather than fixed pixels everywhere.
-
-For Qt Quick Controls, Qt warns not to customize native Windows/macOS styles. Base customized controls on a cross-platform customizable style such as Basic, Fusion, Imagine, Material, or Universal, or provide a custom style.
+Do not customize native Windows/macOS Qt Quick Controls styles. Use a customizable style such as Basic, Fusion, Imagine, Material, or Universal, or provide a custom style.
 
 ### Performance
 
-Qt's [QML Performance Considerations and Suggestions](https://doc.qt.io/qt-6/qtquick-performance.html) starts with profiling rather than speculative optimization. Its main guidance includes:
+Qt's [QML performance guidance](https://doc.qt.io/qt-6/qtquick-performance.html) starts with profiling:
 
 - keep the GUI thread event-driven and non-blocking;
-- do substantial work in worker threads;
-- never spin/process a nested event loop to disguise blocking work;
+- move substantial work to worker threads and avoid nested event loops;
 - keep frequently reevaluated bindings simple;
-- avoid repeated property and value-type lookups in hot code;
-- aggregate changes in a temporary value instead of repeatedly changing a bound property in a loop;
-- keep delegates simple and create objects lazily where appropriate;
-- size images appropriately and use asynchronous loading where appropriate;
-- reduce unnecessary object creation, invisible-item updates, overdraw, animations, and scene-graph work.
+- reduce repeated lookups and repeated bound-property updates;
+- keep delegates cheap and create objects lazily when appropriate;
+- size/load images appropriately;
+- reduce unnecessary objects, updates, overdraw, animations, and scene-graph work.
 
-“60 FPS” implies about 16.7 ms per frame, but it is not a universal pass/fail threshold. The target depends on hardware, display refresh rate, product requirements, and the work shared between GUI and render threads.
+About 16.7 ms corresponds to 60 Hz, not a universal budget. Targets depend on display refresh, hardware, product requirements, and GUI/render-thread work.
 
-## What major QML projects require
+## Representative project expectations
 
-The projects below are representative, not a statistically ranked list of the largest repositories. Their policies demonstrate the common contribution baseline and project-specific differences.
+These projects illustrate common and project-specific policy; they are not a statistical ranking.
 
-### Qt Declarative / Qt itself
+### Qt Declarative
 
-Qt's [`qtdeclarative` contribution file](https://github.com/qt/qtdeclarative/blob/dev/CONTRIBUTING.md), [Contribution Guidelines](https://wiki.qt.io/Qt_Contribution_Guidelines), and [Commit Policy](https://wiki.qt.io/Commit_Policy) require or expect:
-
-- contributions through Qt Gerrit, not GitHub pull requests;
-- a Qt account, correctly configured authorship, and compliance with the contribution agreement;
-- a developer build and successful Qt build/autotest integration;
-- one self-contained change per commit and no unrelated formatting cleanup;
-- Qt coding conventions, API design review, documentation, translation conventions, and no reliance on private APIs;
-- tests for fixed bugs and new functionality, or an explicit reason why an automated test is not possible;
-- no regressions and compatibility with supported platforms/configurations;
-- response to Early Warning System, reviewer, and CI feedback;
-- a ChangeLog entry for significant user-facing or compatibility changes.
-
-This is the canonical upstream bar: correctness, reviewability, compatibility, documentation, and tests are more important than a numeric maintainability score.
+Qt's [contribution guide](https://github.com/qt/qtdeclarative/blob/dev/CONTRIBUTING.md), [general guidelines](https://wiki.qt.io/Qt_Contribution_Guidelines), and [commit policy](https://wiki.qt.io/Commit_Policy) emphasize Gerrit review, focused commits, successful builds/autotests, compatibility, documentation, translation, API review, and regression tests. Correctness and reviewability outweigh a numeric score.
 
 ### KDE Kirigami
 
-Kirigami's [CI configuration](https://github.com/KDE/kirigami/blob/master/.kde-ci.yml), [GitLab CI configuration](https://github.com/KDE/kirigami/blob/master/.gitlab-ci.yml), [`qmllint` configuration](https://github.com/KDE/kirigami/blob/master/qmllint.ini.in), and KDE's [Commit Policy](https://community.kde.org/Policies/Commit_Policy) show a framework-level gate:
-
-- run tests before installation and require passing tests on Linux, FreeBSD, and Windows;
-- build/test additional configurations including Qt-next, static builds, and Android;
-- run `qmllint`, with warnings including unqualified access, unused imports, missing properties/types, incompatible types, required properties, duplicate bindings, and signal-handler parameters;
-- run C++ static analysis and XML/YAML linting;
-- use atomic commits, avoid mixing formatting with behavior, test before submission, and do not submit code the author does not understand;
-- include SPDX license/copyright metadata and follow KDE review and compatibility policies.
+Kirigami's [repository and CI](https://github.com/KDE/kirigami) and KDE's [commit policy](https://community.kde.org/Policies/Commit_Policy) require broad build/test coverage, qmllint, static analysis, atomic understood changes, review, compatibility, and SPDX metadata. Its qmllint policy includes unqualified access, imports/types, required properties, incompatible types, duplicate bindings, and handler parameters.
 
 ### QGroundControl
 
-QGroundControl is a large production Qt/QML application. Its [contribution guide](https://github.com/mavlink/qgroundcontrol/blob/master/.github/CONTRIBUTING.md), [coding style](https://github.com/mavlink/qgroundcontrol/blob/master/CODING_STYLE.md), [`qmllint` settings](https://github.com/mavlink/qgroundcontrol/blob/master/.qmllint.ini), [`qmlformat` settings](https://github.com/mavlink/qgroundcontrol/blob/master/.qmlformat.ini), and [pre-commit configuration](https://github.com/mavlink/qgroundcontrol/blob/master/.pre-commit-config.yaml) expect:
-
-- four-space, LF, UTF-8 QML with a documented object-content order;
-- `qmlformat` normalization and `qmllint` in the local lint gate;
-- explicit Qt 6 signal/`Connections` function syntax and project architecture conventions;
-- `just build`, `just lint`, and relevant tests before completion;
-- unit tests for new behavior, all CI checks passing, focused changes, documentation, and screenshots for UI changes;
-- testing on applicable desktop/mobile platforms and PX4/ArduPilot configurations;
-- Conventional Commits and compatibility with its Apache-2.0/GPL-3.0 dual-license policy.
-
-Its configuration also shows a key limitation: projects may disable valid `qmllint` categories when custom modules or context properties are invisible to the tool. Reports must distinguish a clean result from an incomplete type/import environment.
+QGroundControl's [contribution guide](https://github.com/mavlink/qgroundcontrol/blob/master/.github/CONTRIBUTING.md) and repository configurations require documented formatting, qmllint, focused changes, tests/CI, UI evidence, platform testing, and architecture conventions. Disabled qmllint categories also demonstrate an important limitation: custom modules/context properties can make evidence incomplete unless the real type environment is available.
 
 ### Quickshell
 
-Quickshell is especially relevant to this repository's intended users. Its [contribution policy](https://git.outfoxxed.me/quickshell/quickshell/src/branch/master/CONTRIBUTING.md) and [development guide](https://git.outfoxxed.me/quickshell/quickshell/src/branch/master/HACKING.md) require:
+Quickshell's [contribution policy](https://git.outfoxxed.me/quickshell/quickshell/src/branch/master/CONTRIBUTING.md) requires human responsibility for every change, focused license-compatible commits, project formatting/linting, tests where appropriate, documentation, and changelog entries. It explicitly prohibits unsupervised automated submissions. A tool can support human review but cannot certify contributor responsibility.
 
-- the submitter to understand and take responsibility for every change;
-- human-submitted changes; automated tooling or AI-agent submissions without a human in the loop are explicitly prohibited;
-- license-compatible, focused, stand-alone changes;
-- formatting with `just fmt` and linting changed code with the documented test-enabled build configuration;
-- no regression in existing tests and tests for complex/breakable features when requested;
-- source documentation and a changelog entry for user-visible changes;
-- project-specific scoped commit messages and a clean, searchable history.
+## Common contribution baseline
 
-A tool can assist a human review, but it cannot certify compliance with contributor-responsibility policies.
+Across these projects:
 
-## Industry common denominator
+1. Read local policy; project rules override generic advice.
+2. Keep changes focused and avoid unrelated formatting churn.
+3. Build against supported Qt versions/configurations.
+4. Use the project's formatter and qmllint environment.
+5. Add and run relevant unit, integration, and UI tests.
+6. Check runtime warnings and visually inspect UI changes.
+7. Review keyboard/focus, translation, DPI/resizing, themes, and platforms.
+8. Profile startup, delegates, animation, models, images, and rendering when affected.
+9. Update public documentation, screenshots, release notes, and translations.
+10. Satisfy licensing, contribution agreements, review, and CI.
 
-Across these projects, contribution-ready QML normally means:
+Numeric size or complexity values are useful hotspot policies, not common standards.
 
-1. Read the repository's local policy; existing project style takes precedence over generic advice.
-2. Keep the change focused and avoid unrelated formatting or generated-file churn.
-3. Build against the project's supported Qt version and configurations.
-4. Run its exact formatter and linter configuration with correct import/build paths.
-5. Add or update tests and run relevant unit, integration, and UI tests.
-6. Check runtime QML warnings and visually inspect UI changes.
-7. Test keyboard/focus, localization, resizing/DPI, themes/styles, and applicable platforms.
-8. Profile changes to delegates, startup, animations, large models, images, or rendering.
-9. Update public API documentation, screenshots, release notes/changelog, and translations as required.
-10. Satisfy license headers, contribution agreements, review feedback, and CI.
+## Tools
 
-There is no evidence of a common industry gate such as “QML files must be below 250 lines” or “binding complexity must be below 5.” Such values are useful hotspot heuristics, not standards violations.
-
-## Tools that can measure or enforce QML quality
-
-| Tool | What it provides | Appropriate use |
+| Tool | Evidence | Best use |
 | --- | --- | --- |
-| [`qmllint`](https://doc.qt.io/qt-6/qtqml-tooling-qmllint.html) | Syntax, imports/types, handlers, unqualified access, duplicate bindings, deprecations, type safety, anti-patterns, optional compiler warnings; JSON output | Primary static correctness gate |
-| [`qmlformat`](https://doc.qt.io/qt-6/qtqml-tooling-qmlformat.html) | Deterministic Qt-convention formatting | Style enforcement; compare generated output in CI if the installed version has no check mode |
-| [`qmlls`](https://doc.qt.io/qt-6/qtqml-tooling-qmlls.html) | Editor diagnostics from `qmllint`, completion, navigation, references, rename, formatting | Fast developer feedback; requires correct build/import configuration |
-| Qt Quick Compiler / `qmlcachegen` / `qmlsc` diagnostics | Whether QML can be compiled efficiently and which constructs block compilation | Build-time compatibility/performance signal; enable the `qmllint` compiler warning category deliberately |
-| [Qt Quick Test](https://doc.qt.io/qt-6/qtquicktest-index.html) / `qmltestrunner` | QML unit and interaction tests, `TestCase`, `SignalSpy`, data-driven tests | Behavior and regression gate, commonly run offscreen in CI |
-| [QML Profiler](https://doc.qt.io/qtcreator/creator-qml-performance-monitor.html) | Binding/handler/JavaScript time and frequency, object creation, compilation, animation FPS, pixmap cache, JS memory, scene-graph events | Runtime performance measurement on representative hardware/workloads |
-| `QSG_RENDER_TIMING`, scene-graph visualization modes | Render/sync/upload timing, batches, clipping, overdraw, dirty regions | Rendering diagnosis and frame-budget work |
-| [GammaRay](https://github.com/KDAB/GammaRay) | Runtime QObject/item trees, properties, bindings, scene graph, layouts, signals, and other introspection | Diagnose object growth, wrong bindings, layout/item-tree problems, and runtime state |
-| [Squish for Qt](https://doc.qt.io/squish/) | Automated cross-platform GUI interaction and verification | End-to-end UI regression testing |
-| Qt Test, sanitizers, Valgrind, general profilers | Backend correctness, leaks, races, C++ hot paths | Necessary for mixed C++/QML applications; QML Profiler does not replace C++ analysis |
-| `clazy`, `clang-tidy`, `clang-format` | Qt/C++ API misuse, C++ static analysis, C++ style | Quality of types and models exposed to QML, not QML source itself |
-| [`qmlqualitylens`](../README.md) | Heuristic architecture, complexity, locality, clone, cleanup, semantic, test-catalog, and changed-code artifacts | Review prioritization beyond `qmllint`; not an official Qt validator |
+| [`qmllint`](https://doc.qt.io/qt-6/qtqml-tooling-qmllint.html) | Syntax, imports/types, handlers, type safety, deprecations, compiler warnings, JSON output | Primary static correctness gate |
+| [`qmlformat`](https://doc.qt.io/qt-6/qtqml-tooling-qmlformat.html) | Deterministic Qt formatting | Pinned style enforcement |
+| [`qmlls`](https://doc.qt.io/qt-6/qtqml-tooling-qmlls.html) | Diagnostics, completion, navigation, references, rename | Fast editor feedback with correct build/import setup |
+| Qt Quick Compiler / `qmlcachegen` / `qmlsc` | Compilation compatibility and blockers | Build-time compatibility/performance evidence |
+| [Qt Quick Test](https://doc.qt.io/qt-6/qtquicktest-index.html) | QML unit, interaction, data-driven, and signal tests | Behavioral regression gate |
+| [QML Profiler](https://doc.qt.io/qtcreator/creator-qml-performance-monitor.html) | Binding, JavaScript, creation, frame, image, memory, and scene-graph events | Runtime measurement on representative workloads |
+| Scene-graph timing/visualization | Render/sync/upload timing, batches, clipping, overdraw | Rendering diagnosis |
+| [GammaRay](https://github.com/KDAB/GammaRay) | Runtime object/item trees, properties, bindings, layouts, signals | Runtime structure and state diagnosis |
+| [Squish for Qt](https://doc.qt.io/squish/) | Cross-platform GUI automation | End-to-end UI regression testing |
+| Sanitizers, Valgrind, general profilers | Backend correctness, memory, races, native hotspots | Mixed C++/QML quality |
+| `clazy`, `clang-tidy`, `clang-format` | Qt/C++ API and style checks | Types/models exposed to QML |
+| [`qmlqualitylens`](../README.md) | QML architecture, complexity, locality, clones, cleanup, semantics, and changed-code artifacts | Review prioritization beyond qmllint |
 
-### Tool limitations
+### Limitations
 
-- `qmllint` quality depends on complete QML type information and correct import/build paths. Missing modules create false positives; disabling import/type warnings can hide real defects.
-- `qmlformat` enforces layout, not architecture or behavior. Pin the Qt/tool version to avoid formatter drift.
-- QML Profiler measures executed paths only. A clean trace does not cover unloaded components, other states, other devices, or rare input paths.
-- General JavaScript linters and complexity tools usually do not parse embedded QML JavaScript with QML scope/type semantics correctly.
-- Generic Sonar-style code metrics do not replace QML-aware type resolution, binding analysis, lifecycle checks, or runtime profiling.
-- A static score cannot prove visual correctness, accessibility, usability, or frame-time stability.
+- qmllint needs complete type information and correct import/build paths.
+- qmlformat checks layout, not architecture or behavior.
+- profiler evidence covers only executed scenarios and environments.
+- generic JavaScript tools rarely model embedded QML scope correctly.
+- generic metrics do not replace QML type, binding, lifecycle, or runtime analysis.
+- static analysis cannot prove visual correctness, accessibility, usability, or frame stability.
 
-## Recommended quality model for qmlqualitylens
+## Recommended evidence model
 
-Lens should report separate evidence dimensions; one score cannot define “best QML.”
+**Potential gates:** parser errors, configured qmllint diagnostics, known-complete local resolution failures, proven semantic conflicts, failing tests, new runtime warnings, and configured build/license failures.
 
-### Hard or high-confidence gates
+**Review signals:** size, complexity, coupling, API surface, clones, cleanup, delegate weight, lazy loading, image sizing, style literals, accessibility, keyboard behavior, translation, and theming.
 
-- parser/syntax errors;
-- `qmllint` errors and configured warning policy;
-- unresolved local imports/types when the import environment is known complete;
-- duplicate assignments/bindings, binding cycles, and invalid signal handlers;
-- anchors on immediate layout children and other unambiguous layout conflicts;
-- failing tests and newly introduced runtime QML warnings;
-- license/build/configuration failures when those inputs are available.
+**Separate runtime evidence:** frame percentiles, dropped frames, binding/handler timing, object creation, startup, JavaScript memory, images/cache, draw calls, overdraw, and full environment/scenario provenance.
 
-### Review-required findings
-
-- file SLOC, object count, handler/function complexity, nesting, and large bindings;
-- cross-object `id` coupling and long property reach-through;
-- component fan-out, low reuse, clones, and unused API/components;
-- delegate weight, Loader policy, image sizing, hardcoded visual values, and side-effect placement;
-- accessibility, keyboard navigation, translation, and theming heuristics.
-
-These are hotspot signals. They need project-specific thresholds, suppressions with reasons, and changed-code baselines; they should not be presented as Qt rules.
-
-### Runtime evidence to keep separate
-
-Runtime imports should retain raw provenance and report:
-
-- frame-time percentiles and dropped frames, not only average FPS;
-- binding/handler count, total time, maximum time, and callers/callees;
-- object creation and startup/loading time;
-- JavaScript heap allocation/usage;
-- image decode/cache cost, draw calls, texture/mesh memory, and overdraw;
-- hardware, Qt version, renderer, build type, scenario, and trace duration.
-
-Do not merge static and runtime data without preserving which claims are measured, inferred, skipped, or environment-dependent.
+Never merge measured and inferred values without preserving which claims were observed, inferred, skipped, or environment-dependent.
 
 ## Suggested CI baseline
 
-For a modern CMake Qt 6 project:
-
 ```sh
-# Generated by qt_add_qml_module() when linting is enabled
 cmake --build build --target all_qmllint
-
-# Project tests
 ctest --test-dir build --output-on-failure
-
-# Formatting: qmlformat has version-dependent options; a portable check writes
-# formatted output to a temporary file and compares it without changing sources.
-qmlformat path/to/File.qml > /tmp/File.qml.formatted
-diff -u path/to/File.qml /tmp/File.qml.formatted
-
-# This project
 npm run build
 node dist/bin/qmlqualitylens.js audit \
   --config qmlqualitylens.config.json \
-  --base origin/main \
-  --format markdown
+  --base origin/main --format markdown
 ```
 
-Version `.qmllint.ini`, `.qmlformat.ini`, import paths, build directories, and warning policy. Gate newly introduced findings first, then ratchet down existing debt without unrelated repository-wide cleanup.
+Version `.qmllint.ini`, `.qmlformat.ini`, import paths, build directories, and warning policy. Gate introduced findings first, then reduce existing debt without unrelated churn.
 
 ## Primary sources
 
 - [Qt: QML Coding Conventions](https://doc.qt.io/qt-6/qml-codingconventions.html)
 - [Qt: Best Practices for QML and Qt Quick](https://doc.qt.io/qt-6/qtquick-bestpractices.html)
-- [Qt: QML Performance Considerations and Suggestions](https://doc.qt.io/qt-6/qtquick-performance.html)
-- [Qt: Qt Quick Tools and Utilities](https://doc.qt.io/qt-6/qtquick-tools-and-utilities.html)
-- [Qt: `qmllint`](https://doc.qt.io/qt-6/qtqml-tooling-qmllint.html)
-- [Qt: `qmlformat`](https://doc.qt.io/qt-6/qtqml-tooling-qmlformat.html)
+- [Qt: QML Performance](https://doc.qt.io/qt-6/qtquick-performance.html)
+- [Qt: Qt Quick Tools](https://doc.qt.io/qt-6/qtquick-tools-and-utilities.html)
+- [Qt: qmllint](https://doc.qt.io/qt-6/qtqml-tooling-qmllint.html)
+- [Qt: qmlformat](https://doc.qt.io/qt-6/qtqml-tooling-qmlformat.html)
 - [Qt: QML Language Server](https://doc.qt.io/qt-6/qtqml-tooling-qmlls.html)
 - [Qt: Qt Quick Test](https://doc.qt.io/qt-6/qtquicktest-index.html)
-- [Qt Creator: Profiling QML applications](https://doc.qt.io/qtcreator/creator-qml-performance-monitor.html)
+- [Qt Creator: QML profiling](https://doc.qt.io/qtcreator/creator-qml-performance-monitor.html)
 - [Qt Project: Contribution Guidelines](https://wiki.qt.io/Qt_Contribution_Guidelines)
 - [Qt Project: Commit Policy](https://wiki.qt.io/Commit_Policy)
 - [KDE: Commit Policy](https://community.kde.org/Policies/Commit_Policy)
-- [KDE Kirigami repository and CI policy](https://github.com/KDE/kirigami)
+- [KDE Kirigami](https://github.com/KDE/kirigami)
 - [QGroundControl contribution guide](https://github.com/mavlink/qgroundcontrol/blob/master/.github/CONTRIBUTING.md)
 - [Quickshell contribution policy](https://git.outfoxxed.me/quickshell/quickshell/src/branch/master/CONTRIBUTING.md)
