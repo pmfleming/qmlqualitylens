@@ -29,103 +29,33 @@ const DEFAULT_POLICY: PolicyConfig = {
 };
 
 export function loadConfig(configPath: string | null): Config {
-  const resolvedConfig = path.resolve(configPath ?? "qmlqualitylens.config.json");
-  const configDir = path.dirname(resolvedConfig);
-  const parsed = fs.existsSync(resolvedConfig) ? parseJson(stripJsonComments(fs.readFileSync(resolvedConfig, "utf8"))) : {};
-  const raw = validateRawConfig(parsed, resolvedConfig);
+  const configPathResolved = path.resolve(configPath ?? "qmlqualitylens.config.json");
+  const configDir = path.dirname(configPathResolved);
+  const raw = readRawConfig(configPathResolved);
   const projectRoot = resolveFrom(configDir, raw.project_root ?? ".");
-  const sourceRoots = (raw.source_roots && raw.source_roots.length ? raw.source_roots : ["."]).map((item) => resolveFrom(projectRoot, item));
   const outputDir = resolveFrom(projectRoot, raw.output_dir ?? "target/qmlqualitylens");
-  const qmllintReport = raw.qmllint_report ? resolveFrom(projectRoot, raw.qmllint_report) : null;
-  const qmllintCommand = raw.qmllint_command ?? null;
   const profile = raw.profile ?? "generic";
-  const profileRoles = typeRolesForProfile(profile);
   return {
-    configPath: resolvedConfig,
+    configPath: configPathResolved,
     configDir,
     projectName: raw.project_name ?? path.basename(projectRoot),
     projectRoot,
-    sourceRoots,
+    sourceRoots: (raw.source_roots?.length ? raw.source_roots : ["."]).map((item) => resolveFrom(projectRoot, item)),
     outputDir,
     exclude: raw.exclude ?? ["node_modules", ".git", "dist", "target", "build", ".direnv"],
     profile,
-    qmllintReport,
-    qmllintCommand,
+    qmllintReport: resolveOptionalPath(projectRoot, raw.qmllint_report),
+    qmllintCommand: raw.qmllint_command ?? null,
     externalModules: raw.external_modules ?? [],
     externalTypes: raw.external_types ?? [],
     entrypoints: (raw.entrypoints ?? []).map(normalizeProjectPath),
     dynamicComponentEdges: (raw.dynamic_component_edges ?? []).map((edge) => ({ from: normalizeProjectPath(edge.from), to: normalizeProjectPath(edge.to) })),
     processBoundary: { ...DEFAULT_PROCESS_BOUNDARY, ...(raw.process_boundary ?? {}) },
-    policy: {
-      requireQmllint: raw.policy?.require_qmllint ?? DEFAULT_POLICY.requireQmllint,
-      newCodeOnly: raw.policy?.new_code_only ?? DEFAULT_POLICY.newCodeOnly,
-      failOn: raw.policy?.fail_on ?? DEFAULT_POLICY.failOn,
-      incomplete: raw.policy?.incomplete ?? DEFAULT_POLICY.incomplete,
-    },
-    tools: {
-      parserOracleCheck: raw.tools?.parser_oracle?.check ?? false,
-      parserOracleQmldomCommand: raw.tools?.parser_oracle?.qmldom_command ?? "qmldom",
-      parserOracleTreeSitter: raw.tools?.parser_oracle?.tree_sitter ?? false,
-      parserOracleTimeoutMs: raw.tools?.parser_oracle?.timeout_ms ?? 30_000,
-      cmakeCommand: raw.tools?.cmake?.command ?? "cmake",
-      cmakeCheck: raw.tools?.cmake?.check ?? false,
-      cmakeBuildDir: resolveFrom(projectRoot, raw.tools?.cmake?.build_dir ?? "build"),
-      cmakeConfigure: raw.tools?.cmake?.configure ?? false,
-      cmakeConfigureArguments: raw.tools?.cmake?.configure_arguments ?? [],
-      cmakeBuildTargets: raw.tools?.cmake?.build_targets ?? [],
-      cmakeBuildArguments: raw.tools?.cmake?.build_arguments ?? [],
-      cmakeTimeoutMs: raw.tools?.cmake?.timeout_ms ?? 600_000,
-      cmakeWorkingDirectory: resolveFrom(projectRoot, raw.tools?.cmake?.working_directory ?? "."),
-      cmakeEnvironment: raw.tools?.cmake?.environment ?? {},
-      cmakeRedactPatterns: raw.tools?.cmake?.redact_patterns ?? [],
-      qmllintCommand: raw.tools?.qmllint?.command ?? "qmllint",
-      qmllintCheck: raw.tools?.qmllint?.check ?? false,
-      qmllintArguments: raw.tools?.qmllint?.arguments ?? [],
-      qmllintImportPaths: (raw.tools?.qmllint?.import_paths ?? []).map((item) => resolveFrom(projectRoot, item)),
-      qmllintQmltypes: (raw.tools?.qmllint?.qmltypes ?? []).map((item) => resolveFrom(projectRoot, item)),
-      qmllintUseEnvironmentImports: raw.tools?.qmllint?.use_environment_imports ?? false,
-      qmlformatCommand: raw.tools?.qmlformat?.command ?? null,
-      qmlformatCheck: raw.tools?.qmlformat?.check ?? false,
-      qmltestrunnerCommand: raw.tools?.qmltestrunner?.command ?? "qmltestrunner",
-      qmltestrunnerCheck: raw.tools?.qmltestrunner?.check ?? false,
-      qmltestrunnerArguments: raw.tools?.qmltestrunner?.arguments ?? [],
-      qmltestrunnerTimeoutMs: raw.tools?.qmltestrunner?.timeout_ms ?? 120_000,
-      qmltestrunnerWorkingDirectory: resolveFrom(projectRoot, raw.tools?.qmltestrunner?.working_directory ?? "."),
-      qmltestrunnerEnvironment: raw.tools?.qmltestrunner?.environment ?? {},
-      qmltestrunnerRedactPatterns: raw.tools?.qmltestrunner?.redact_patterns ?? [],
-      runtimeCommand: raw.tools?.runtime?.command ?? null,
-      runtimeCheck: raw.tools?.runtime?.check ?? false,
-      runtimeArguments: raw.tools?.runtime?.arguments ?? [],
-      runtimeTimeoutMs: raw.tools?.runtime?.timeout_ms ?? 60_000,
-      runtimeWorkingDirectory: resolveFrom(projectRoot, raw.tools?.runtime?.working_directory ?? "."),
-      runtimeEnvironment: raw.tools?.runtime?.environment ?? {},
-      runtimeRedactPatterns: raw.tools?.runtime?.redact_patterns ?? [],
-      qmlProfilerCommand: raw.tools?.qml_profiler?.command ?? null,
-      qmlProfilerCheck: raw.tools?.qml_profiler?.check ?? false,
-      qmlProfilerArguments: raw.tools?.qml_profiler?.arguments ?? [],
-      qmlProfilerTimeoutMs: raw.tools?.qml_profiler?.timeout_ms ?? 300_000,
-      qmlProfilerWorkingDirectory: resolveFrom(projectRoot, raw.tools?.qml_profiler?.working_directory ?? "."),
-      qmlProfilerEnvironment: raw.tools?.qml_profiler?.environment ?? {},
-      qmlProfilerRedactPatterns: raw.tools?.qml_profiler?.redact_patterns ?? [],
-    },
-    typeRoles: {
-      interactiveTypes: [...new Set([...profileRoles.interactiveTypes, ...(raw.type_roles?.interactive_types ?? [])])],
-      layoutTypes: [...new Set([...profileRoles.layoutTypes, ...(raw.type_roles?.layout_types ?? [])])],
-      delegateOwnerTypes: [...new Set([...profileRoles.delegateOwnerTypes, ...(raw.type_roles?.delegate_owner_types ?? [])])],
-    },
-    reports: {
-      tests: raw.reports?.tests ? resolveFrom(projectRoot, raw.reports.tests) : raw.tools?.qmltestrunner?.check ? path.join(outputDir, "qmltestrunner.junit.xml") : null,
-      runtimeWarnings: raw.reports?.runtime_warnings ? resolveFrom(projectRoot, raw.reports.runtime_warnings) : null,
-      qmlProfiler: raw.reports?.qml_profiler ? resolveFrom(projectRoot, raw.reports.qml_profiler) : raw.tools?.qml_profiler?.check ? path.join(outputDir, "qml-profiler.normalized.json") : null,
-      coverage: raw.reports?.coverage ? resolveFrom(projectRoot, raw.reports.coverage) : null,
-      qmlbench: raw.reports?.qmlbench ? resolveFrom(projectRoot, raw.reports.qmlbench) : null,
-      qmlbenchBaseline: raw.reports?.qmlbench_baseline ? resolveFrom(projectRoot, raw.reports.qmlbench_baseline) : null,
-    },
-    benchmarkPolicy: {
-      maxRegressionPercent: raw.benchmark_policy?.max_regression_percent ?? DEFAULT_BENCHMARK_POLICY.maxRegressionPercent,
-      maxCoefficientOfVariation: raw.benchmark_policy?.max_coefficient_of_variation ?? DEFAULT_BENCHMARK_POLICY.maxCoefficientOfVariation,
-      minSamples: raw.benchmark_policy?.min_samples ?? DEFAULT_BENCHMARK_POLICY.minSamples,
-    },
+    policy: resolvePolicy(raw),
+    tools: resolveTools(raw, projectRoot),
+    typeRoles: resolveTypeRoles(raw, profile),
+    reports: resolveReports(raw, projectRoot, outputDir),
+    benchmarkPolicy: resolveBenchmarkPolicy(raw),
     performanceBudgets: (raw.performance_budgets ?? []).map((budget) => ({ scenario: budget.scenario, platform: budget.platform, frameP95Ms: budget.frame_p95_ms, maxEventMs: budget.max_event_ms })),
     rules: raw.rules ?? {},
     suppressions: raw.suppressions ?? [],
@@ -133,6 +63,78 @@ export function loadConfig(configPath: string | null): Config {
     raw,
   };
 }
+
+function readRawConfig(configPath: string): RawConfig { return validateRawConfig(fs.existsSync(configPath) ? parseJson(stripJsonComments(fs.readFileSync(configPath, "utf8"))) : {}, configPath); }
+function resolvePolicy(raw: RawConfig): PolicyConfig { return { requireQmllint: raw.policy?.require_qmllint ?? DEFAULT_POLICY.requireQmllint, newCodeOnly: raw.policy?.new_code_only ?? DEFAULT_POLICY.newCodeOnly, failOn: raw.policy?.fail_on ?? DEFAULT_POLICY.failOn, incomplete: raw.policy?.incomplete ?? DEFAULT_POLICY.incomplete }; }
+
+function resolveTools(raw: RawConfig, root: string): Config["tools"] {
+  const tools = raw.tools;
+  return {
+    parserOracleCheck: tools?.parser_oracle?.check ?? false,
+    parserOracleQmldomCommand: tools?.parser_oracle?.qmldom_command ?? "qmldom",
+    parserOracleTreeSitter: tools?.parser_oracle?.tree_sitter ?? false,
+    parserOracleTimeoutMs: tools?.parser_oracle?.timeout_ms ?? 30_000,
+    cmakeCommand: tools?.cmake?.command ?? "cmake",
+    cmakeCheck: tools?.cmake?.check ?? false,
+    cmakeBuildDir: resolveFrom(root, tools?.cmake?.build_dir ?? "build"),
+    cmakeConfigure: tools?.cmake?.configure ?? false,
+    cmakeConfigureArguments: tools?.cmake?.configure_arguments ?? [],
+    cmakeBuildTargets: tools?.cmake?.build_targets ?? [],
+    cmakeBuildArguments: tools?.cmake?.build_arguments ?? [],
+    cmakeTimeoutMs: tools?.cmake?.timeout_ms ?? 600_000,
+    cmakeWorkingDirectory: resolveFrom(root, tools?.cmake?.working_directory ?? "."),
+    cmakeEnvironment: tools?.cmake?.environment ?? {},
+    cmakeRedactPatterns: tools?.cmake?.redact_patterns ?? [],
+    qmllintCommand: tools?.qmllint?.command ?? "qmllint",
+    qmllintCheck: tools?.qmllint?.check ?? false,
+    qmllintArguments: tools?.qmllint?.arguments ?? [],
+    qmllintImportPaths: (tools?.qmllint?.import_paths ?? []).map((item) => resolveFrom(root, item)),
+    qmllintQmltypes: (tools?.qmllint?.qmltypes ?? []).map((item) => resolveFrom(root, item)),
+    qmllintUseEnvironmentImports: tools?.qmllint?.use_environment_imports ?? false,
+    qmlformatCommand: tools?.qmlformat?.command ?? null,
+    qmlformatCheck: tools?.qmlformat?.check ?? false,
+    qmltestrunnerCommand: tools?.qmltestrunner?.command ?? "qmltestrunner",
+    qmltestrunnerCheck: tools?.qmltestrunner?.check ?? false,
+    qmltestrunnerArguments: tools?.qmltestrunner?.arguments ?? [],
+    qmltestrunnerTimeoutMs: tools?.qmltestrunner?.timeout_ms ?? 120_000,
+    qmltestrunnerWorkingDirectory: resolveFrom(root, tools?.qmltestrunner?.working_directory ?? "."),
+    qmltestrunnerEnvironment: tools?.qmltestrunner?.environment ?? {},
+    qmltestrunnerRedactPatterns: tools?.qmltestrunner?.redact_patterns ?? [],
+    runtimeCommand: tools?.runtime?.command ?? null,
+    runtimeCheck: tools?.runtime?.check ?? false,
+    runtimeArguments: tools?.runtime?.arguments ?? [],
+    runtimeTimeoutMs: tools?.runtime?.timeout_ms ?? 60_000,
+    runtimeWorkingDirectory: resolveFrom(root, tools?.runtime?.working_directory ?? "."),
+    runtimeEnvironment: tools?.runtime?.environment ?? {},
+    runtimeRedactPatterns: tools?.runtime?.redact_patterns ?? [],
+    qmlProfilerCommand: tools?.qml_profiler?.command ?? null,
+    qmlProfilerCheck: tools?.qml_profiler?.check ?? false,
+    qmlProfilerArguments: tools?.qml_profiler?.arguments ?? [],
+    qmlProfilerTimeoutMs: tools?.qml_profiler?.timeout_ms ?? 300_000,
+    qmlProfilerWorkingDirectory: resolveFrom(root, tools?.qml_profiler?.working_directory ?? "."),
+    qmlProfilerEnvironment: tools?.qml_profiler?.environment ?? {},
+    qmlProfilerRedactPatterns: tools?.qml_profiler?.redact_patterns ?? [],
+  };
+}
+
+function resolveTypeRoles(raw: RawConfig, profile: ProjectProfile): Config["typeRoles"] { const defaults = typeRolesForProfile(profile); return { interactiveTypes: unique(defaults.interactiveTypes, raw.type_roles?.interactive_types), layoutTypes: unique(defaults.layoutTypes, raw.type_roles?.layout_types), delegateOwnerTypes: unique(defaults.delegateOwnerTypes, raw.type_roles?.delegate_owner_types) }; }
+
+function unique(defaults: string[], configured: string[] | undefined): string[] { return [...new Set([...defaults, ...(configured ?? [])])]; }
+
+function resolveReports(raw: RawConfig, root: string, outputDir: string): Config["reports"] {
+  return {
+    tests: resolveOptionalPath(root, raw.reports?.tests) ?? (raw.tools?.qmltestrunner?.check ? path.join(outputDir, "qmltestrunner.junit.xml") : null),
+    runtimeWarnings: resolveOptionalPath(root, raw.reports?.runtime_warnings),
+    qmlProfiler: resolveOptionalPath(root, raw.reports?.qml_profiler) ?? (raw.tools?.qml_profiler?.check ? path.join(outputDir, "qml-profiler.normalized.json") : null),
+    coverage: resolveOptionalPath(root, raw.reports?.coverage),
+    qmlbench: resolveOptionalPath(root, raw.reports?.qmlbench),
+    qmlbenchBaseline: resolveOptionalPath(root, raw.reports?.qmlbench_baseline),
+  };
+}
+
+function resolveBenchmarkPolicy(raw: RawConfig): Config["benchmarkPolicy"] { return { maxRegressionPercent: raw.benchmark_policy?.max_regression_percent ?? DEFAULT_BENCHMARK_POLICY.maxRegressionPercent, maxCoefficientOfVariation: raw.benchmark_policy?.max_coefficient_of_variation ?? DEFAULT_BENCHMARK_POLICY.maxCoefficientOfVariation, minSamples: raw.benchmark_policy?.min_samples ?? DEFAULT_BENCHMARK_POLICY.minSamples }; }
+
+function resolveOptionalPath(root: string, value: string | undefined): string | null { return value ? resolveFrom(root, value) : null; }
 
 export function starterConfig(): RawConfig {
   return {
@@ -213,8 +215,8 @@ function validateConfigSections(value: Record<string, JsonValue>): string[] {
 
 function validateCoreFields(value: Record<string, JsonValue>, errors: string[]): void {
   for (const key of Object.keys(value)) if (!CONFIG_KEYS.has(key)) errors.push(`unknown property '${key}'`);
-  for (const key of ["$schema", "project_name", "project_root", "output_dir", "qmllint_report", "qmllint_command"]) if (value[key] !== undefined && typeof value[key] !== "string") errors.push(`${key} must be a string`);
-  if (value.profile !== undefined && !isOneOf(value.profile, ["generic", "qtquick", "kirigami", "quickshell", "custom"] satisfies ProjectProfile[])) errors.push("profile must be one of: generic, qtquick, kirigami, quickshell, custom");
+  for (const key of ["$schema", "project_name", "project_root", "output_dir", "qmllint_report", "qmllint_command"]) validateOptionalValue(value[key], (item) => typeof item === "string", `${key} must be a string`, errors);
+  validateOptionalValue(value.profile, (item) => isOneOf(item, ["generic", "qtquick", "kirigami", "quickshell", "custom"] satisfies ProjectProfile[]), "profile must be one of: generic, qtquick, kirigami, quickshell, custom", errors);
   for (const key of ["source_roots", "exclude", "external_modules", "external_types", "entrypoints"]) validateStringArray(value[key], key, errors);
   validateDynamicEdges(value.dynamic_component_edges, errors);
   if (Array.isArray(value.source_roots) && value.source_roots.length === 0) errors.push("source_roots must not be empty");
@@ -292,16 +294,16 @@ function validateTools(value: JsonValue | undefined, errors: string[]): void {
 function validateParserOracle(value: JsonValue | undefined, errors: string[]): void {
   validateObjectKeys(value, "tools.parser_oracle", new Set(["check", "qmldom_command", "tree_sitter", "timeout_ms"]), errors);
   if (!isJsonRecord(value)) return;
-  for (const key of ["check", "tree_sitter"]) if (value[key] !== undefined && typeof value[key] !== "boolean") errors.push(`tools.parser_oracle.${key} must be a boolean`);
-  if (value.qmldom_command !== undefined && !isNonEmptyString(value.qmldom_command)) errors.push("tools.parser_oracle.qmldom_command must be a non-empty string");
-  if (value.timeout_ms !== undefined && (typeof value.timeout_ms !== "number" || !Number.isInteger(value.timeout_ms) || value.timeout_ms <= 0)) errors.push("tools.parser_oracle.timeout_ms must be a positive integer");
+  for (const key of ["check", "tree_sitter"]) validateOptionalValue(value[key], (item) => typeof item === "boolean", `tools.parser_oracle.${key} must be a boolean`, errors);
+  validateOptionalValue(value.qmldom_command, isNonEmptyString, "tools.parser_oracle.qmldom_command must be a non-empty string", errors);
+  validateOptionalValue(value.timeout_ms, isPositiveInteger, "tools.parser_oracle.timeout_ms must be a positive integer", errors);
 }
 
 function validateCmakeTool(value: JsonValue | undefined, errors: string[]): void {
   validateObjectKeys(value, "tools.cmake", new Set(["command", "check", "build_dir", "configure", "configure_arguments", "build_targets", "build_arguments", "timeout_ms", "working_directory", "environment", "redact_patterns"]), errors);
   if (!isJsonRecord(value)) return;
-  for (const key of ["command", "build_dir"]) if (value[key] !== undefined && !isNonEmptyString(value[key])) errors.push(`tools.cmake.${key} must be a non-empty string`);
-  for (const key of ["check", "configure"]) if (value[key] !== undefined && typeof value[key] !== "boolean") errors.push(`tools.cmake.${key} must be a boolean`);
+  for (const key of ["command", "build_dir"]) validateOptionalValue(value[key], isNonEmptyString, `tools.cmake.${key} must be a non-empty string`, errors);
+  for (const key of ["check", "configure"]) validateOptionalValue(value[key], (item) => typeof item === "boolean", `tools.cmake.${key} must be a boolean`, errors);
   for (const key of ["configure_arguments", "build_targets", "build_arguments"]) {
     validateStringArray(value[key], `tools.cmake.${key}`, errors);
     validateNonEmptyStrings(value[key], `tools.cmake.${key}`, errors);
@@ -314,9 +316,9 @@ function validateCmakeTool(value: JsonValue | undefined, errors: string[]): void
 function validateQmllintTool(value: JsonValue | undefined, errors: string[]): void {
   validateObjectKeys(value, "tools.qmllint", new Set(["command", "check", "arguments", "import_paths", "qmltypes", "use_environment_imports"]), errors);
   if (!isJsonRecord(value)) return;
-  if (value.command !== undefined && !isNonEmptyString(value.command)) errors.push("tools.qmllint.command must be a non-empty string");
-  if (value.check !== undefined && typeof value.check !== "boolean") errors.push("tools.qmllint.check must be a boolean");
-  if (value.use_environment_imports !== undefined && typeof value.use_environment_imports !== "boolean") errors.push("tools.qmllint.use_environment_imports must be a boolean");
+  validateOptionalValue(value.command, isNonEmptyString, "tools.qmllint.command must be a non-empty string", errors);
+  validateOptionalValue(value.check, (item) => typeof item === "boolean", "tools.qmllint.check must be a boolean", errors);
+  validateOptionalValue(value.use_environment_imports, (item) => typeof item === "boolean", "tools.qmllint.use_environment_imports must be a boolean", errors);
   for (const key of ["arguments", "import_paths", "qmltypes"]) validateStringArray(value[key], `tools.qmllint.${key}`, errors);
   for (const key of ["import_paths", "qmltypes"]) validateNonEmptyStrings(value[key], `tools.qmllint.${key}`, errors);
   if (hasManagedArgument(value.arguments, /^--json(?:=|$)/)) errors.push("tools.qmllint.arguments must not set --json; qmlqualitylens manages structured output");
@@ -367,8 +369,8 @@ function validateReports(value: JsonValue | undefined, errors: string[]): void {
 function validateBenchmarkPolicy(value: JsonValue | undefined, errors: string[]): void {
   validateObjectKeys(value, "benchmark_policy", new Set(["max_regression_percent", "max_coefficient_of_variation", "min_samples"]), errors);
   if (!isJsonRecord(value)) return;
-  for (const key of ["max_regression_percent", "max_coefficient_of_variation"]) if (value[key] !== undefined && (typeof value[key] !== "number" || !Number.isFinite(value[key]) || value[key] < 0)) errors.push(`benchmark_policy.${key} must be a non-negative number`);
-  if (value.min_samples !== undefined && (typeof value.min_samples !== "number" || !Number.isInteger(value.min_samples) || value.min_samples < 1)) errors.push("benchmark_policy.min_samples must be a positive integer");
+  for (const key of ["max_regression_percent", "max_coefficient_of_variation"]) validateOptionalValue(value[key], isNonNegativeNumber, `benchmark_policy.${key} must be a non-negative number`, errors);
+  validateOptionalValue(value.min_samples, isPositiveInteger, "benchmark_policy.min_samples must be a positive integer", errors);
 }
 
 function validateDynamicEdges(value: JsonValue | undefined, errors: string[]): void {
@@ -394,7 +396,12 @@ function validatePerformanceBudget(value: JsonValue, index: number, errors: stri
   for (const key of ["frame_p95_ms", "max_event_ms"]) validatePositiveNumber(value[key], `${name}.${key}`, errors);
 }
 
+type JsonPredicate = (value: JsonValue) => boolean;
+
+function validateOptionalValue(value: JsonValue | undefined, valid: JsonPredicate, message: string, errors: string[]): void { if (value !== undefined && !valid(value)) errors.push(message); }
 function isNonEmptyString(value: JsonValue | undefined): value is string { return typeof value === "string" && Boolean(value.trim()); }
+function isPositiveInteger(value: JsonValue): boolean { return typeof value === "number" && Number.isInteger(value) && value > 0; }
+function isNonNegativeNumber(value: JsonValue): boolean { return typeof value === "number" && Number.isFinite(value) && value >= 0; }
 
 function validatePositiveNumber(value: JsonValue | undefined, name: string, errors: string[]): void { if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value) || value <= 0)) errors.push(`${name} must be a positive number`); }
 
@@ -438,11 +445,10 @@ function stripJsonComments(text: string): string {
   let result = "";
   for (let index = 0; index < text.length; index += 1) {
     const char = text[index] ?? "";
-    const next = text[index + 1] ?? "";
-    if (appendStringChar(state, char)) result += char;
-    else if (char === "/" && next === "/") index = skipLineComment(text, index + 2, (value) => { result += value; });
-    else if (char === "/" && next === "*") index = skipBlockComment(text, index + 2, (value) => { result += value; });
-    else result += char;
+    if (appendStringChar(state, char)) { result += char; continue; }
+    const commentEnd = skipJsonComment(text, index, (value) => { result += value; });
+    if (commentEnd === null) result += char;
+    else index = commentEnd;
   }
   return result;
 }
@@ -456,6 +462,12 @@ function appendStringChar(state: JsonStringState, char: string): boolean {
   else if (char === "\\") state.escaped = true;
   else if (char === '"') state.inString = false;
   return true;
+}
+
+function skipJsonComment(text: string, index: number, keep: (value: string) => void): number | null {
+  if (text[index] !== "/") return null;
+  if (text[index + 1] === "/") return skipLineComment(text, index + 2, keep);
+  return text[index + 1] === "*" ? skipBlockComment(text, index + 2, keep) : null;
 }
 
 function skipLineComment(text: string, index: number, keep: (value: string) => void): number {

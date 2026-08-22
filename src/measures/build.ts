@@ -81,15 +81,12 @@ function runCmake(config: Config): CmakeExecution {
     const targets = config.tools.cmakeBuildTargets.length ? ["--target", ...config.tools.cmakeBuildTargets] : [];
     steps.push(runCmakeStep(config, "build", ["--build", config.tools.cmakeBuildDir, ...targets, ...config.tools.cmakeBuildArguments]));
   }
-  const status = steps.some((step) => step.status === "incomplete") ? "incomplete"
-    : steps.some((step) => step.status === "failed") ? "failed"
-      : steps.some((step) => step.status === "warn") ? "warn"
-        : "pass";
-  const reason = status === "incomplete" ? steps.find((step) => step.status === "incomplete")?.error ?? "CMake execution was incomplete."
-    : status === "failed" ? "A configured CMake configure/build step failed."
-      : null;
-  return { enabled: true, status, version: support.toolVersion(config.tools.cmakeCommand, config.projectRoot), build_dir: config.tools.cmakeBuildDir, reason, steps };
+  const status = cmakeStatus(steps);
+  return { enabled: true, status, version: support.toolVersion(config.tools.cmakeCommand, config.projectRoot), build_dir: config.tools.cmakeBuildDir, reason: cmakeFailureReason(status, steps), steps };
 }
+
+function cmakeStatus(steps: CmakeStep[]): CmakeExecution["status"] { if (steps.some((step) => step.status === "incomplete")) return "incomplete"; if (steps.some((step) => step.status === "failed")) return "failed"; return steps.some((step) => step.status === "warn") ? "warn" : "pass"; }
+function cmakeFailureReason(status: CmakeExecution["status"], steps: CmakeStep[]): string | null { if (status === "incomplete") return steps.find((step) => step.status === "incomplete")?.error ?? "CMake execution was incomplete."; return status === "failed" ? "A configured CMake configure/build step failed." : null; }
 
 function runCmakeStep(config: Config, phase: CmakeStep["phase"], args: string[]): CmakeStep {
   const result = support.executeTool(config.tools.cmakeCommand, args, config.tools.cmakeWorkingDirectory, config.tools.cmakeTimeoutMs, { ...process.env, ...config.tools.cmakeEnvironment }, config.tools.cmakeRedactPatterns);

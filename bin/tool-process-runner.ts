@@ -24,15 +24,19 @@ function run(executable: string, executableArgs: string[]): void {
     if (stopping) return;
     stopping = true;
     terminateTree(child, signal);
-    const timer = setTimeout(() => {
-      if (child.pid && process.platform !== "win32") try { process.kill(-child.pid, "SIGKILL"); } catch { /* already exited */ }
-      process.exit(128);
-    }, 500);
-    timer.unref();
-    child.once("exit", () => process.exit(128));
+    scheduleForcedExit(child);
   };
   const signals: NodeJS.Signals[] = ["SIGTERM", "SIGINT", "SIGHUP"];
   for (const signal of signals) process.on(signal, () => stop(signal));
+}
+
+function scheduleForcedExit(child: ChildProcess): void {
+  const timer = setTimeout(() => {
+    if (child.pid && process.platform !== "win32") try { process.kill(-child.pid, "SIGKILL"); } catch { /* already exited */ }
+    process.exit(128);
+  }, 500);
+  timer.unref();
+  child.once("exit", () => process.exit(128));
 }
 
 function terminateTree(child: ChildProcess, signal: NodeJS.Signals): void {

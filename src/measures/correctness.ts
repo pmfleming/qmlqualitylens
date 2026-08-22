@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { ARTIFACT_SCHEMA_VERSION } from "../version.js";
-import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding, type MeasureToolExecution as ToolExecution } from "./foundation.js";
+import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding, type MeasureJsonValue as JsonValue, type MeasureToolExecution as ToolExecution } from "./foundation.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 
 export function measureCorrectnessCatalog(config: Config, command: string, context: AnalysisContext) {
@@ -103,14 +103,27 @@ function loadTestEvidence(file: string | null): TestEvidence {
 
 function parseJsonTestEvidence(text: string, report: string): TestEvidence {
   const value = support.parseJson(text);
-  const root = support.isRecord(value) ? value : {};
-  const cases = Array.isArray(value) ? value : Array.isArray(root.tests) ? root.tests : Array.isArray(root.testCases) ? root.testCases : null;
-  if (!cases) return { status: "incomplete", reason: "JSON test report has no tests or testCases array.", report, format: "json", tests: 0, duration: support.numberValue(root.duration), failures: [] };
-  if (cases.length === 0) return { status: "incomplete", reason: "Configured test report contains zero test cases.", report, format: "json", tests: 0, duration: support.numberValue(root.duration), failures: [] };
-  const unknownStatuses = cases.filter((item) => !support.isRecord(item) || !["passed", "pass", "success", "ok", "skipped", "disabled", "failed", "failure", "error"].includes(String(item.status ?? "").toLowerCase())).length;
-  const failures = cases.flatMap((item, index) => support.isRecord(item) && ["failed", "failure", "error"].includes(String(item.status ?? "").toLowerCase()) ? [{ name: String(item.name ?? `test-${index + 1}`), file: support.stringValue(item.file), line: support.numberValue(item.line) ?? undefined, message: support.stringValue(item.message) }] : []);
-  if (unknownStatuses) return { status: "incomplete", reason: `${unknownStatuses} test case(s) have a missing or unsupported status.`, report, format: "json", tests: cases.length, duration: support.numberValue(root.duration), failures };
-  return { status: failures.length ? "failed" : "complete", reason: null, report, format: "json", tests: cases.length, duration: support.numberValue(root.duration), failures };
+  const root = support.isJsonRecord(value) ? value : {};
+  const cases = jsonTestCases(value, root);
+  const duration = support.numberValue(root.duration);
+  if (!cases) return { status: "incomplete", reason: "JSON test report has no tests or testCases array.", report, format: "json", tests: 0, duration, failures: [] };
+  if (!cases.length) return { status: "incomplete", reason: "Configured test report contains zero test cases.", report, format: "json", tests: 0, duration, failures: [] };
+  const failures = cases.flatMap(jsonTestFailure);
+  const unknownStatuses = cases.filter((item) => !knownTestStatus(item)).length;
+  if (unknownStatuses) return { status: "incomplete", reason: `${unknownStatuses} test case(s) have a missing or unsupported status.`, report, format: "json", tests: cases.length, duration, failures };
+  return { status: failures.length ? "failed" : "complete", reason: null, report, format: "json", tests: cases.length, duration, failures };
+}
+
+const TEST_STATUSES = new Set(["passed", "pass", "success", "ok", "skipped", "disabled", "failed", "failure", "error"]);
+const FAILURE_STATUSES = new Set(["failed", "failure", "error"]);
+
+function jsonTestCases(value: JsonValue, root: Record<string, JsonValue>): JsonValue[] | null { if (Array.isArray(value)) return value; if (Array.isArray(root.tests)) return root.tests; return Array.isArray(root.testCases) ? root.testCases : null; }
+
+function knownTestStatus(value: JsonValue): boolean { return support.isJsonRecord(value) && TEST_STATUSES.has(String(value.status ?? "").toLowerCase()); }
+
+function jsonTestFailure(value: JsonValue, index: number): TestEvidence["failures"] {
+  if (!support.isJsonRecord(value) || !FAILURE_STATUSES.has(String(value.status ?? "").toLowerCase())) return [];
+  return [{ name: String(value.name ?? `test-${index + 1}`), file: support.stringValue(value.file), line: support.numberValue(value.line) ?? undefined, message: support.stringValue(value.message) }];
 }
 
 function parseJunitEvidence(text: string, report: string): TestEvidence {

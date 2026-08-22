@@ -40,20 +40,25 @@ export function qmlSemanticRuleCoverage(context: AnalysisContext): RuleCoverageR
 }
 
 function connectionRuleCoverage(rule: string, context: AnalysisContext): RuleCoverageRecord {
-  let applicable = 0, evaluated = 0;
+  const evaluations = context.qmlDocuments.flatMap((entry) => connectionEvaluations(entry, rule));
   const reasons: Record<string, number> = {};
-  for (const entry of context.qmlDocuments) {
-    const ids = new Map(entry.document.objects.flatMap((object) => object.idName ? [[object.idName, object]] : []));
-    for (const connection of entry.document.objects.filter((object) => baseTypeName(object.typeName) === "Connections")) {
-      applicable += 1;
-      const target = targetExpression(connection)?.match(/^([A-Za-z_]\w*)$/)?.[1];
-      if (!target) increment(reasons, "dynamic_target");
-      else if (!ids.has(target) && isLikelyLocalId(target)) rule === "qml.connections.unknown_target" ? evaluated += 1 : increment(reasons, "unknown_target");
-      else if (!ids.has(target)) increment(reasons, "external_or_singleton_target");
-      else evaluated += 1;
-    }
-  }
-  return { rule, applicable, evaluated, skipped: applicable - evaluated, skip_reasons: reasons };
+  for (const reason of evaluations) if (reason) increment(reasons, reason);
+  const evaluated = evaluations.filter((reason) => reason === null).length;
+  return { rule, applicable: evaluations.length, evaluated, skipped: evaluations.length - evaluated, skip_reasons: reasons };
+}
+
+type ConnectionSkipReason = "dynamic_target" | "unknown_target" | "external_or_singleton_target" | null;
+
+function connectionEvaluations(entry: AnalysisContext["qmlDocuments"][number], rule: string): ConnectionSkipReason[] {
+  const ids = new Set(entry.document.objects.flatMap((object) => object.idName ? [object.idName] : []));
+  return entry.document.objects.filter((object) => baseTypeName(object.typeName) === "Connections").map((connection) => connectionSkipReason(targetExpression(connection), ids, rule));
+}
+
+function connectionSkipReason(expression: string | null, ids: Set<string>, rule: string): ConnectionSkipReason {
+  const target = expression?.match(/^([A-Za-z_]\w*)$/)?.[1];
+  if (!target) return "dynamic_target";
+  if (ids.has(target) || (isLikelyLocalId(target) && rule === "qml.connections.unknown_target")) return null;
+  return isLikelyLocalId(target) ? "unknown_target" : "external_or_singleton_target";
 }
 
 function increment(record: Record<string, number>, key: string): void {
@@ -81,30 +86,32 @@ function bindingCycleFindings({ file, document }: AnalysisContext["qmlDocuments"
   const objectById = new Map(document.objects.map((object) => [object.objectId, object]));
   const bindings = document.bindings.filter((binding) => !isHandlerPath(binding.propertyPath));
   const lineByNode = new Map(bindings.map((binding) => [bindingNodeKey(binding.ownerObjectId, binding.propertyPath), binding.line]));
-  const edges = new Map<string, Set<string>>();
-  for (const binding of bindings) {
-    const from = bindingNodeKey(binding.ownerObjectId, binding.propertyPath);
-    const owner = objectById.get(binding.ownerObjectId);
-    const targets = edges.get(from) ?? new Set<string>();
-    if (owner) {
-      for (const candidate of owner.bindings.filter((item) => !isHandlerPath(item.propertyPath))) {
-        if (usesBareProperty(binding.expression, candidate.propertyPath)) targets.add(bindingNodeKey(owner.objectId, candidate.propertyPath));
-      }
-    }
-    for (const reference of binding.references) {
-      const target = reference.targetObjectId ? objectById.get(reference.targetObjectId) : null;
-      if (!target || target.objectId === binding.ownerObjectId) continue;
-      for (const property of referencedProperties(binding.expression, reference.name, target)) targets.add(bindingNodeKey(target.objectId, property));
-    }
-    edges.set(from, targets);
-  }
-  return stronglyConnectedComponents(edges)
-    .filter((nodes) => nodes.length > 1)
-    .map((nodes) => {
-      const lines = nodes.map((node) => lineByNode.get(node) ?? 1).sort((left, right) => left - right);
-      const labels = nodes.map(bindingNodeLabel).sort();
-      return finding(`qml.binding_cycle.${file}.${lines.join(".")}`, "qml.binding_cycle", "high", file, lines[0] ?? 1, `Binding cycle connects ${labels.map((label) => `'${label}'`).join(", ")}`, "Break the cycle with a source-of-truth property, one-way data flow, or an explicit signal update.");
-    });
+  const edges = new Map(bindings.map((binding) => [bindingNodeKey(binding.ownerObjectId, binding.propertyPath), bindingTargets(binding, objectById)]));
+  return stronglyConnectedComponents(edges).filter((nodes) => nodes.length > 1).map((nodes) => bindingCycleFinding(file, nodes, lineByNode));
+}
+
+type CycleBinding = AnalysisContext["qmlDocuments"][number]["document"]["bindings"][number];
+type CycleObject = AnalysisContext["qmlDocuments"][number]["document"]["objects"][number];
+
+function bindingTargets(binding: CycleBinding, objectById: Map<number, CycleObject>): Set<string> {
+  const owner = objectById.get(binding.ownerObjectId);
+  const local = owner ? owner.bindings
+    .filter((candidate) => !isHandlerPath(candidate.propertyPath) && usesBareProperty(binding.expression, candidate.propertyPath))
+    .map((candidate) => bindingNodeKey(owner.objectId, candidate.propertyPath)) : [];
+  const referenced = binding.references.flatMap((reference) => referencedBindingTargets(binding, reference.name, reference.targetObjectId, objectById));
+  return new Set([...local, ...referenced]);
+}
+
+function referencedBindingTargets(binding: CycleBinding, name: string, targetId: number | null, objectById: Map<number, CycleObject>): string[] {
+  const target = targetId ? objectById.get(targetId) : null;
+  if (!target || target.objectId === binding.ownerObjectId) return [];
+  return referencedProperties(binding.expression, name, target).map((property) => bindingNodeKey(target.objectId, property));
+}
+
+function bindingCycleFinding(file: string, nodes: string[], lineByNode: Map<string, number>): Finding {
+  const lines = nodes.map((node) => lineByNode.get(node) ?? 1).sort((left, right) => left - right);
+  const labels = nodes.map(bindingNodeLabel).sort();
+  return finding(`qml.binding_cycle.${file}.${lines.join(".")}`, "qml.binding_cycle", "high", file, lines[0] ?? 1, `Binding cycle connects ${labels.map((label) => `'${label}'`).join(", ")}`, "Break the cycle with a source-of-truth property, one-way data flow, or an explicit signal update.");
 }
 
 function isDynamicBinding(expression: string): boolean {
@@ -208,11 +215,8 @@ function layoutConflictFindings({ file, document }: AnalysisContext["qmlDocument
 }
 
 function hasContradictoryGeometry(names: Set<string>): boolean {
-  if (names.has("anchors.fill") && ["x", "y", "width", "height"].some((name) => names.has(name))) return true;
-  if (names.has("anchors.left") && names.has("anchors.right") && names.has("width")) return true;
-  if (names.has("anchors.top") && names.has("anchors.bottom") && names.has("height")) return true;
-  if (names.has("anchors.centerIn") && (names.has("x") || names.has("y"))) return true;
-  return false;
+  const hasAll = (...required: string[]) => required.every((name) => names.has(name));
+  return [hasAll("anchors.fill") && hasAll("x"), hasAll("anchors.fill") && hasAll("y"), hasAll("anchors.fill") && hasAll("width"), hasAll("anchors.fill") && hasAll("height"), hasAll("anchors.left", "anchors.right", "width"), hasAll("anchors.top", "anchors.bottom", "height"), hasAll("anchors.centerIn", "x"), hasAll("anchors.centerIn", "y")].some(Boolean);
 }
 
 function unusedPublicApiFindings(context: AnalysisContext): Finding[] {
@@ -244,21 +248,22 @@ function publicApiFinding(file: string, item: { name: string; line: number }, ap
 
 function connectionMismatchFindings(entry: AnalysisContext["qmlDocuments"][number], context: AnalysisContext): Finding[] {
   const idToObject = new Map(entry.document.objects.flatMap((object) => object.idName ? [[object.idName, object]] : []));
-  return entry.document.objects
-    .filter((object) => baseTypeName(object.typeName) === "Connections")
-    .flatMap((connection) => {
-      const targetId = targetExpression(connection)?.match(/^([A-Za-z_]\w*)$/)?.[1];
-      if (targetId && !idToObject.has(targetId) && isLikelyLocalId(targetId)) return [finding(`qml.connections.unknown_target.${entry.file}.${connection.line}.${targetId}`, "qml.connections.unknown_target", "high", entry.file, connection.line, `Connections target '${targetId}' is not declared in this component`, "Correct the target id or expose the intended target explicitly; use a suppression only for a documented injected context object.")];
-      const targetObject = targetId ? idToObject.get(targetId) : null;
-      if (!targetObject) return [];
-      const targetFile = resolvedTargetForObject(context, entry.file, targetObject.typeName, targetObject.line);
-      const targetSignals = targetFile ? signalsForComponent(context, targetFile) : inheritedSignals(context.typeEvidence, targetObject.typeName);
-      if (targetSignals.size === 0) return [];
-      return connectionHandlerEntries(connection).flatMap((handler) => {
-        const signal = signalNameForHandler(handler.name);
-        return signal && !targetSignals.has(signal) ? [finding(`qml.connection_mismatch.${entry.file}.${handler.line}.${handler.name}`, "qml.connection_signal_mismatch", "medium", entry.file, handler.line, `Connections handler '${handler.name}' does not match a known signal on ${targetObject.typeName}`, "Rename the handler or add the matching signal to the target component.")] : [];
-      });
-    });
+  return entry.document.objects.filter((object) => baseTypeName(object.typeName) === "Connections").flatMap((connection) => connectionFindings(connection, entry.file, idToObject, context));
+}
+
+function connectionFindings(connection: CycleObject, file: string, idToObject: Map<string, CycleObject>, context: AnalysisContext): Finding[] {
+  const targetId = targetExpression(connection)?.match(/^([A-Za-z_]\w*)$/)?.[1];
+  if (targetId && !idToObject.has(targetId) && isLikelyLocalId(targetId)) return [finding(`qml.connections.unknown_target.${file}.${connection.line}.${targetId}`, "qml.connections.unknown_target", "high", file, connection.line, `Connections target '${targetId}' is not declared in this component`, "Correct the target id or expose the intended target explicitly; use a suppression only for a documented injected context object.")];
+  const targetObject = targetId ? idToObject.get(targetId) : null;
+  if (!targetObject) return [];
+  const targetFile = resolvedTargetForObject(context, file, targetObject.typeName, targetObject.line);
+  const targetSignals = targetFile ? signalsForComponent(context, targetFile) : inheritedSignals(context.typeEvidence, targetObject.typeName);
+  return targetSignals.size ? connectionHandlerEntries(connection).flatMap((handler) => connectionHandlerFinding(handler, targetSignals, targetObject, file)) : [];
+}
+
+function connectionHandlerFinding(handler: { name: string; line: number }, targetSignals: Set<string>, target: CycleObject, file: string): Finding[] {
+  const signal = signalNameForHandler(handler.name);
+  return signal && !targetSignals.has(signal) ? [finding(`qml.connection_mismatch.${file}.${handler.line}.${handler.name}`, "qml.connection_signal_mismatch", "medium", file, handler.line, `Connections handler '${handler.name}' does not match a known signal on ${target.typeName}`, "Rename the handler or add the matching signal to the target component.")] : [];
 }
 
 function delegateStateFindings(entry: AnalysisContext["qmlDocuments"][number], context: AnalysisContext): Finding[] {

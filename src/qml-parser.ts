@@ -288,7 +288,7 @@ class Parser {
     const start = this.tokens[startIndex]?.offset ?? 0;
     const end = endIndex === null ? this.text.length : this.tokens[endIndex]?.endOffset ?? this.text.length;
     const closeParen = this.findTokenBefore(declarationStart, startIndex, ")");
-    const returnColon = closeParen === null ? null : this.tokens.findIndex((token, index) => index > closeParen && index < startIndex && token.value === ":");
+    const returnColon = closeParen === null ? null : this.findTokenBetween(closeParen + 1, startIndex, ":");
     const returnType = returnColon !== null && returnColon >= 0 ? this.tokens.slice(returnColon + 1, startIndex).map((token) => token.value).join("").trim() || null : null;
     return { name, line, startOffset: start, endOffset: end, body: this.text.slice(start, end), parameters: this.parametersBetween(declarationStart + 2, startIndex), returnType };
   }
@@ -375,9 +375,9 @@ class Parser {
   }
 
   private parametersBetween(start: number, end: number): Array<{ name: string; typeName: string | null }> {
-    const open = this.tokens.findIndex((token, index) => index >= start && index < end && token.value === "(");
+    const open = this.findTokenBetween(start, end, "(");
     if (open < 0) return [];
-    const close = this.tokens.findIndex((token, index) => index > open && index < end && token.value === ")");
+    const close = this.findTokenBetween(open + 1, end, ")");
     const limit = close < 0 ? end : close;
     const segments: QmlToken[][] = [];
     let current: QmlToken[] = [];
@@ -408,9 +408,13 @@ class Parser {
     return null;
   }
 
+  private findTokenBetween(start: number, end: number, value: string): number {
+    return this.tokens.findIndex((token, index) => index >= start && index < end && token.value === value);
+  }
+
   private localNamesForFunction(declarationStart: number, brace: number, end: number): Set<string> {
     const names = new Set<string>();
-    const openParen = this.tokens.findIndex((token, index) => index >= declarationStart && index < brace && token.value === "(");
+    const openParen = this.findTokenBetween(declarationStart, brace, "(");
     if (openParen >= 0) {
       for (let cursor = openParen + 1; cursor < brace && this.tokens[cursor]?.value !== ")"; cursor += 1) {
         const token = this.tokens[cursor];
@@ -615,10 +619,10 @@ function startsWithUppercase(value: string): boolean {
 }
 
 function classifyImport(module: string): ImportRecord["classification"] {
-  if (module === "." || module === ".." || module.startsWith("./") || module.startsWith("../")) return "local";
-  if (module === "Qt" || module.startsWith("Qt")) return "qt";
-  if (module === "Quickshell" || module.startsWith("Quickshell.")) return "quickshell";
-  if (module.startsWith("org.kde") || /Kirigami/i.test(module)) return "kirigami";
+  if (/^\.{1,2}(?:\/|$)/.test(module)) return "local";
+  if (module.startsWith("Qt")) return "qt";
+  if (/^Quickshell(?:\.|$)/.test(module)) return "quickshell";
+  if (/^org\.kde|Kirigami/i.test(module)) return "kirigami";
   return "external";
 }
 

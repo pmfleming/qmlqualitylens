@@ -80,16 +80,20 @@ function parseCobertura(xml: string, context: AnalysisContext, config: Config): 
     if (!raw) continue;
     const file = mapCoveragePath(raw, context, config);
     if (!file) { unmapped += 1; continue; }
-    const lines = new Map<number, number>();
-    for (const line of (match[2] ?? "").matchAll(/<line\b([^>]*?)(?:\/?>)/gi)) {
-      const number = Number(attribute(line[1] ?? "", "number"));
-      const hits = Number(attribute(line[1] ?? "", "hits"));
-      if (Number.isInteger(number) && number > 0 && Number.isFinite(hits) && hits >= 0) lines.set(number, hits);
-    }
+    const lines = coberturaLines(match[2] ?? "");
     const rate = Number(attribute(match[1] ?? "", "line-rate"));
     mapped.push({ file, lines, line_rate: Number.isFinite(rate) ? rate : null });
   }
   return { files: mergeCoverageFiles(mapped), reportFiles: classes.length, reason: unmapped ? `${unmapped} report file(s) could not be mapped to analyzed sources.` : null };
+}
+
+function coberturaLines(xml: string): Map<number, number> {
+  const lines = [...xml.matchAll(/<line\b([^>]*?)(?:\/?>)/gi)].flatMap((match): Array<[number, number]> => {
+    const number = Number(attribute(match[1] ?? "", "number"));
+    const hits = Number(attribute(match[1] ?? "", "hits"));
+    return Number.isInteger(number) && number > 0 && Number.isFinite(hits) && hits >= 0 ? [[number, hits]] : [];
+  });
+  return new Map(lines);
 }
 
 function mapCoveragePath(value: string, context: AnalysisContext, config: Config): string | null {

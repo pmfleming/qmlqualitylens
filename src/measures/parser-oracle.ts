@@ -18,22 +18,15 @@ type OracleRecord = {
 type TreeSitterOracle = { parser: Parser; query: Parser.Query };
 type LoadableModule = object | null | undefined;
 const COUNT_KEYS: Array<keyof OracleCounts> = ["imports", "objects", "properties", "bindings"];
+const COUNT_KEY_NAMES = new Set<string>(COUNT_KEYS);
 const TREE_SITTER_STRUCTURE_QUERY = "(ui_import) @imports (ui_object_definition) @objects (ui_property) @properties (ui_binding) @bindings (ui_property value: (_) @bindings)";
 
 export function measureParserOracle(config: Config, command: string, context: AnalysisContext) {
   if (!config.tools.parserOracleCheck) return skipped(config, command, context);
   const treeSitter = config.tools.parserOracleTreeSitter ? loadTreeSitter() : null;
-  const records: OracleRecord[] = [];
-  const rawFindings: Finding[] = [];
-  for (const entry of context.qmlDocuments) {
-    const source = context.sources.find((item) => item.relativePath === entry.file);
-    if (!source) continue;
-    const record: OracleRecord = { file: entry.file, internal: internalCounts(entry.document) };
-    rawFindings.push(...inspectQmlDom(config, source.path, record));
-    if (config.tools.parserOracleTreeSitter) rawFindings.push(...inspectTreeSitter(config, source.text, record, treeSitter));
-    records.push(record);
-  }
-  const findings = support.applySuppressions(support.enrichFindings(rawFindings, config), config);
+  const evidence = context.qmlDocuments.flatMap((entry) => inspectOracleEntry(config, context, entry, treeSitter));
+  const records = evidence.map((item) => item.record);
+  const findings = support.applySuppressions(support.enrichFindings(evidence.flatMap((item) => item.findings), config), config);
   const unavailableTreeSitter = config.tools.parserOracleTreeSitter && !treeSitter;
   const failed = records.some((record) => record.qmldom?.status !== "pass" || record.tree_sitter?.status === "failed");
   const artifact = {
@@ -52,6 +45,15 @@ export function measureParserOracle(config: Config, command: string, context: An
   };
   writeArtifact(config, "parser_oracle.json", artifact);
   return artifact;
+}
+
+function inspectOracleEntry(config: Config, context: AnalysisContext, entry: AnalysisContext["qmlDocuments"][number], treeSitter: TreeSitterOracle | null): Array<{ record: OracleRecord; findings: Finding[] }> {
+  const source = context.sources.find((item) => item.relativePath === entry.file);
+  if (!source) return [];
+  const record: OracleRecord = { file: entry.file, internal: internalCounts(entry.document) };
+  const findings = inspectQmlDom(config, source.path, record);
+  if (config.tools.parserOracleTreeSitter) findings.push(...inspectTreeSitter(config, source.text, record, treeSitter));
+  return [{ record, findings }];
 }
 
 function inspectQmlDom(config: Config, source: string, record: OracleRecord): Finding[] {
@@ -137,14 +139,11 @@ function parseTreeSitter(oracle: TreeSitterOracle, source: string, timeoutMs: nu
 
 function treeSitterCounts(query: Parser.Query, root: Parser.SyntaxNode): OracleCounts {
   const counts: OracleCounts = { imports: 0, objects: 0, properties: 0, bindings: 0 };
-  for (const { name } of query.captures(root)) {
-    if (name === "imports") counts.imports += 1;
-    else if (name === "objects") counts.objects += 1;
-    else if (name === "properties") counts.properties += 1;
-    else if (name === "bindings") counts.bindings += 1;
-  }
+  for (const { name } of query.captures(root)) if (isCountKey(name)) counts[name] += 1;
   return counts;
 }
+
+function isCountKey(value: string): value is keyof OracleCounts { return COUNT_KEY_NAMES.has(value); }
 
 function treeSitterStats(root: Parser.SyntaxNode): { named_nodes: number; total_nodes: number; error_nodes: number; missing_nodes: number } {
   const stats = { named_nodes: 0, total_nodes: 0, error_nodes: 0, missing_nodes: 0 };

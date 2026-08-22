@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import type { JsonValue } from "./types.js";
 
 export function parseJson(text: string): JsonValue { return JSON.parse(text); }
@@ -16,3 +18,8 @@ export function numberValue(value: unknown): number | null {
 }
 
 export function hasCaptures(match: RegExpMatchArray | null, ...indexes: number[]): match is RegExpMatchArray { return match !== null && indexes.every((index) => Boolean(match[index])); }
+
+export function writeJsonArtifact(outputDir: string, filename: string, artifact: object): void {
+  fs.mkdirSync(outputDir, { recursive: true });
+  fs.writeFileSync(path.join(outputDir, filename), `${JSON.stringify(artifact, null, 2)}\n`);
+}

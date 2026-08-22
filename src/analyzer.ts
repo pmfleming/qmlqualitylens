@@ -14,6 +14,7 @@ import { loadQmllintResult, qmllintDiagnostic, type QmllintResult } from "./qmll
 import { deduplicateToolFindings, enrichFindings } from "./rules.js";
 import { applySuppressions, staleSuppressionFindings } from "./suppressions.js";
 import { buildTypeEvidence, type TypeEvidence } from "./type-evidence.js";
+import { writeJsonArtifact } from "./value-utils.js";
 import { ARTIFACT_SCHEMA_VERSION } from "./version.js";
 import type {
   AnalysisArtifact,
@@ -431,10 +432,7 @@ function scoreProject(
   return { overall, complexity, cognitive, effort, locality, leverage, duplication, size, styling, boundary };
 }
 
-function writeArtifact(config: Config, artifact: AnalysisArtifact): void {
-  fs.mkdirSync(config.outputDir, { recursive: true });
-  fs.writeFileSync(path.join(config.outputDir, "qml_quality_report.json"), `${JSON.stringify(artifact, null, 2)}\n`);
-}
+function writeArtifact(config: Config, artifact: AnalysisArtifact): void { writeJsonArtifact(config.outputDir, "qml_quality_report.json", artifact); }
 
 function effortForComponent(component: ComponentRecord, functions: FunctionRecord[], bindings: BindingRecord[]): number {
   return Math.round(

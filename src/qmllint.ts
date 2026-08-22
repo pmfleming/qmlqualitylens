@@ -30,11 +30,7 @@ export function loadQmllintResult(config: Config, expectedFiles: string[] = []):
     const parsed = safeParseQmllintOutput(text, config);
     const reportedFiles = filesFromStructuredReport(text, config);
     const coverage = reportCoverage(expected, reportedFiles, hasStructuredFileManifest(text));
-    const coverageError = coverage === "partial"
-      ? `qmllint report covers ${reportedFiles.length} of ${expected.length} expected QML/JavaScript files`
-      : coverage === "unknown" && expected.length > 0 && parsed.findings.length === 0
-        ? "clean qmllint report does not identify which QML/JavaScript files were checked"
-        : null;
+    const coverageError = reportCoverageError(coverage, reportedFiles.length, expected.length, parsed.findings.length);
     const error = [parsed.error, coverageError].filter(Boolean).join("; ") || null;
     const settings = qmllintSettings(config);
     return { source: "report", status: error ? "incomplete" : "complete", command: null, report: config.qmllintReport, exitCode: null, version: versionFromReport(text), ...settings, expectedFiles: expected, reportedFiles, coverage, error, findings: parsed.findings };
@@ -42,6 +38,11 @@ export function loadQmllintResult(config: Config, expectedFiles: string[] = []):
   if (config.qmllintCommand) return runQmllintCommand(config, expected);
   if (config.tools.qmllintCheck) return runNativeQmllint(config, expected);
   return { source: "none", status: "not_run", command: null, report: config.qmllintReport, exitCode: null, version: null, ...qmllintSettings(config), expectedFiles: expected, reportedFiles: [], coverage: "unknown", error: null, findings: [] };
+}
+
+function reportCoverageError(coverage: QmllintResult["coverage"], reported: number, expected: number, findings: number): string | null {
+  if (coverage === "partial") return `qmllint report covers ${reported} of ${expected} expected QML/JavaScript files`;
+  return coverage === "unknown" && expected > 0 && findings === 0 ? "clean qmllint report does not identify which QML/JavaScript files were checked" : null;
 }
 
 export function qmllintDiagnostic(item: QmllintFinding): Finding {

@@ -6,27 +6,28 @@ import { support, type MeasureConfig as Config, type MeasureContext as AnalysisC
 export function measureRuntimeWarnings(config: Config, command: string, context: AnalysisContext) {
   const report = config.reports.runtimeWarnings;
   const execution = runRuntimeSmoke(config);
-  let status = runtimeExecutionStatus(execution);
-  let raw: Finding[] = execution ? parseRuntimeWarnings(`${execution.stdout}\n${execution.stderr}`, config) : [];
-  if (execution?.status === "failed") raw.push({ id: "runtime.execution_failed", kind: "runtime.execution_failed", severity: "high", message: `Configured runtime smoke command failed with exit code ${execution.exit_code ?? "unknown"}`, actions: ["Inspect runtime_warnings.json output tails, reproduce the smoke scenario, and fix the crash or nonzero exit."] });
-  if (report) {
-    if (!fs.existsSync(report)) {
-      if (!execution || execution.status === "pass") status = "missing";
-    } else {
-      if (!execution || execution.status === "pass") status = "complete";
-      raw.push(...parseRuntimeWarnings(fs.readFileSync(report, "utf8"), config));
-    }
-  }
-  raw = [...new Map(raw.map((finding) => [`${finding.kind}\0${finding.file ?? ""}\0${finding.line ?? 0}\0${finding.message}`, finding])).values()];
-  const findings = support.applySuppressions(support.enrichFindings(raw, config), config);
+  const evidence = runtimeWarningEvidence(config, report, execution);
+  const unique = [...new Map(evidence.findings.map((finding) => [`${finding.kind}\0${finding.file ?? ""}\0${finding.line ?? 0}\0${finding.message}`, finding])).values()];
+  const findings = support.applySuppressions(support.enrichFindings(unique, config), config);
   const artifact = {
     ...baseArtifact(context, "correctness.runtime_warnings", command),
-    summary: { status, reason: execution?.error ?? null, report, tool_status: execution?.status ?? "not_configured", ...findingSummary(findings) },
+    summary: { status: evidence.status, reason: execution?.error ?? null, report, tool_status: execution?.status ?? "not_configured", ...findingSummary(findings) },
     execution: execution ? support.publicToolExecution(execution) : null,
     findings,
   };
   writeArtifact(config, "runtime_warnings.json", artifact);
   return artifact;
+}
+
+function runtimeWarningEvidence(config: Config, report: string | null, execution: ToolExecution | null): { status: ReturnType<typeof runtimeExecutionStatus>; findings: Finding[] } {
+  let status = runtimeExecutionStatus(execution);
+  const findings = execution ? parseRuntimeWarnings(`${execution.stdout}\n${execution.stderr}`, config) : [];
+  if (execution?.status === "failed") findings.push({ id: "runtime.execution_failed", kind: "runtime.execution_failed", severity: "high", message: `Configured runtime smoke command failed with exit code ${execution.exit_code ?? "unknown"}`, actions: ["Inspect runtime_warnings.json output tails, reproduce the smoke scenario, and fix the crash or nonzero exit."] });
+  if (!report) return { status, findings };
+  if (!fs.existsSync(report)) return { status: !execution || execution.status === "pass" ? "missing" : status, findings };
+  if (!execution || execution.status === "pass") status = "complete";
+  findings.push(...parseRuntimeWarnings(fs.readFileSync(report, "utf8"), config));
+  return { status, findings };
 }
 
 export function measureRuntimePerformance(config: Config, command: string, context: AnalysisContext) {
@@ -122,16 +123,34 @@ function scenarioRoots(value: JsonValue | null): JsonValue[] {
 }
 
 function normalizeScenario(value: JsonValue): RuntimeScenario[] {
-  if (!support.isJsonRecord(value) || typeof value.scenario !== "string" || !value.scenario.trim() || !support.isJsonRecord(value.environment)) return [];
-  const qt = value.environment.qt ?? value.environment.qt_version ?? value.environment.qtVersion;
-  if (typeof qt !== "string" || !qt.trim() || typeof value.environment.platform !== "string" || !value.environment.platform.trim()) return [];
+  if (!support.isJsonRecord(value) || !nonEmptyString(value.scenario)) return [];
+  const environment = scenarioEnvironment(value.environment);
+  if (!environment) return [];
+  const measurements = scenarioMeasurements(value);
+  if (!measurements.frames.length && !Object.keys(measurements.events).length) return [];
+  return [runtimeScenario(value.scenario, environment, measurements)];
+}
+
+function scenarioEnvironment(value: JsonValue | undefined): Record<string, JsonValue> | null {
+  if (!support.isJsonRecord(value) || !nonEmptyString(value.platform)) return null;
+  const qt = value.qt ?? value.qt_version ?? value.qtVersion;
+  return nonEmptyString(qt) ? value : null;
+}
+
+function nonEmptyString(value: JsonValue | undefined): value is string { return typeof value === "string" && Boolean(value.trim()); }
+
+type ScenarioMeasurements = { frames: number[]; events: RuntimeScenario["events"]; measuredEvents: JsonValue[] };
+
+function scenarioMeasurements(value: Record<string, JsonValue>): ScenarioMeasurements {
   const traceEvents = Array.isArray(value.traceEvents) ? value.traceEvents : [];
-  const frames = frameDurations(value.frames, traceEvents).sort((a, b) => a - b);
   const measuredEvents = Array.isArray(value.events) ? value.events : traceEvents;
-  const events = eventSummaries(measuredEvents);
-  if (!frames.length && !Object.keys(events).length) return [];
-  const frameBudget = scenarioFrameBudget(value.environment);
-  return [{ scenario: value.scenario, environment: value.environment, frame_count: frames.length, frame_time_ms: { p50: percentile(frames, 0.5), p95: percentile(frames, 0.95), p99: percentile(frames, 0.99), max: frames.at(-1) ?? null }, frame_budget_ms: frameBudget, frames_over_budget: frameBudget === null ? null : frames.filter((duration) => duration > frameBudget).length, events, hotspots: eventHotspots(measuredEvents) }];
+  return { frames: frameDurations(value.frames, traceEvents).sort((a, b) => a - b), events: eventSummaries(measuredEvents), measuredEvents };
+}
+
+function runtimeScenario(scenario: string, environment: Record<string, JsonValue>, measurements: ScenarioMeasurements): RuntimeScenario {
+  const { frames, events, measuredEvents } = measurements;
+  const frameBudget = scenarioFrameBudget(environment);
+  return { scenario, environment, frame_count: frames.length, frame_time_ms: { p50: percentile(frames, 0.5), p95: percentile(frames, 0.95), p99: percentile(frames, 0.99), max: frames.at(-1) ?? null }, frame_budget_ms: frameBudget, frames_over_budget: frameBudget === null ? null : frames.filter((duration) => duration > frameBudget).length, events, hotspots: eventHotspots(measuredEvents) };
 }
 
 function scenarioFrameBudget(environment: Record<string, JsonValue>): number | null {
@@ -159,15 +178,21 @@ function eventSummaries(input: JsonValue[]): RuntimeScenario["events"] {
 
 function eventHotspots(input: JsonValue[]): RuntimeScenario["hotspots"] {
   return input.flatMap((event) => {
-    const category = eventCategory(event);
-    const duration = durationMs(event);
-    if (!category || /frame/i.test(category) || duration === null || !Number.isFinite(duration) || duration < 0 || !support.isJsonRecord(event)) return [];
-    const args = support.isJsonRecord(event.args) ? event.args : {};
+    const hotspot = normalizedHotspotEvent(event);
+    if (!hotspot) return [];
+    const args = support.isJsonRecord(hotspot.event.args) ? hotspot.event.args : {};
     const data = support.isJsonRecord(args.data) ? args.data : {};
-    const file = support.stringValue(event.file) ?? support.stringValue(args.file) ?? support.stringValue(data.file) ?? undefined;
-    const line = support.numberValue(event.line) ?? support.numberValue(args.line) ?? support.numberValue(data.line) ?? undefined;
-    return [{ category, duration_ms: round(duration), ...(file ? { file } : {}), ...(line ? { line } : {}) }];
+    const file = support.stringValue(hotspot.event.file) ?? support.stringValue(args.file) ?? support.stringValue(data.file) ?? undefined;
+    const line = support.numberValue(hotspot.event.line) ?? support.numberValue(args.line) ?? support.numberValue(data.line) ?? undefined;
+    return [{ category: hotspot.category, duration_ms: round(hotspot.duration), ...(file ? { file } : {}), ...(line ? { line } : {}) }];
   }).sort((left, right) => right.duration_ms - left.duration_ms).slice(0, 50);
+}
+
+function normalizedHotspotEvent(event: JsonValue): { event: Record<string, JsonValue>; category: string; duration: number } | null {
+  const category = eventCategory(event);
+  const duration = durationMs(event);
+  if (!support.isJsonRecord(event) || !category || /frame/i.test(category) || duration === null || !Number.isFinite(duration) || duration < 0) return null;
+  return { event, category, duration };
 }
 
 function eventCategory(value: JsonValue): string | null {

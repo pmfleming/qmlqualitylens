@@ -1,5 +1,3 @@
-import fs from "node:fs";
-import path from "node:path";
 import { ARTIFACT_SCHEMA_VERSION } from "../version.js";
 import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding, type MeasureJsonValue as JsonValue } from "./foundation.js";
 
@@ -18,10 +16,7 @@ export function baseArtifact(context: AnalysisContext, taskId: string, command: 
   };
 }
 
-export function writeArtifact(config: Config, filename: string, artifact: object): void {
-  fs.mkdirSync(config.outputDir, { recursive: true });
-  fs.writeFileSync(path.join(config.outputDir, filename), `${JSON.stringify(artifact, null, 2)}\n`);
-}
+export function writeArtifact(config: Config, filename: string, artifact: object): void { support.writeJsonArtifact(config.outputDir, filename, artifact); }
 
 export function findingSummary(findings: Finding[]) {
   const active = findings.filter((finding) => !finding.suppressed);
