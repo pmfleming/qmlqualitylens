@@ -127,14 +127,14 @@ test("recognizes common Qt types and preserves ambiguous component names", () =>
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-type-catalog-"));
   fs.mkdirSync(path.join(root, "a"));
   fs.mkdirSync(path.join(root, "b"));
-  fs.writeFileSync(path.join(root, "Main.qml"), `import QtQuick\nItem { TapHandler {}; State {}; NumberAnimation {} }\n`);
+  fs.writeFileSync(path.join(root, "Main.qml"), `import QtQuick\nItem { Binding {}; TapHandler {}; State {}; NumberAnimation {} }\n`);
   fs.writeFileSync(path.join(root, "a", "Card.qml"), `import QtQuick\nItem {}\n`);
   fs.writeFileSync(path.join(root, "b", "Card.qml"), `import QtQuick\nItem {}\n`);
   fs.writeFileSync(path.join(root, "qmlqualitylens.config.json"), JSON.stringify({ project_root: ".", output_dir: "target" }));
 
   const context = createAnalysisContext(loadConfig(path.join(root, "qmlqualitylens.config.json")));
 
-  assert.equal(context.resolution.unresolvedTypes.some((item) => ["TapHandler", "State", "NumberAnimation"].includes(item.typeName)), false);
+  assert.equal(context.resolution.unresolvedTypes.some((item) => ["Binding", "TapHandler", "State", "NumberAnimation"].includes(item.typeName)), false);
   assert.deepEqual(context.resolution.ambiguousComponentNames.get("Card"), ["a/Card.qml", "b/Card.qml"]);
   assert.equal(context.resolution.componentsByName.has("Card"), false);
 });

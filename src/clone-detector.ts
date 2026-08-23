@@ -47,9 +47,22 @@ function cloneGroups(windows: Map<string, CloneWindowBucket>, windowSize: number
     if (existing) existing.instances = uniqueBy([...existing.instances, ...expanded.instances], (entry) => `${entry.file}:${entry.startLine}:${entry.endLine}`);
     else merged.set(key, { kind: "normalized_line_window", lines: expanded.lines, instances: expanded.instances, sample: expanded.sample });
   }
-  return [...merged.values()]
-    .sort((a, b) => b.lines - a.lines || b.instances.length - a.instances.length || compareInstance(a.instances[0], b.instances[0]))
+  const groups = [...merged.values()]
+    .sort((a, b) => b.lines - a.lines || b.instances.length - a.instances.length || compareInstance(a.instances[0], b.instances[0]));
+  return removeSubsumedGroups(groups)
     .map((group, index) => ({ id: `clone.${index + 1}`, ...group }));
+}
+
+function removeSubsumedGroups(groups: Array<Omit<CloneGroup, "id">>): Array<Omit<CloneGroup, "id">> {
+  const retained: Array<Omit<CloneGroup, "id">> = [];
+  for (const group of groups) {
+    const subsumed = retained.some((larger) => group.instances.every((instance) =>
+      larger.instances.some((candidate) => candidate.file === instance.file
+        && candidate.startLine <= instance.startLine
+        && candidate.endLine >= instance.endLine)));
+    if (!subsumed) retained.push(group);
+  }
+  return retained;
 }
 
 function expandClone(locations: CloneWindow[], windowSize: number, lookup: SourceLookup): { lines: number; instances: CloneWindow[]; sample: string[] } | null {

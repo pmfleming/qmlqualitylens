@@ -41,6 +41,13 @@ test("parses revision 4 nested qmllint JSON and accepts clean file reports", () 
   const clean = loadQmllintResult(config);
   assert.equal(clean.status, "complete");
   assert.equal(clean.findings.length, 0);
+
+  const second = { files: [{ filename: path.join(root, "Other.qml"), success: true, warnings: [] }], revision: 4 };
+  fs.writeFileSync(path.join(root, "qmllint.json"), `${JSON.stringify(nested)}\n${JSON.stringify(second)}\n`);
+  const concatenated = loadQmllintResult(config, ["Main.qml", "Other.qml"]);
+  assert.equal(concatenated.status, "complete");
+  assert.deepEqual(concatenated.reportedFiles, ["Main.qml", "Other.qml"]);
+  assert.equal(concatenated.findings.length, 1);
 });
 
 test("does not treat an unscoped empty qmllint report as a verified clean run", () => {

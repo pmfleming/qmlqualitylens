@@ -136,12 +136,10 @@ function safeParseQmllintOutput(text: string, config: Config): { findings: Qmlli
 
 function isStructuredQmllintJson(text: string): boolean {
   if (!text.startsWith("{") && !text.startsWith("[")) return false;
-  try {
-    const value = parseJson(text);
-    return Array.isArray(value) || (isRecord(value) && ["diagnostics", "messages", "issues", "files"].some((key) => Array.isArray(value[key]))) || (isRecord(value) && Object.keys(value).length === 0);
-  } catch {
-    return false;
-  }
+  const documents = parseJsonDocuments(text);
+  return Boolean(documents?.length && documents.every((value) => Array.isArray(value)
+    || (isRecord(value) && ["diagnostics", "messages", "issues", "files"].some((key) => Array.isArray(value[key])))
+    || (isRecord(value) && Object.keys(value).length === 0)));
 }
 
 export function parseQmllintOutput(text: string, config: Config): QmllintFinding[] {
@@ -152,8 +150,41 @@ export function parseQmllintOutput(text: string, config: Config): QmllintFinding
 }
 
 function parseJsonQmllint(text: string, config: Config): QmllintFinding[] {
-  const value = parseJson(text);
-  return walkJsonDiagnostics(value, config, null);
+  const documents = parseJsonDocuments(text) ?? [parseJson(text)];
+  return documents.flatMap((value) => walkJsonDiagnostics(value, config, null));
+}
+
+function parseJsonDocuments(text: string): JsonValue[] | null {
+  const documents: JsonValue[] = [];
+  let offset = 0;
+  while (offset < text.length) {
+    while (/\s/.test(text[offset] ?? "")) offset += 1;
+    if (offset >= text.length) break;
+    if (text[offset] !== "{" && text[offset] !== "[") return null;
+    const start = offset;
+    let depth = 0;
+    let quote = false;
+    let escaped = false;
+    for (; offset < text.length; offset += 1) {
+      const character = text[offset] ?? "";
+      if (quote) {
+        if (escaped) escaped = false;
+        else if (character === "\\") escaped = true;
+        else if (character === '"') quote = false;
+        continue;
+      }
+      if (character === '"') quote = true;
+      else if (character === "{" || character === "[") depth += 1;
+      else if (character === "}" || character === "]") depth -= 1;
+      if (depth === 0) {
+        documents.push(parseJson(text.slice(start, offset + 1)));
+        offset += 1;
+        break;
+      }
+    }
+    if (depth !== 0 || quote) return null;
+  }
+  return documents.length ? documents : null;
 }
 
 function walkJsonDiagnostics(value: JsonValue, config: Config, inheritedFile: string | null): QmllintFinding[] {
@@ -253,8 +284,8 @@ function normalizedExpectedFiles(files: string[]): string[] {
 
 function filesFromStructuredReport(text: string, config: Config): string[] {
   try {
-    const value = parseJson(text);
-    const records = isRecord(value) && Array.isArray(value.files) ? value.files : Array.isArray(value) ? value : [];
+    const documents = parseJsonDocuments(text) ?? [parseJson(text)];
+    const records = documents.flatMap((value) => isRecord(value) && Array.isArray(value.files) ? value.files : Array.isArray(value) ? value : []);
     return [...new Set(records.flatMap((item) => {
       if (!isRecord(item)) return [];
       const file = stringValue(item.filename) ?? stringValue(item.file) ?? stringValue(item.path);
@@ -267,8 +298,8 @@ function filesFromStructuredReport(text: string, config: Config): string[] {
 
 function hasStructuredFileManifest(text: string): boolean {
   try {
-    const value = parseJson(text);
-    return (isRecord(value) && Array.isArray(value.files)) || Array.isArray(value);
+    const documents = parseJsonDocuments(text) ?? [parseJson(text)];
+    return documents.some((value) => (isRecord(value) && Array.isArray(value.files)) || Array.isArray(value));
   } catch {
     return false;
   }

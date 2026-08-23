@@ -38,6 +38,13 @@ test("v0.5 computes entrypoint reachability through static, Loader, and configur
   assert.ok(cleanup.findings.some((finding) => finding.kind === "cleanup.unused_component" && finding.file === "Orphan.qml"));
 });
 
+test("v0.5 treats Qt Test cases as entrypoints", () => {
+  const { context } = fixture({ "tests/tst_feature.qml": `import QtTest\nTestCase {}\n` });
+
+  assert.ok(context.resolution.entrypoints.has("tests/tst_feature.qml"));
+  assert.ok(context.resolution.reachableFiles.has("tests/tst_feature.qml"));
+});
+
 test("v0.5 cleanup retains ids used as property-alias targets", () => {
   const { context } = fixture({ "Main.qml": `import QtQuick\nItem { default property alias content: body.data; Item { id: body } }\n` });
   assert.equal(context.qmlDocuments[0]?.document.root?.properties[0]?.aliasTarget, "body.data");

@@ -16,3 +16,23 @@ test("clone detector merges adjacent rolling windows into one block", () => {
   assert.ok(clones[0]?.lines && clones[0].lines >= 9);
   assert.deepEqual(clones[0]?.instances.map((instance) => instance.file).sort(), ["A.qml", "B.qml"]);
 });
+
+test("clone detector removes blocks subsumed across a blank-line window", () => {
+  const properties = `
+    required property real uiScale
+    property string icon: ""
+    property bool signalIcon: false
+    property color iconColor: Theme.mutedText
+    property string title: ""
+    property string subtitle: ""
+    property bool statusIndicatorVisible: false
+    property int actionWidth: 170
+    property int headerHeight: Math.max(56, Math.round(64 * uiScale))`;
+  const first = `import QtQuick\n\nItem {\n    id: pane\n${properties}\n    property bool firstOnly: true\n}\n`;
+  const second = `import QtQuick\nimport QtQuick.Layouts\n\nColumn {\n    id: header\n${properties}\n    property bool secondOnly: true\n}\n`;
+
+  const clones = detectClones([source("First.qml", first), source("Second.qml", second)], 4);
+
+  assert.equal(clones.length, 1);
+  assert.equal(clones[0]?.lines, 10);
+});

@@ -59,7 +59,7 @@ export type ProjectResolution = {
 const EXTERNAL_MODULE_PREFIXES = ["Qt", "QtQuick", "Quickshell", "QML", "org.kde", "org.freedesktop"];
 
 const BUILTIN_TYPES = new Set(`
-  AbstractButton Action AnchorAnimation ApplicationWindow Behavior BorderImage BusyIndicator Button ButtonGroup Canvas
+  AbstractButton Action AnchorAnimation ApplicationWindow Behavior Binding BorderImage BusyIndicator Button ButtonGroup Canvas
   CheckBox CheckDelegate ColorAnimation Column ColumnLayout ComboBox Component Connections Control DelayButton Dialog
   DialogButtonBox DragHandler Drawer Flickable Flow FocusScope Grid Gradient GradientStop GridLayout GroupBox HandlerPoint
   HoverHandler Image Instantiator Item Label Layout ListElement ListModel ListView Loader Menu MenuBar MenuItem MouseArea
@@ -290,7 +290,8 @@ function discoverEntrypoints(components: ComponentRecord[], config: Config, sour
   const configured = config.entrypoints.filter((file) => sourcePaths.has(file));
   const automatic = components.filter((component) => {
     const name = path.posix.basename(component.file).toLowerCase();
-    return name === "main.qml" || isShellEntrypoint(component.file) || /(?:^|\.)(?:Application)?Window$/.test(component.rootType ?? "");
+    return name === "main.qml" || isShellEntrypoint(component.file) || component.rootType === "TestCase"
+      || /(?:^|\.)(?:Application)?Window$/.test(component.rootType ?? "");
   }).map((component) => component.file);
   return new Set([...configured, ...automatic]);
 }
