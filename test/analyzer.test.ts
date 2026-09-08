@@ -30,6 +30,16 @@ test("computes QML function complexity from parser spans", () => {
   assert.ok(context.functions.some((fn) => fn.kind === "signal_handler" && fn.name === "onClicked" && fn.cyclomatic > 1));
 });
 
+test("JavaScript function spans ignore comment quotes, braces, and fake declarations", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-js-spans-"));
+  fs.writeFileSync(path.join(root, "Main.qml"), "import QtQuick\nItem {}\n");
+  fs.writeFileSync(path.join(root, "Helper.js"), `// function fake() {\nfunction first() {\n  // Hyprland's selector uses an edge {\n  return true;\n}\nfunction second() { return false; }\n`);
+  fs.writeFileSync(path.join(root, "qmlqualitylens.config.json"), JSON.stringify({ project_root: ".", source_roots: ["."], output_dir: "target" }));
+  const context = createAnalysisContext(loadConfig(path.join(root, "qmlqualitylens.config.json")));
+  const functions = context.functions.filter((fn) => fn.file === "Helper.js");
+  assert.deepEqual(functions.map((fn) => [fn.name, fn.lines, fn.cyclomatic]), [["first", 4, 1], ["second", 1, 1]]);
+});
+
 test("resolves component uses through import scope and aliases", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-scoped-resolution-"));
   fs.mkdirSync(path.join(root, "controls"));

@@ -215,7 +215,7 @@ function executableRecord(file: SourceFile, node: QmlExecutableNode, kind: Funct
 }
 
 function matchedFunctionRecords(file: SourceFile, regex: RegExp, kind: FunctionRecord["kind"], fallbackName: string): FunctionRecord[] {
-  return [...file.text.matchAll(regex)].map((match) => {
+  return [...stripCommentsAndStrings(file.text).matchAll(regex)].map((match) => {
     const start = (match.index ?? 0) + match[0].lastIndexOf("{");
     const line = lineNumberAt(file.text, match.index ?? 0);
     return functionRecord(file, match[1] ?? fallbackName, kind, line, extractBraceBlock(file.text, start));
@@ -242,8 +242,9 @@ function functionRecord(file: SourceFile, name: string, kind: FunctionRecord["ki
 function extractBraceBlock(text: string, openBraceOffset: number): string {
   let depth = 0;
   const stringState: StringScanState = { quote: null, escaped: false };
-  for (let i = openBraceOffset; i < text.length; i += 1) {
-    const char = text[i] ?? "";
+  const code = stripComments(text);
+  for (let i = openBraceOffset; i < code.length; i += 1) {
+    const char = code[i] ?? "";
     if (advanceStringState(stringState, char)) continue;
     depth += char === "{" ? 1 : char === "}" ? -1 : 0;
     if (depth === 0 && char === "}") return text.slice(openBraceOffset, i + 1);
