@@ -62,6 +62,13 @@ test("parser does not treat function parameters and locals as id references", ()
   assert.equal(document.idReferences.some((reference) => reference.name === "card" || reference.name === "local"), false);
 });
 
+test("inline signal declarations do not consume the enclosing object brace", () => {
+  const document = parseQmlDocument("Item { Item { signal ready() } Item {} }", "Main.qml");
+  assert.deepEqual(document.diagnostics, []);
+  assert.equal(document.root?.children.length, 2);
+  assert.equal(document.root?.children[0]?.signals[0]?.name, "ready");
+});
+
 test("parser surfaces diagnostics", () => {
   const document = parseQmlDocument(`Item {\n  width: (1 + 2\n`, "Broken.qml");
   assert.ok(document.diagnostics.length >= 1);

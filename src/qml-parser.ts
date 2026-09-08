@@ -582,7 +582,7 @@ class Parser {
 
   private skipLineOrStatement(start: number): void {
     const line = this.tokens[start]?.line ?? 0;
-    while (this.index < this.tokens.length && this.tokens[this.index]?.line === line && this.tokens[this.index]?.value !== ";") this.index += 1;
+    while (this.index < this.tokens.length && this.tokens[this.index]?.line === line && ![";", "}"].includes(this.tokens[this.index]?.value ?? "")) this.index += 1;
     if (this.tokens[this.index]?.value === ";") this.index += 1;
   }
 

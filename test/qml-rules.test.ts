@@ -48,6 +48,60 @@ test("binding-cycle rule detects same-object and multi-binding cycles", () => {
   assert.match(findings[0]?.message ?? "", /third/);
 });
 
+test("binding cycles include self-reference but exclude shadowed locals", () => {
+  const context = fixtureContext({ "Main.qml": `import QtQuick
+Item {
+  id: root
+  property int first: first + 1
+  property int second: root.second + 1
+  property int third: { let third = 1; return third }
+}
+` });
+  const cycles = context.findings.filter((finding) => finding.kind === "qml.binding_cycle");
+  assert.equal(cycles.length, 2);
+  assert.ok(cycles.some((finding) => finding.message.includes("'first'")));
+  assert.ok(cycles.some((finding) => finding.message.includes("'second'")));
+});
+
+test("binding loss checks scoped handlers and methods and reports unsupported targets", () => {
+  const context = fixtureContext({ "Main.qml": `import QtQuick
+Item {
+  width: parent.width
+  onWidthChanged: { let width = 1; width = 2 }
+  function resize(width) { width = 3 }
+  function reset() { width = 4 }
+}
+` });
+  const losses = context.findings.filter((finding) => finding.kind === "qml.binding_loss");
+  assert.equal(losses.length, 1);
+  assert.equal(losses[0]?.line, 6);
+  const dynamic = fixtureContext({ "Main.qml": `import QtQuick\nItem { width: parent.width; Component.onCompleted: root[key] = 1 }\n` });
+  assert.equal(dynamic.ruleCoverage.find((rule) => rule.rule === "qml.binding_loss")?.skip_reasons.dynamic_assignment_target, 1);
+});
+
+test("Connections accepts inline, inherited, and property-change signals", () => {
+  const context = fixtureContext({
+    "Base.qml": `import QtQuick\nItem { signal ready() }\n`,
+    "Child.qml": `import QtQuick\nBase { property int count: 0 }\n`,
+    "Main.qml": `import QtQuick
+Item {
+  Child { id: child; signal finished() }
+  Connections {
+    target: child
+    function onReady() {}
+    function onCountChanged() {}
+    function onFinished() {}
+    function onMissing() {}
+  }
+}
+`,
+  });
+  const mismatches = context.findings.filter((finding) => finding.kind === "qml.connection_signal_mismatch");
+  assert.equal(mismatches.length, 1);
+  assert.match(mismatches[0]?.message ?? "", /onMissing/);
+  assert.equal(context.ruleCoverage.find((rule) => rule.rule === "qml.connection_signal_mismatch")?.evaluated, 1);
+});
+
 test("binding-cycle rule does not treat parent alias plus child read as a cycle", () => {
   const context = fixtureContext({
     "Main.qml": `import QtQuick\nItem {\n  id: root\n  property alias text: label.text\n  visible: true\n  Text {\n    id: label\n    text: root.visible ? \"yes\" : \"no\"\n  }\n}\n`,

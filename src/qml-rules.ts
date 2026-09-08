@@ -1,20 +1,17 @@
 import type { AnalysisContext } from "./analyzer.js";
 import { lineNumberAt, stripCommentsAndStrings } from "./metrics.js";
+import { analyzeAssignments } from "./expression-analysis.js";
 import { baseTypeName } from "./qml-model.js";
 import { qmlHealthFindings } from "./qml-health-measure.js";
 import { inheritedSignals, typeIsA } from "./type-evidence.js";
 import type { Finding, RuleCoverageRecord } from "./types.js";
 
-const ASSIGNMENT_PATTERN = /\b([A-Za-z_]\w*)(?:\.([A-Za-z_]\w*))?\s*=(?!=|>)/g;
-const DECLARATION_PREFIX = /\b(?:const|let|var|property)\s+$/;
 const EXTERNAL_API_PREFIXES = new Set(["anchors", "Layout", "Accessible", "Keys", "Component"]);
 
 type DocumentEntry = AnalysisContext["qmlDocuments"][number];
 type RuleGroup = { rules: string[]; run: (context: AnalysisContext) => Finding[]; needsWholeProject?: boolean };
 const perFile = (run: (entry: DocumentEntry, context: AnalysisContext) => Finding[]) => (context: AnalysisContext) => context.qmlDocuments.flatMap((entry) => run(entry, context));
 const RULE_GROUPS: RuleGroup[] = [
-  { rules: ["qml.binding_loss"], run: perFile(bindingLossFindings) },
-  { rules: ["qml.binding_cycle"], run: perFile(bindingCycleFindings) },
   { rules: ["qml.layout_conflict.anchors_with_layout", "qml.layout_conflict.anchors_with_geometry"], run: perFile(layoutConflictFindings) },
   { rules: ["cleanup.unused_public_property", "cleanup.unused_public_signal"], run: unusedPublicApiFindings, needsWholeProject: true },
   { rules: ["qml.delegate_state"], run: perFile(delegateStateFindings) },
@@ -43,6 +40,8 @@ export function evaluateQmlRules(context: AnalysisContext): { findings: Finding[
       coverage.push(coverageRecord(rule, "file", targets, ["File-level evaluation by the internal QML parser; JavaScript and dynamic behavior are not fully resolved."]));
     }
   }
+  evaluateFileRule(context, "qml.binding_loss", bindingLossEvaluation, findings, coverage);
+  evaluateFileRule(context, "qml.binding_cycle", bindingCycleEvaluation, findings, coverage);
   evaluateConnections(context, findings, coverage);
   return { findings, coverage };
 }
@@ -87,47 +86,57 @@ function connectionSkipReason(connection: CycleObject, ids: Map<string, CycleObj
   return undefined;
 }
 
-function bindingLossFindings({ file, document }: AnalysisContext["qmlDocuments"][number]): Finding[] {
-  const objectById = new Map(document.objects.map((object) => [object.objectId, object]));
-  const idToObject = new Map(document.objects.flatMap((object) => object.idName ? [[object.idName, object]] : []));
-  return document.objects.flatMap((object) => object.bindings
-    .filter((binding) => isHandlerPath(binding.propertyPath))
-    .flatMap((binding) => assignmentTargets(binding.expression)
-      .flatMap((assignment) => {
-        const target = assignment.owner ? idToObject.get(assignment.owner) : object;
-        if (!target || !hasDeclarativeBinding(target, assignment.property)) return [];
-        return [finding(`qml.binding_loss.${file}.${binding.line}.${assignment.owner ?? "self"}.${assignment.property}`, "qml.binding_loss", "high", file, binding.line, `Imperative assignment to '${assignment.owner ? `${assignment.owner}.` : ""}${assignment.property}' can break its declarative binding`, "Move the mutable value into a separate state property or replace the binding intentionally with Qt.binding().")];
-      })));
-
-  function hasDeclarativeBinding(object: NonNullable<ReturnType<typeof objectById.get>>, property: string): boolean {
-    return object.bindings.some((binding) => !isHandlerPath(binding.propertyPath) && leafName(binding.propertyPath) === property && (binding.references.length > 0 || isDynamicBinding(binding.expression)));
+function evaluateFileRule(context: AnalysisContext, rule: string, evaluate: (entry: DocumentEntry) => { findings: Finding[]; reason?: string }, findings: Finding[], coverage: RuleCoverageRecord[]): void {
+  const targets: EvaluationTarget[] = [];
+  for (const entry of context.qmlDocuments) {
+    const reason = context.config.rules[rule]?.enabled === false ? "rule_disabled" : entry.document.diagnostics.length ? "parser_diagnostic" : undefined;
+    const result = reason ? { findings: [], reason } : evaluate(entry);
+    targets.push(evaluationTarget(entry.file, undefined, result.reason));
+    if (!result.reason) findings.push(...result.findings);
   }
+  coverage.push(coverageRecord(rule, "file", targets, ["Dynamic property targets and unsupported JavaScript are skipped; full lexical scope requires the optional tree-sitter parser."]));
 }
 
-function bindingCycleFindings({ file, document }: AnalysisContext["qmlDocuments"][number]): Finding[] {
+function bindingLossEvaluation({ file, document }: DocumentEntry): { findings: Finding[]; reason?: string } {
+  const ids = new Map(document.objects.flatMap((object) => object.idName ? [[object.idName, object]] : []));
+  const findings: Finding[] = [];
+  for (const object of document.objects) {
+    for (const executable of [...object.handlers, ...object.functions]) {
+      const analysis = analyzeAssignments(executable.body, executable.parameters.map((parameter) => parameter.name));
+      if (analysis.reason) return { findings: [], reason: analysis.reason };
+      for (const assignment of analysis.assignments) {
+        if (EXTERNAL_API_PREFIXES.has(assignment.owner ?? assignment.property)) continue;
+        const target = assignment.owner ? ids.get(assignment.owner) : object;
+        if (!target?.bindings.some((binding) => !isHandlerPath(binding.propertyPath) && binding.propertyPath === assignment.property && isDynamicBinding(binding.expression))) continue;
+        const line = executable.line + assignment.line - 1;
+        findings.push(finding(`qml.binding_loss.${file}.${line}.${assignment.owner ?? "self"}.${assignment.property}`, "qml.binding_loss", "high", file, line, `Imperative assignment to '${assignment.owner ? `${assignment.owner}.` : ""}${assignment.property}' can break its declarative binding`, "Move the mutable value into a separate state property or replace the binding intentionally with Qt.binding()."));
+      }
+    }
+  }
+  return { findings };
+}
+
+function bindingCycleEvaluation({ file, document }: DocumentEntry): { findings: Finding[]; reason?: string } {
   const objectById = new Map(document.objects.map((object) => [object.objectId, object]));
-  const bindings = document.bindings.filter((binding) => !isHandlerPath(binding.propertyPath));
+  const bindings = document.bindings.filter((binding) => !isHandlerPath(binding.propertyPath) && binding.propertyPath !== "id" && !/^\s*[A-Za-z_]\w*(?:\.\w+)*\s*\{/.test(binding.expression));
   const lineByNode = new Map(bindings.map((binding) => [bindingNodeKey(binding.ownerObjectId, binding.propertyPath), binding.line]));
-  const edges = new Map(bindings.map((binding) => [bindingNodeKey(binding.ownerObjectId, binding.propertyPath), bindingTargets(binding, objectById)]));
-  return stronglyConnectedComponents(edges).filter((nodes) => nodes.length > 1).map((nodes) => bindingCycleFinding(file, nodes, lineByNode));
+  const edges = new Map<string, Set<string>>();
+  for (const binding of bindings) {
+    const analysis = analyzeAssignments(binding.expression);
+    if (analysis.reason) return { findings: [], reason: analysis.reason };
+    edges.set(bindingNodeKey(binding.ownerObjectId, binding.propertyPath), bindingTargets(binding, objectById, analysis.references ?? []));
+  }
+  return { findings: stronglyConnectedComponents(edges).filter((nodes) => nodes.length > 1 || Boolean(nodes[0] && edges.get(nodes[0])?.has(nodes[0]))).map((nodes) => bindingCycleFinding(file, nodes, lineByNode)) };
 }
 
 type CycleBinding = AnalysisContext["qmlDocuments"][number]["document"]["bindings"][number];
 type CycleObject = AnalysisContext["qmlDocuments"][number]["document"]["objects"][number];
 
-function bindingTargets(binding: CycleBinding, objectById: Map<number, CycleObject>): Set<string> {
-  const owner = objectById.get(binding.ownerObjectId);
-  const local = owner ? owner.bindings
-    .filter((candidate) => !isHandlerPath(candidate.propertyPath) && usesBareProperty(binding.expression, candidate.propertyPath))
-    .map((candidate) => bindingNodeKey(owner.objectId, candidate.propertyPath)) : [];
-  const referenced = binding.references.flatMap((reference) => referencedBindingTargets(binding, reference.name, reference.targetObjectId, objectById));
-  return new Set([...local, ...referenced]);
-}
-
-function referencedBindingTargets(binding: CycleBinding, name: string, targetId: number | null, objectById: Map<number, CycleObject>): string[] {
-  const target = targetId ? objectById.get(targetId) : null;
-  if (!target || target.objectId === binding.ownerObjectId) return [];
-  return referencedProperties(binding.expression, name, target).map((property) => bindingNodeKey(target.objectId, property));
+function bindingTargets(binding: CycleBinding, objectById: Map<number, CycleObject>, references: Array<{ owner: string | null; property: string }>): Set<string> {
+  return new Set(references.flatMap((reference) => {
+    const target = !reference.owner || reference.owner === "this" ? objectById.get(binding.ownerObjectId) : [...objectById.values()].find((object) => object.idName === reference.owner);
+    return target?.bindings.some((candidate) => candidate.propertyPath === reference.property && !isHandlerPath(candidate.propertyPath)) ? [bindingNodeKey(target.objectId, reference.property)] : [];
+  }));
 }
 
 function bindingCycleFinding(file: string, nodes: string[], lineByNode: Map<string, number>): Finding {
@@ -148,11 +157,6 @@ function bindingNodeKey(objectId: number, property: string): string {
 
 function bindingNodeLabel(key: string): string {
   return key.slice(key.indexOf(":") + 1);
-}
-
-function usesBareProperty(expression: string, propertyPath: string): boolean {
-  const name = propertyPath.split(".")[0] ?? propertyPath;
-  return new RegExp(`(^|[^A-Za-z0-9_$.])${escapeRegex(name)}\\b`).test(stripCommentsAndStrings(expression));
 }
 
 type ComponentTraversal = {
@@ -198,26 +202,6 @@ function popComponent(node: string, traversal: ComponentTraversal): string[] {
     }
   } while (current && current !== node);
   return component;
-}
-
-function referencedProperties(expression: string, idName: string, target: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number]): string[] {
-  const knownProperties = new Set([...target.bindings.map((binding) => binding.propertyPath), ...target.properties.map((property) => property.name)]);
-  const regex = new RegExp(`\\b${escapeRegex(idName)}\\s*\\.\\s*([A-Za-z_]\\w*(?:\\s*\\.\\s*[A-Za-z_]\\w*)*)`, "g");
-  const properties = new Set<string>();
-  for (const match of expression.matchAll(regex)) {
-    const segments = (match[1] ?? "").split(".").map((segment) => segment.trim()).filter(Boolean);
-    if (segments.length === 0) continue;
-    properties.add(bestKnownPropertyPath(segments, knownProperties));
-  }
-  return [...properties];
-}
-
-function bestKnownPropertyPath(segments: string[], knownProperties: Set<string>): string {
-  for (let length = segments.length; length > 0; length -= 1) {
-    const candidate = segments.slice(0, length).join(".");
-    if (knownProperties.has(candidate)) return candidate;
-  }
-  return segments[0] ?? "";
 }
 
 function layoutConflictFindings({ file, document }: AnalysisContext["qmlDocuments"][number], context: AnalysisContext): Finding[] {
@@ -279,7 +263,11 @@ function connectionFindings(connection: CycleObject, file: string, idToObject: M
 
 function connectionTargetSignals(context: AnalysisContext, file: string, object: CycleObject): Set<string> {
   const targetFile = resolvedTargetForObject(context, file, object.typeName, object.line);
-  return targetFile ? signalsForComponent(context, targetFile) : inheritedSignals(context.typeEvidence, object.typeName);
+  return new Set([
+    ...(targetFile ? signalsForComponent(context, targetFile) : inheritedSignals(context.typeEvidence, object.typeName)),
+    ...object.signals.map((signal) => signal.name),
+    ...object.properties.map((property) => `${property.name}Changed`),
+  ]);
 }
 
 function connectionHandlerFinding(handler: { name: string; line: number }, targetSignals: Set<string>, target: CycleObject, file: string): Finding[] {
@@ -499,20 +487,6 @@ function hasExternalUser(context: AnalysisContext, file: string): boolean {
 
 function union(...sets: Array<Set<string> | undefined>): Set<string> {
   return new Set(sets.flatMap((set) => [...(set ?? [])]));
-}
-
-function assignmentTargets(expression: string): Array<{ owner: string | null; property: string }> {
-  const results: Array<{ owner: string | null; property: string }> = [];
-  for (const match of expression.matchAll(ASSIGNMENT_PATTERN)) {
-    if (DECLARATION_PREFIX.test(expression.slice(Math.max(0, (match.index ?? 0) - 16), match.index ?? 0))) continue;
-    if (isQtBindingAssignment(expression, match.index ?? 0, match[0].length)) continue;
-    results.push(match[2] ? { owner: match[1] ?? null, property: match[2] } : { owner: null, property: match[1] ?? "" });
-  }
-  return results.filter((item) => item.property.length > 0 && !EXTERNAL_API_PREFIXES.has(item.owner ?? item.property));
-}
-
-function isQtBindingAssignment(expression: string, index: number, matchLength: number): boolean {
-  return /^\s*Qt\.binding\s*\(/.test(expression.slice(index + matchLength));
 }
 
 function connectionHandlerEntries(object: AnalysisContext["qmlDocuments"][number]["document"]["objects"][number]): Array<{ name: string; line: number }> {
