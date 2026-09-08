@@ -2,7 +2,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { detectClones } from "./clone-detector.js";
 import { cleanupFindings } from "./measures/cleanup.js";
-import { qmlHealthFindings } from "./qml-health-measure.js";
 import { discoverSourceFiles } from "./file-walk.js";
 import { attachSemanticAnchors } from "./finding-identity.js";
 import { boundedScore, complexityForCode, countMatches, lineNumberAt, locFor, stripComments, stripCommentsAndStrings } from "./metrics.js";
@@ -11,7 +10,7 @@ import { matchesAnyConfiguredTypeName } from "./qml-model.js";
 import { parseQmlDocument } from "./qml-parser.js";
 import type { QmlDocument, QmlExecutableNode } from "./qml-parser-types.js";
 import { buildProjectResolution, type ProjectResolution } from "./qml-resolution.js";
-import { qmlSemanticFindings, qmlSemanticRuleCoverage } from "./qml-rules.js";
+import { evaluateQmlRules } from "./qml-rules.js";
 import { loadQmllintResult, qmllintDiagnostic, type QmllintResult } from "./qmllint.js";
 import { deduplicateToolFindings, enrichFindings } from "./rules.js";
 import { applySuppressions, staleSuppressionFindings } from "./suppressions.js";
@@ -70,18 +69,18 @@ export function createAnalysisContext(config: Config): AnalysisContext {
   const qmllintFindings = qmllint.findings;
   const clones = detectClones(sources, config.thresholds.cloneWindow);
   const baseContext: AnalysisContext = { config, sources, qmlDocuments, resolution, typeEvidence, ruleCoverage: [], files, components, functions, bindings, parserDiagnostics, qmllint, qmllintFindings, clones, findings: [], scores: emptyScores() };
+  const evaluation = evaluateQmlRules(baseContext);
   const candidates = attachSemanticAnchors([
     ...inputFindings(config, sources),
     ...deriveFindings(config, files, components, functions, bindings, clones, resolution),
-    ...qmlSemanticFindings(baseContext),
-    ...qmlHealthFindings(baseContext),
+    ...evaluation.findings,
     ...cleanupFindings(baseContext),
     ...qmllintFindings.map(qmllintDiagnostic),
   ], qmlDocuments);
   const rawFindings = deduplicateToolFindings(enrichFindings(candidates, config));
   const findings = [...applySuppressions(rawFindings, config), ...enrichFindings(staleSuppressionFindings(rawFindings, config), config)];
   const scores = scoreProject(config, files, components, functions, clones, findings);
-  return { ...baseContext, ruleCoverage: qmlSemanticRuleCoverage(baseContext), findings, scores };
+  return { ...baseContext, ruleCoverage: evaluation.coverage, findings, scores };
 }
 
 export function analyzeProject(config: Config): AnalysisArtifact {

@@ -1,7 +1,7 @@
 import type { AnalysisContext } from "./analyzer.js";
 import { lineNumberAt, stripCommentsAndStrings } from "./metrics.js";
 import { baseTypeName } from "./qml-model.js";
-import { RULES } from "./rules.js";
+import { qmlHealthFindings } from "./qml-health-measure.js";
 import { inheritedSignals, typeIsA } from "./type-evidence.js";
 import type { Finding, RuleCoverageRecord } from "./types.js";
 
@@ -9,60 +9,82 @@ const ASSIGNMENT_PATTERN = /\b([A-Za-z_]\w*)(?:\.([A-Za-z_]\w*))?\s*=(?!=|>)/g;
 const DECLARATION_PREFIX = /\b(?:const|let|var|property)\s+$/;
 const EXTERNAL_API_PREFIXES = new Set(["anchors", "Layout", "Accessible", "Keys", "Component"]);
 
+type DocumentEntry = AnalysisContext["qmlDocuments"][number];
+type RuleGroup = { rules: string[]; run: (context: AnalysisContext) => Finding[]; needsWholeProject?: boolean };
+const perFile = (run: (entry: DocumentEntry, context: AnalysisContext) => Finding[]) => (context: AnalysisContext) => context.qmlDocuments.flatMap((entry) => run(entry, context));
+const RULE_GROUPS: RuleGroup[] = [
+  { rules: ["qml.binding_loss"], run: perFile(bindingLossFindings) },
+  { rules: ["qml.binding_cycle"], run: perFile(bindingCycleFindings) },
+  { rules: ["qml.layout_conflict.anchors_with_layout", "qml.layout_conflict.anchors_with_geometry"], run: perFile(layoutConflictFindings) },
+  { rules: ["cleanup.unused_public_property", "cleanup.unused_public_signal"], run: unusedPublicApiFindings, needsWholeProject: true },
+  { rules: ["qml.delegate_state"], run: perFile(delegateStateFindings) },
+  { rules: ["qml.prefer_typed_property"], run: perFile(typedPropertyFindings) },
+  { rules: ["qml.missing_required"], run: missingRequiredFindings, needsWholeProject: true },
+  { rules: ["qml.native_style_customization"], run: perFile(nativeStyleFindings) },
+  { rules: ["qml.untranslated_string"], run: perFile(internationalizationFindings) },
+  { rules: ["qml.accessibility.icon_only_control", "qml.accessibility.pointer_without_keyboard", "qml.accessibility.popup_without_escape"], run: perFile(accessibilityFindings) },
+  { rules: ["qml.process_command_construction"], run: perFile(processCommandFindings) },
+  { rules: ["qml.function_missing_types"], run: perFile(functionConventionFindings) },
+  { rules: ["qml.performance_complex_delegate_js", "qml.performance.image_without_source_size", "qml.performance.loader_without_active"], run: perFile(performanceSmellFindings) },
+  { rules: ["qml.api_surface", "qml.alias_leakage", "qml.binding_pressure", "qml.side_effect_in_binding", "quickshell.process_placement"], run: qmlHealthFindings },
+];
+
+export function evaluateQmlRules(context: AnalysisContext): { findings: Finding[]; coverage: RuleCoverageRecord[] } {
+  const cleanFiles = new Set(context.qmlDocuments.filter((entry) => !entry.document.diagnostics.length).map((entry) => entry.file));
+  const cleanContext = { ...context, qmlDocuments: context.qmlDocuments.filter((entry) => cleanFiles.has(entry.file)), components: context.components.filter((item) => cleanFiles.has(item.file)), bindings: context.bindings.filter((item) => cleanFiles.has(item.file)) };
+  const findings: Finding[] = [];
+  const coverage: RuleCoverageRecord[] = [];
+  for (const group of RULE_GROUPS) {
+    const projectReason = group.needsWholeProject && cleanFiles.size !== context.qmlDocuments.length ? "project_parser_diagnostic" : undefined;
+    const enabled = group.rules.filter((rule) => context.config.rules[rule]?.enabled !== false);
+    if (!projectReason && enabled.length) findings.push(...group.run(cleanContext).filter((finding) => enabled.includes(finding.kind)));
+    for (const rule of group.rules) {
+      const targets = context.qmlDocuments.map((entry) => evaluationTarget(entry.file, undefined, context.config.rules[rule]?.enabled === false ? "rule_disabled" : projectReason ?? (entry.document.diagnostics.length ? "parser_diagnostic" : undefined)));
+      coverage.push(coverageRecord(rule, "file", targets, ["File-level evaluation by the internal QML parser; JavaScript and dynamic behavior are not fully resolved."]));
+    }
+  }
+  evaluateConnections(context, findings, coverage);
+  return { findings, coverage };
+}
+
 export function qmlSemanticFindings(context: AnalysisContext): Finding[] {
-  return [
-    ...context.qmlDocuments.flatMap((entry) => bindingLossFindings(entry)),
-    ...context.qmlDocuments.flatMap((entry) => bindingCycleFindings(entry)),
-    ...context.qmlDocuments.flatMap((entry) => layoutConflictFindings(entry, context)),
-    ...unusedPublicApiFindings(context),
-    ...context.qmlDocuments.flatMap((entry) => connectionMismatchFindings(entry, context)),
-    ...context.qmlDocuments.flatMap((entry) => delegateStateFindings(entry, context)),
-    ...context.qmlDocuments.flatMap((entry) => typedPropertyFindings(entry)),
-    ...missingRequiredFindings(context),
-    ...context.qmlDocuments.flatMap((entry) => nativeStyleFindings(entry)),
-    ...context.qmlDocuments.flatMap((entry) => internationalizationFindings(entry)),
-    ...context.qmlDocuments.flatMap((entry) => accessibilityFindings(entry, context)),
-    ...context.qmlDocuments.flatMap((entry) => processCommandFindings(entry, context)),
-    ...context.qmlDocuments.flatMap((entry) => functionConventionFindings(entry)),
-    ...context.qmlDocuments.flatMap((entry) => performanceSmellFindings(entry)),
-  ];
+  return evaluateQmlRules(context).findings;
 }
 
-export function qmlSemanticRuleCoverage(context: AnalysisContext): RuleCoverageRecord[] {
-  const qmlRules = RULES.filter((rule) => rule.id.startsWith("qml.") && rule.evidence !== "tool");
-  const cleanFiles = new Set(context.qmlDocuments.filter((entry) => entry.document.diagnostics.length === 0).map((entry) => entry.file));
-  return qmlRules.map((rule) => {
-    if (rule.id === "qml.connection_signal_mismatch" || rule.id === "qml.connections.unknown_target") return connectionRuleCoverage(rule.id, context);
-    const applicable = context.qmlDocuments.length;
-    const evaluated = cleanFiles.size;
-    return { rule: rule.id, applicable, evaluated, skipped: applicable - evaluated, skip_reasons: applicable === evaluated ? {} : { parser_diagnostic: applicable - evaluated } };
-  });
+type EvaluationTarget = NonNullable<RuleCoverageRecord["targets"]>[number];
+function evaluationTarget(file: string, line: number | undefined, reason?: string): EvaluationTarget {
+  return { file, ...(line === undefined ? {} : { line }), status: reason ? "skipped" : "evaluated", ...(reason ? { reason } : {}) };
 }
 
-function connectionRuleCoverage(rule: string, context: AnalysisContext): RuleCoverageRecord {
-  const evaluations = context.qmlDocuments.flatMap((entry) => connectionEvaluations(entry, rule));
+function coverageRecord(rule: string, unit: "file" | "connection", targets: EvaluationTarget[], limitations: string[]): RuleCoverageRecord {
   const reasons: Record<string, number> = {};
-  for (const reason of evaluations) if (reason) increment(reasons, reason);
-  const evaluated = evaluations.filter((reason) => reason === null).length;
-  return { rule, applicable: evaluations.length, evaluated, skipped: evaluations.length - evaluated, skip_reasons: reasons };
+  for (const target of targets) if (target.reason) reasons[target.reason] = (reasons[target.reason] ?? 0) + 1;
+  const evaluated = targets.filter((target) => target.status === "evaluated").length;
+  return { rule, unit, applicable: targets.length, evaluated, skipped: targets.length - evaluated, skip_reasons: reasons, targets, limitations };
 }
 
-type ConnectionSkipReason = "dynamic_target" | "unknown_target" | "external_or_singleton_target" | null;
-
-function connectionEvaluations(entry: AnalysisContext["qmlDocuments"][number], rule: string): ConnectionSkipReason[] {
-  const ids = new Set(entry.document.objects.flatMap((object) => object.idName ? [object.idName] : []));
-  return entry.document.objects.filter((object) => baseTypeName(object.typeName) === "Connections").map((connection) => connectionSkipReason(targetExpression(connection), ids, rule));
+function evaluateConnections(context: AnalysisContext, findings: Finding[], coverage: RuleCoverageRecord[]): void {
+  for (const rule of ["qml.connections.unknown_target", "qml.connection_signal_mismatch"]) {
+    const targets: EvaluationTarget[] = [];
+    for (const entry of context.qmlDocuments) {
+      const ids = new Map(entry.document.objects.flatMap((object) => object.idName ? [[object.idName, object]] : []));
+      for (const connection of entry.document.objects.filter((object) => baseTypeName(object.typeName) === "Connections")) {
+        const reason = context.config.rules[rule]?.enabled === false ? "rule_disabled" : entry.document.diagnostics.length ? "parser_diagnostic" : connectionSkipReason(connection, ids, rule, entry.file, context);
+        targets.push(evaluationTarget(entry.file, connection.line, reason));
+        if (!reason) findings.push(...connectionFindings(connection, entry.file, ids, context).filter((finding) => finding.kind === rule));
+      }
+    }
+    coverage.push(coverageRecord(rule, "connection", targets, ["Only simple local-id targets with known signal evidence can be checked for handler mismatches."]));
+  }
 }
 
-function connectionSkipReason(expression: string | null, ids: Set<string>, rule: string): ConnectionSkipReason {
-  const target = expression?.match(/^([A-Za-z_]\w*)$/)?.[1];
+function connectionSkipReason(connection: CycleObject, ids: Map<string, CycleObject>, rule: string, file: string, context: AnalysisContext): string | undefined {
+  const target = targetExpression(connection)?.match(/^([A-Za-z_]\w*)$/)?.[1];
   if (!target) return "dynamic_target";
-  if (ids.has(target) || (isLikelyLocalId(target) && rule === "qml.connections.unknown_target")) return null;
-  return isLikelyLocalId(target) ? "unknown_target" : "external_or_singleton_target";
-}
-
-function increment(record: Record<string, number>, key: string): void {
-  record[key] = (record[key] ?? 0) + 1;
+  const object = ids.get(target);
+  if (!object) return isLikelyLocalId(target) ? rule === "qml.connections.unknown_target" ? undefined : "unknown_target" : "external_or_singleton_target";
+  if (rule === "qml.connection_signal_mismatch" && !connectionTargetSignals(context, file, object).size) return "missing_signal_evidence";
+  return undefined;
 }
 
 function bindingLossFindings({ file, document }: AnalysisContext["qmlDocuments"][number]): Finding[] {
@@ -246,19 +268,18 @@ function publicApiFinding(file: string, item: { name: string; line: number }, ap
   return finding(`cleanup.unused_public_${apiKind}.${file}.${item.name}`, `cleanup.unused_public_${apiKind}`, "low", file, item.line, `Public ${apiKind} '${item.name}' is neither used internally nor ${usage}`, action);
 }
 
-function connectionMismatchFindings(entry: AnalysisContext["qmlDocuments"][number], context: AnalysisContext): Finding[] {
-  const idToObject = new Map(entry.document.objects.flatMap((object) => object.idName ? [[object.idName, object]] : []));
-  return entry.document.objects.filter((object) => baseTypeName(object.typeName) === "Connections").flatMap((connection) => connectionFindings(connection, entry.file, idToObject, context));
-}
-
 function connectionFindings(connection: CycleObject, file: string, idToObject: Map<string, CycleObject>, context: AnalysisContext): Finding[] {
   const targetId = targetExpression(connection)?.match(/^([A-Za-z_]\w*)$/)?.[1];
   if (targetId && !idToObject.has(targetId) && isLikelyLocalId(targetId)) return [finding(`qml.connections.unknown_target.${file}.${connection.line}.${targetId}`, "qml.connections.unknown_target", "high", file, connection.line, `Connections target '${targetId}' is not declared in this component`, "Correct the target id or expose the intended target explicitly; use a suppression only for a documented injected context object.")];
   const targetObject = targetId ? idToObject.get(targetId) : null;
   if (!targetObject) return [];
-  const targetFile = resolvedTargetForObject(context, file, targetObject.typeName, targetObject.line);
-  const targetSignals = targetFile ? signalsForComponent(context, targetFile) : inheritedSignals(context.typeEvidence, targetObject.typeName);
+  const targetSignals = connectionTargetSignals(context, file, targetObject);
   return targetSignals.size ? connectionHandlerEntries(connection).flatMap((handler) => connectionHandlerFinding(handler, targetSignals, targetObject, file)) : [];
+}
+
+function connectionTargetSignals(context: AnalysisContext, file: string, object: CycleObject): Set<string> {
+  const targetFile = resolvedTargetForObject(context, file, object.typeName, object.line);
+  return targetFile ? signalsForComponent(context, targetFile) : inheritedSignals(context.typeEvidence, object.typeName);
 }
 
 function connectionHandlerFinding(handler: { name: string; line: number }, targetSignals: Set<string>, target: CycleObject, file: string): Finding[] {

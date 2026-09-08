@@ -214,6 +214,9 @@ export type RuleCoverageRecord = {
   evaluated: number;
   skipped: number;
   skip_reasons: Record<string, number>;
+  unit?: "file" | "connection";
+  targets?: Array<{ file: string; line?: number; status: "evaluated" | "skipped"; reason?: string }>;
+  limitations?: string[];
 };
 
 export type Finding = {
