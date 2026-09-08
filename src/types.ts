@@ -251,6 +251,7 @@ export type AnalysisArtifact = {
     root: string;
   };
   generated_at: string;
+  provenance?: Record<string, JsonValue>;
   summary: {
     files: number;
     qmlFiles: number;

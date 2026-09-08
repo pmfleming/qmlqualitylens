@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import { ARTIFACT_SCHEMA_VERSION } from "../version.js";
 import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding, type MeasureJsonValue as JsonValue, type MeasureToolExecution as ToolExecution } from "./foundation.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 
@@ -10,8 +9,9 @@ export function measureCorrectnessCatalog(config: Config, command: string, conte
   const execution = loadTestEvidence(config.reports.tests);
   const rawFindings = catalogFindings(tests.length, toolExecution, execution);
   const findings = support.applySuppressions(support.enrichFindings(rawFindings, config), config);
+  const version = config.tools.qmltestrunnerCheck ? support.toolVersion(config.tools.qmltestrunnerCommand, config.tools.qmltestrunnerWorkingDirectory) : null;
   const artifact = {
-    ...baseArtifact(context, "correctness.catalog", command),
+    ...baseArtifact(context, "correctness.catalog", command, { qmltestrunner: version }),
     summary: {
       test_files: tests.length,
       test_cases: tests.reduce((sum, test) => sum + test.test_cases.length, 0),
@@ -19,7 +19,7 @@ export function measureCorrectnessCatalog(config: Config, command: string, conte
       execution_status: toolExecution?.status === "incomplete" ? "incomplete" : toolExecution?.status === "failed" && execution.failures.length === 0 ? "failed" : execution.status,
       execution_reason: toolExecution?.error ?? execution.reason,
       tool_status: toolExecution?.status ?? "not_configured",
-      tool_version: config.tools.qmltestrunnerCheck ? support.toolVersion(config.tools.qmltestrunnerCommand, config.tools.qmltestrunnerWorkingDirectory) : null,
+      tool_version: version,
       executed: execution.tests,
       failures: execution.failures.length,
       ...findingSummary(findings),
@@ -29,8 +29,8 @@ export function measureCorrectnessCatalog(config: Config, command: string, conte
     findings,
   };
   writeArtifact(config, "correctness_review.json", artifact);
-  writeArtifact(config, "test_catalog.json", { schema_version: ARTIFACT_SCHEMA_VERSION, project: { name: config.projectName, root: config.projectRoot }, tests });
-  writeArtifact(config, "test_evidence.json", { ...baseArtifact(context, "correctness.test_evidence", command), summary: artifact.summary, execution: artifact.execution, findings: findings.filter((finding) => finding.kind === "tests.failure" || finding.kind === "tests.execution_failed") });
+  writeArtifact(config, "test_catalog.json", { ...baseArtifact(context, "correctness.test_catalog", command), tests });
+  writeArtifact(config, "test_evidence.json", { ...baseArtifact(context, "correctness.test_evidence", command, { qmltestrunner: version }), summary: artifact.summary, execution: artifact.execution, findings: findings.filter((finding) => finding.kind === "tests.failure" || finding.kind === "tests.execution_failed") });
   return artifact;
 }
 

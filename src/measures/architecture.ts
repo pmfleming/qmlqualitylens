@@ -1,11 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { isShellEntrypoint } from "../qml-model.js";
+import { artifactFreshness, changedRunInputs } from "../run-evidence.js";
 import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureJsonValue as JsonValue } from "./foundation.js";
 import { baseArtifact, writeArtifact } from "./shared.js";
 
 export function measureArchitectureMap(config: Config, command: string, context: AnalysisContext) {
-  const observed = observedCoverageFiles(config);
+  const observed = observedCoverageFiles(context);
   const nodes = context.files.map((file) => architectureNode(file, context, observed));
   const idEdges = context.qmlDocuments.flatMap(({ file, document }) => document.idReferences.filter((item) => item.external).map((reference) => ({ from: file, to: `${file}#${reference.name}`, kind: "id_reference", line: reference.line })));
   const edges = [
@@ -27,7 +28,7 @@ export function measureArchitectureMap(config: Config, command: string, context:
   return artifact;
 }
 
-function architectureNode(file: AnalysisContext["files"][number], context: AnalysisContext, observed: Set<string>) {
+function architectureNode(file: AnalysisContext["files"][number], context: AnalysisContext, observed: Set<string> | null) {
   const component = file.qmlComponent;
   return {
     id: file.path,
@@ -42,14 +43,14 @@ function architectureNode(file: AnalysisContext["files"][number], context: Analy
   };
 }
 
-function observedCoverageFiles(config: Config): Set<string> {
-  const file = path.join(config.outputDir, "coverage_evidence.json");
-  if (!fs.existsSync(file)) return new Set();
+function observedCoverageFiles(context: AnalysisContext): Set<string> | null {
+  const file = path.join(context.config.outputDir, "coverage_evidence.json");
+  if (!fs.existsSync(file) || changedRunInputs(context)) return null;
   try {
     const value = support.parseJson(fs.readFileSync(file, "utf8"));
-    if (!support.isJsonRecord(value) || !Array.isArray(value.files)) return new Set();
+    if (artifactFreshness(context, value) || !support.isJsonRecord(value) || !Array.isArray(value.files) || !support.isJsonRecord(value.summary) || value.summary.status !== "complete") return null;
     return new Set(value.files.flatMap(observedFile));
-  } catch { return new Set(); }
+  } catch { return null; }
 }
 
 function observedFile(value: JsonValue): string[] {
@@ -59,8 +60,8 @@ function observedFile(value: JsonValue): string[] {
   return file && coveredLines !== null && coveredLines > 0 ? [file] : [];
 }
 
-function configCoverageState(config: Config, observed: Set<string>, file: string): boolean | null {
-  return config.reports.coverage ? observed.has(file) : null;
+function configCoverageState(config: Config, observed: Set<string> | null, file: string): boolean | null {
+  return config.reports.coverage && observed ? observed.has(file) : null;
 }
 
 function componentMetrics(component: AnalysisContext["components"][number]) {

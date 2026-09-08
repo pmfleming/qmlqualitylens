@@ -1,15 +1,18 @@
 import fs from "node:fs";
 import path from "node:path";
 import { evidenceChecks, evidenceDefinitions, incompleteCheckReasons, qualityVerdict, type CheckRecord } from "../evidence-policy.js";
+import { artifactFreshness, changedRunInputs } from "../run-evidence.js";
 import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding } from "./foundation.js";
 import { baseArtifact, writeArtifact } from "./shared.js";
 
 export function measureQualityContract(config: Config, command: string, context: AnalysisContext) {
-  const artifacts = new Map(evidenceDefinitions(config).map((definition) => [definition.file, readArtifact(config, definition.file)]));
+  const inputChange = changedRunInputs(context);
+  const artifacts = new Map(evidenceDefinitions(config).map((definition) => [definition.file, readArtifact(context, definition.file, definition.task === "correctness.catalog" ? "correctness.test_evidence" : definition.task, inputChange)]));
   const imported = [...artifacts.values()].flatMap((value) => support.isRecord(value) && Array.isArray(value.findings) ? value.findings.filter(support.isFindingRecord) : []);
   const active = [...new Map([...context.findings, ...imported].filter((finding) => !finding.suppressed).map((finding) => [finding.fingerprint ?? finding.id, finding])).values()];
   const unresolved = context.resolution.unresolvedImports.length + context.resolution.unresolvedTypes.length;
   const checks: CheckRecord[] = [
+    { id: "static.inputs", name: "Analysis input snapshot", required: true, status: inputChange ? "incomplete" : "pass", findings: 0, ...(inputChange ? { reason: inputChange } : {}) },
     { id: "static.parser", name: "Internal QML parser", status: context.parserDiagnostics.length ? "warn" : "pass", findings: context.parserDiagnostics.length },
     { id: "static.resolution", name: "Project import/type resolution", status: unresolved ? "warn" : "pass", findings: unresolved },
     { id: "static.type_evidence", name: "QML type evidence", status: context.typeEvidence.status === "complete" ? "pass" : "incomplete", findings: context.typeEvidence.missing_sources.length },
@@ -33,11 +36,14 @@ export function measureQualityContract(config: Config, command: string, context:
   return artifact;
 }
 
-function readArtifact(config: Config, filename: string): unknown {
-  const file = path.join(config.outputDir, filename);
+function readArtifact(context: AnalysisContext, filename: string, task: string, inputChange: string | null): unknown {
+  const file = path.join(context.config.outputDir, filename);
   if (!fs.existsSync(file)) return undefined;
-  try { return support.parseJson(fs.readFileSync(file, "utf8")); }
-  catch { return null; }
+  try {
+    const artifact = support.parseJson(fs.readFileSync(file, "utf8"));
+    const reason = inputChange ?? artifactFreshness(context, artifact) ?? (support.isRecord(artifact) && artifact.task_id === task ? null : "Artifact task does not match the requested check.");
+    return reason ? { summary: { status: "incomplete", execution_status: "incomplete", reason }, findings: [] } : artifact;
+  } catch { return { summary: { status: "incomplete", execution_status: "incomplete", reason: `${filename} could not be parsed.` }, findings: [] }; }
 }
 
 function dimensionsFor(active: Finding[]) {

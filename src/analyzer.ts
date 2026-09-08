@@ -12,6 +12,8 @@ import type { QmlDocument, QmlExecutableNode } from "./qml-parser-types.js";
 import { buildProjectResolution, type ProjectResolution } from "./qml-resolution.js";
 import { evaluateQmlRules } from "./qml-rules.js";
 import { loadQmllintResult, qmllintDiagnostic, type QmllintResult } from "./qmllint.js";
+import { provenance } from "./provenance.js";
+import { createAnalysisRun, type AnalysisRun } from "./run-evidence.js";
 import { deduplicateToolFindings, enrichFindings } from "./rules.js";
 import { applySuppressions, staleSuppressionFindings } from "./suppressions.js";
 import { buildTypeEvidence, type TypeEvidence } from "./type-evidence.js";
@@ -34,6 +36,7 @@ import type {
 
 export type AnalysisContext = {
   config: Config;
+  run: AnalysisRun;
   sources: SourceFile[];
   qmlDocuments: Array<{ file: string; document: QmlDocument }>;
   resolution: ProjectResolution;
@@ -68,7 +71,8 @@ export function createAnalysisContext(config: Config): AnalysisContext {
   const qmllint = loadQmllintResult(config, sources.filter((source) => source.kind === "qml" || source.kind === "js").map((source) => source.relativePath));
   const qmllintFindings = qmllint.findings;
   const clones = detectClones(sources, config.thresholds.cloneWindow);
-  const baseContext: AnalysisContext = { config, sources, qmlDocuments, resolution, typeEvidence, ruleCoverage: [], files, components, functions, bindings, parserDiagnostics, qmllint, qmllintFindings, clones, findings: [], scores: emptyScores() };
+  const run = createAnalysisRun(config, sources, qmllint.version);
+  const baseContext: AnalysisContext = { config, run, sources, qmlDocuments, resolution, typeEvidence, ruleCoverage: [], files, components, functions, bindings, parserDiagnostics, qmllint, qmllintFindings, clones, findings: [], scores: emptyScores() };
   const evaluation = evaluateQmlRules(baseContext);
   const candidates = attachSemanticAnchors([
     ...inputFindings(config, sources),
@@ -97,6 +101,7 @@ export function legacyQualityArtifact(context: AnalysisContext): AnalysisArtifac
     task_id: "quality.qml",
     project: { name: config.projectName, root: config.projectRoot },
     generated_at: new Date().toISOString(),
+    provenance: provenance(config, "qmlqualitylens analyze", context.run),
     summary: {
       files: files.length,
       qmlFiles: files.filter((file) => file.kind === "qml").length,

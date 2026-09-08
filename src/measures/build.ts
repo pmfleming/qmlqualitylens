@@ -51,7 +51,7 @@ export function measureBuildEvidence(config: Config, command: string, context: A
   const findings = support.applySuppressions(support.enrichFindings(raw, config), config);
   const status = execution.enabled ? execution.status : cmakeProject ? "observed" : "not_applicable";
   const artifact = {
-    ...baseArtifact(context, "quality.build_evidence", command),
+    ...baseArtifact(context, "quality.build_evidence", command, { cmake: execution.version }),
     summary: {
       status,
       reason: execution.reason,

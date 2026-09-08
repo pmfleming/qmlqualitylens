@@ -29,12 +29,13 @@ export function measureParserOracle(config: Config, command: string, context: An
   const findings = support.applySuppressions(support.enrichFindings(evidence.flatMap((item) => item.findings), config), config);
   const unavailableTreeSitter = config.tools.parserOracleTreeSitter && !treeSitter;
   const failed = records.some((record) => record.qmldom?.status !== "pass" || record.tree_sitter?.status === "failed");
+  const version = support.toolVersion(config.tools.parserOracleQmldomCommand, config.projectRoot);
   const artifact = {
-    ...baseArtifact(context, "quality.parser_oracle", command),
+    ...baseArtifact(context, "quality.parser_oracle", command, { qmldom: version }),
     summary: {
       status: unavailableTreeSitter ? "incomplete" : failed ? "warn" : "pass",
       files: records.length,
-      qmldom_version: support.toolVersion(config.tools.parserOracleQmldomCommand, config.projectRoot),
+      qmldom_version: version,
       tree_sitter_enabled: config.tools.parserOracleTreeSitter,
       tree_sitter_available: Boolean(treeSitter),
       ...findingSummary(findings),

@@ -14,6 +14,7 @@ import { measureRuntimePerformance, measureRuntimeWarnings } from "./measures/ru
 import { findingSummary } from "./measures/shared.js";
 import { confidence, provenance } from "./provenance.js";
 import { isFindingRecord } from "./rules.js";
+import { artifactFreshness, changedRunInputs } from "./run-evidence.js";
 import type { Config, Finding } from "./types.js";
 import { errorMessage, isRecord, parseJson, writeJsonArtifact } from "./value-utils.js";
 import { ARTIFACT_SCHEMA_VERSION } from "./version.js";
@@ -78,13 +79,18 @@ type AuditArtifact = {
 
 export function runAudit(config: Config, command: string, options: AuditOptions): AuditArtifact {
   const context = createAnalysisContext(config);
-  const evidenceArtifacts = collectEvidence(config, command, context);
+  const evidenceArtifacts = collectEvidence(config, command, context).map((artifact) => {
+    const reason = artifactFreshness(context, artifact);
+    return reason ? { task_id: isRecord(artifact) ? artifact.task_id : undefined, summary: { status: "incomplete", execution_status: "incomplete", reason }, findings: [] } : artifact;
+  });
   const allFindings = collectFindings(context.findings, evidenceArtifacts);
   const diff = diffContext(config, options.base);
   const base = baseSnapshot(config, options.base);
   const findings = classifyAuditFindings(allFindings, readBaseline(options.baseline), diff, base);
   const gateFindings = gateCandidates(findings, options.base, config.policy.newCodeOnly);
   const incompleteChecks = requiredCheckFailures(config, context, evidenceArtifacts);
+  const inputChange = changedRunInputs(context);
+  if (inputChange) incompleteChecks.push(inputChange);
   if (options.base && (diff.status !== "available" || base.status !== "available")) {
     incompleteChecks.push(`Git base comparison is unavailable: ${diff.reason ?? base.reason ?? "comparison did not complete"}`);
   }
@@ -122,7 +128,7 @@ function buildAuditArtifact(config: Config, command: string, selectedBase: strin
     schema_version: ARTIFACT_SCHEMA_VERSION,
     task_id: "audit",
     project: { name: config.projectName, root: config.projectRoot },
-    provenance: provenance(config, command),
+    provenance: provenance(config, command, context.run),
     confidence: confidence(context),
     summary: {
       verdict: qualityVerdict(config, gateFindings, incompleteChecks.length),

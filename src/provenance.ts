@@ -2,9 +2,11 @@ import fs from "node:fs";
 import type { AnalysisContext } from "./analyzer.js";
 import type { Config, JsonValue } from "./types.js";
 import { LENS_VERSION } from "./version.js";
+import type { AnalysisRun } from "./run-evidence.js";
 
-export function provenance(config: Config, command: string): Record<string, JsonValue> {
+export function provenance(config: Config, command: string, run?: AnalysisRun): Record<string, JsonValue> {
   return {
+    ...run,
     generated_at: new Date().toISOString(),
     command,
     config_path: config.configPath,

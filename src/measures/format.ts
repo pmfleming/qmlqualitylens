@@ -14,7 +14,7 @@ export function measureFormat(config: Config, command: string, context: Analysis
   const findings = support.applySuppressions(support.enrichFindings(rawFindings, config), config);
   const errors = records.filter((record) => record.status === "error");
   const artifact = {
-    ...baseArtifact(context, "quality.format", command),
+    ...baseArtifact(context, "quality.format", command, { qmlformat: version }),
     summary: {
       status: errors.length ? "incomplete" : findings.length ? "warn" : "pass",
       tool,
