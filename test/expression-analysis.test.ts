@@ -41,6 +41,19 @@ test("assignment analysis supports destructuring locals and catch parameters", (
   }`), ["error.width"]);
 });
 
+test("nested member reads retain their root dependency without broadening assignment targets", () => {
+  const reads = analyzeAssignments("{ return controller.state.value + state.value.deep; }");
+  assert.equal(reads.reason, undefined);
+  assert.deepEqual(reads.references, [
+    { owner: "controller", property: "state" },
+    { owner: "state", property: "value" },
+  ]);
+  assert.deepEqual(analyzeAssignments("{ return controller.state.value; }", ["controller"]).references, []);
+  const write = analyzeAssignments("{ controller.state.value = 1; }");
+  assert.equal(write.reason, "dynamic_assignment_target");
+  assert.deepEqual(write.assignments, []);
+});
+
 test("dynamic writes are explicitly unsupported and fallback never guesses lexical scope", () => {
   assert.equal(analyzeAssignments("{ card[key] = 1 }").reason, "dynamic_assignment_target");
   assert.equal(analyzeAssignments("{ let width = 0; width = 1 }", [], false).reason, "javascript_parser_unavailable");

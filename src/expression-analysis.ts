@@ -134,7 +134,12 @@ function referenceTarget(node: Node): Omit<AssignmentTarget, "line"> | null {
   if (node.parent?.type === "member_expression") return null;
   if (node.parent?.type === "assignment_expression" && node.parent.childForFieldName("left")?.id === node.id) return null;
   if (node.type === "shorthand_property_identifier") return { owner: null, property: node.text };
-  return assignmentTarget(node);
+  // A read of controller.state.value still depends on controller.state.
+  // Keep assignment targets strict; only reads may collapse a member chain.
+  let base = node;
+  while (base.type === "member_expression" && base.childForFieldName("object")?.type === "member_expression")
+    base = base.childForFieldName("object")!;
+  return assignmentTarget(base);
 }
 
 function qtBindingCall(node: Node | null, scope: Scope): boolean {

@@ -465,21 +465,44 @@ function usedPublicApi(context: AnalysisContext): Map<string, Set<string>> {
 
 function internalApiUses(entry: AnalysisContext["qmlDocuments"][number]): Set<string> {
   const root = entry.document.root;
-  const rootPrefix = root?.idName ? `${root.idName}.` : "";
   const names = new Set<string>();
   if (!root) return names;
-  for (const property of root.properties) {
-    if (entry.document.bindings.some((binding) => binding.ownerObjectId !== root.objectId && expressionUsesName(binding.expression, property.name, rootPrefix))) names.add(property.name);
-  }
-  for (const signal of root.signals) {
-    if (entry.document.bindings.some((binding) => new RegExp(`\\b${escapeRegex(signal.name)}\\s*\\(`).test(binding.expression))) names.add(signal.name);
+  for (const object of entry.document.objects) {
+    if (object === root) {
+      for (const handler of object.handlers) {
+        const handled = apiNameForBinding(handler.name);
+        names.add(handled);
+        if (handled.endsWith("Changed")) names.add(handled.slice(0, -"Changed".length));
+      }
+    }
+    const expressions = [
+      ...object.bindings.filter((binding) => !isHandlerPath(binding.propertyPath)).map((binding) => ({ body: binding.expression, parameters: [] as string[] })),
+      ...[...object.functions, ...object.handlers].map((fn) => ({ body: fn.body, parameters: fn.parameters.map((parameter) => parameter.name) })),
+    ];
+    for (const expression of expressions) {
+      const analysis = analyzeAssignments(expression.body, expression.parameters);
+      for (const reference of [...(analysis.references ?? []), ...analysis.assignments]) {
+        if (reference.owner && reference.owner === root.idName) names.add(reference.property);
+        else if (reference.owner === "this" && object === root) names.add(reference.property);
+        else {
+          const name = reference.owner ?? reference.property;
+          if (apiOwner(entry, object, name) === root) names.add(name);
+        }
+      }
+    }
   }
   return names;
 }
 
-function expressionUsesName(expression: string, name: string, rootPrefix: string): boolean {
-  const escaped = escapeRegex(name);
-  return rootPrefix ? new RegExp(`\\b${escapeRegex(rootPrefix)}${escaped}\\b`).test(expression) : false;
+function apiOwner(entry: DocumentEntry, object: CycleObject, name: string): CycleObject | undefined {
+  if (entry.document.objects.some((candidate) => candidate.idName === name)) return undefined;
+  let scope: CycleObject | undefined = object;
+  while (scope) {
+    if ([...scope.properties, ...scope.signals, ...scope.functions].some((member) => member.name === name)) return scope;
+    const parentId: number | null = scope.parentObjectId;
+    scope = entry.document.objects.find((candidate) => candidate.objectId === parentId);
+  }
+  return undefined;
 }
 
 function resolvedTargetForObject(context: AnalysisContext, from: string, typeName: string, line: number): string | null {

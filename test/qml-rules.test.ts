@@ -36,6 +36,46 @@ test("semantic rules catch binding, layout, public API, connection, and performa
   assert.ok(kinds.has("qml.performance.image_without_source_size"));
 });
 
+test("public API cleanup recognizes root bindings, methods, signals and nested member reads", () => {
+  const context = fixtureContext({
+    "qmldir": "module Demo\nWidget 1.0 Widget.qml\n",
+    "Widget.qml": `import QtQuick
+Item {
+  id: controller
+  property int count: 1
+  property int derived: count + 1
+  property var state: ({})
+  property int qualified: 1
+  property int watched: 0
+  property int unused: 0
+  property int shadowed: 0
+  property int childOnly: 0
+  signal finished()
+  signal unusedSignal()
+  width: derived
+  onWatchedChanged: finished()
+  function update() { count++; return state.nested.value + controller.qualified; }
+  function local(shadowed) { return shadowed; }
+  function comments() { /* controller.unused; unusedSignal() */ return "controller.unused"; }
+  Item { property int childOnly: 1; width: childOnly }
+}
+`,
+    "Main.qml": `import QtQuick\nimport "."\nWidget {}\n`,
+  });
+  const unused = context.findings.filter((finding) => finding.kind.startsWith("cleanup.unused_public_"));
+  assert.deepEqual(unused.map((finding) => finding.id.split(".").at(-1)).sort(),
+    ["childOnly", "shadowed", "unused", "unusedSignal"]);
+});
+
+test("public API cleanup recognizes unqualified outer-scope reads without requiring an id", () => {
+  const context = fixtureContext({
+    "qmldir": "module Demo\nWidget 1.0 Widget.qml\n",
+    "Widget.qml": `import QtQuick\nItem { property int count: 1; Text { text: String(count) } }\n`,
+    "Main.qml": `import QtQuick\nimport "."\nWidget {}\n`,
+  });
+  assert.ok(!context.findings.some((finding) => finding.kind === "cleanup.unused_public_property"));
+});
+
 test("binding-cycle rule detects same-object and multi-binding cycles", () => {
   const context = fixtureContext({
     "Main.qml": `import QtQuick\nItem {\n  property int first: second\n  property int second: third\n  property int third: first\n}\n`,
