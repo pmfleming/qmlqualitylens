@@ -134,6 +134,9 @@ type CycleObject = AnalysisContext["qmlDocuments"][number]["document"]["objects"
 
 function bindingTargets(binding: CycleBinding, objectById: Map<number, CycleObject>, references: Array<{ owner: string | null; property: string }>): Set<string> {
   return new Set(references.flatMap((reference) => {
+    // QML ids are object references, including when an injected property's name
+    // matches an outer id (for example, controller: controller).
+    if (!reference.owner && [...objectById.values()].some((object) => object.idName === reference.property)) return [];
     const target = !reference.owner || reference.owner === "this" ? objectById.get(binding.ownerObjectId) : [...objectById.values()].find((object) => object.idName === reference.owner);
     return target?.bindings.some((candidate) => candidate.propertyPath === reference.property && !isHandlerPath(candidate.propertyPath)) ? [bindingNodeKey(target.objectId, reference.property)] : [];
   }));
@@ -146,6 +149,8 @@ function bindingCycleFinding(file: string, nodes: string[], lineByNode: Map<stri
 }
 
 function isDynamicBinding(expression: string): boolean {
+  const analysis = analyzeAssignments(expression);
+  if (!analysis.reason && analysis.references?.length === 0 && analysis.assignments.length === 0) return false;
   const value = expression.trim().replace(/;$/, "");
   if (/^(?:true|false|null|undefined|[+-]?(?:\d+(?:\.\d*)?|\.\d+)|["'](?:[^"'\\]|\\.)*["']|[A-Z]\w*(?:\.[A-Za-z_]\w*)+)$/.test(value)) return false;
   return true;

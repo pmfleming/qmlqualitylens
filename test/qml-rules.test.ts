@@ -102,6 +102,38 @@ Item {
   assert.equal(context.ruleCoverage.find((rule) => rule.rule === "qml.connection_signal_mismatch")?.evaluated, 1);
 });
 
+test("Shelllist-style object injection and literal mutable state do not imply binding failures", () => {
+  const context = fixtureContext({ "Main.qml": `import QtQuick
+Item {
+  id: controller
+  property var devices: []
+  property var profile: ({})
+  property var constants: [1, "ready", { value: true }]
+  function update() {
+    devices = [];
+    profile = ({});
+    constants = [];
+  }
+  Item { property var controller: controller }
+  FontMetrics {}
+  TextMetrics {}
+}
+` });
+  assert.deepEqual(context.parserDiagnostics, []);
+  assert.ok(!context.findings.some((finding) => ["qml.binding_loss", "qml.binding_cycle", "resolution.unknown_type"].includes(finding.kind)));
+});
+
+test("literal collections with reactive members still have bindings to lose", () => {
+  const context = fixtureContext({ "Main.qml": `import QtQuick
+Item {
+  property int count: 1
+  property var values: [count]
+  function reset() { values = [] }
+}
+` });
+  assert.equal(context.findings.filter((finding) => finding.kind === "qml.binding_loss").length, 1);
+});
+
 test("binding-cycle rule does not treat parent alias plus child read as a cycle", () => {
   const context = fixtureContext({
     "Main.qml": `import QtQuick\nItem {\n  id: root\n  property alias text: label.text\n  visible: true\n  Text {\n    id: label\n    text: root.visible ? \"yes\" : \"no\"\n  }\n}\n`,

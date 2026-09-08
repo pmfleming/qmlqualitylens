@@ -61,14 +61,14 @@ const EXTERNAL_MODULE_PREFIXES = ["Qt", "QtQuick", "Quickshell", "QML", "org.kde
 const BUILTIN_TYPES = new Set(`
   AbstractButton Action AnchorAnimation ApplicationWindow Behavior Binding BorderImage BusyIndicator Button ButtonGroup Canvas
   CheckBox CheckDelegate ColorAnimation Column ColumnLayout ComboBox Component Connections Control DelayButton Dialog
-  DialogButtonBox DragHandler Drawer Flickable Flow FocusScope Grid Gradient GradientStop GridLayout GroupBox HandlerPoint
+  DialogButtonBox DragHandler Drawer Flickable Flow FocusScope FontMetrics Grid Gradient GradientStop GridLayout GroupBox HandlerPoint
   HoverHandler Image Instantiator Item Label Layout ListElement ListModel ListView Loader Menu MenuBar MenuItem MouseArea
   MultiEffect NumberAnimation Page PageIndicator Pane ParallelAnimation ParentAnimation ParentChange PauseAnimation PinchHandler
   PointHandler Popup Process ProgressBar PropertyAction PropertyAnimation QtObject RadioButton RangeSlider Rectangle Repeater
   RotationAnimation RoundButton Row RowLayout ScrollBar ScrollIndicator ScrollView SequentialAnimation ShaderEffect
   ShaderEffectSource ShellCommand ShellRoot Slider SpinBox SplitParser SplitView StackView State StateChangeScript StateGroup
   StdioCollector SwipeDelegate SwipeView Switch SwitchDelegate SystemPalette TabBar TabButton TapHandler Text TextArea TextEdit
-  TextField TextInput Timer ToolBar ToolButton ToolSeparator ToolTip Transition Tumbler Window WlrLayershell FloatingWindow
+  TextField TextInput TextMetrics Timer ToolBar ToolButton ToolSeparator ToolTip Transition Tumbler Window WlrLayershell FloatingWindow
   PopupWindow HyprlandFocusGrab WheelHandler
 `.trim().split(/\s+/));
 
