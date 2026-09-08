@@ -1,15 +1,19 @@
 import fs from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding } from "./foundation.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 
-type CoverageFile = { file: string; lines: Map<number, number>; line_rate: number | null };
+type ObservedSites = { objects: number[]; bindings: number[]; executables: number[] };
+type CoverageFile = { file: string; lines: Map<number, number>; line_rate: number | null; observations?: ObservedSites };
 
 export function measureCoverageEvidence(config: Config, command: string, context: AnalysisContext) {
   const report = config.reports.coverage;
   if (!report) return writeCoverage(config, { ...baseArtifact(context, "testing.coverage", command), summary: { status: "not_configured", reason: null }, files: [], unobserved_qml_files: [], findings: [] });
   if (!fs.existsSync(report)) return writeCoverage(config, { ...baseArtifact(context, "testing.coverage", command), summary: { status: "missing", reason: "Configured coverage report does not exist.", report }, files: [], unobserved_qml_files: [], findings: [] });
-  const parsed = parseCobertura(fs.readFileSync(report, "utf8"), context, config);
+  const text = fs.readFileSync(report, "utf8");
+  const profiler = text.trimStart().startsWith("{");
+  const parsed = profiler ? parseProfilerObservations(text, context) : parseCobertura(text, context, config);
   if (!parsed.files.length) return writeCoverage(config, { ...baseArtifact(context, "testing.coverage", command), summary: { status: "incomplete", reason: parsed.reason ?? "No mapped Cobertura classes/lines were found.", report }, files: [], unobserved_qml_files: context.qmlDocuments.map((entry) => entry.file), findings: [] });
 
   const observedFiles = new Set(parsed.files.filter((file) => [...file.lines.values()].some((hits) => hits > 0)).map((file) => file.file));
@@ -24,14 +28,15 @@ export function measureCoverageEvidence(config: Config, command: string, context
     summary: {
       status: parsed.reason ? "incomplete" : "complete",
       reason: parsed.reason,
-      format: "cobertura",
+      format: profiler ? "qml-profiler-observations" : "cobertura",
+      ...(profiler ? { limitations: "Executed source sites only; not statement, branch, or exhaustive binding coverage. Compiling a file does not count as executing it." } : {}),
       report,
       report_files: parsed.reportFiles,
       mapped_files: parsed.files.length,
       mapped_qml_files: mappedQml,
       qml_files: qmlFiles,
       scope: mappedQml === qmlFiles ? "full" : "partial",
-      observed_qml_files: observedFiles.size,
+      observed_qml_files: context.qmlDocuments.filter((entry) => observedFiles.has(entry.file)).length,
       ...findingSummary(findings),
     },
     files: records,
@@ -51,11 +56,14 @@ function coverageRecord(coverage: CoverageFile, context: AnalysisContext) {
     file: coverage.file,
     kind: "qml",
     line_rate: coverage.line_rate,
+    observation_only: Boolean(coverage.observations),
     tracked_lines: coverage.lines.size,
     covered_lines: [...coverage.lines.values()].filter((hits) => hits > 0).length,
-    declarative_objects: { total: objects.length, observed: objects.filter((object) => covered(object.line)).length },
-    bindings: { total: bindings.length, observed: bindings.filter((binding) => covered(binding.line)).length },
-    executable_blocks: { total: executables.length, observed: executables.filter((node) => [...coverage.lines].some(([line, hits]) => hits > 0 && line >= node.line && line <= lineAtOffset(context, coverage.file, node.endOffset))).length },
+    declarative_objects: { total: objects.length, observed: objects.filter((object) => coverage.observations ? coverage.observations.objects.includes(object.line) : covered(object.line)).length },
+    bindings: { total: bindings.length, observed: bindings.filter((binding) => coverage.observations ? coverage.observations.bindings.includes(binding.line) : covered(binding.line)).length },
+    executable_blocks: { total: executables.length, observed: executables.filter((node) => coverage.observations
+      ? coverage.observations.executables.some((line) => line >= node.line && line <= lineAtOffset(context, coverage.file, node.endOffset))
+      : [...coverage.lines].some(([line, hits]) => hits > 0 && line >= node.line && line <= lineAtOffset(context, coverage.file, node.endOffset))).length },
   };
 }
 
@@ -68,6 +76,27 @@ function highRiskUnobserved(component: AnalysisContext["components"][number], ob
   const risk = support.componentRiskScore(component);
   if (risk < 120 || observed.has(component.file)) return [];
   return [{ id: `coverage.unobserved_high_risk.${component.file}`, kind: "coverage.unobserved_high_risk", severity: "medium", file: component.file, line: component.line, message: `High-risk component ${component.name} was not observed in the imported coverage scenarios`, metric: risk, actions: ["Add a representative QML test or runtime scenario, or document why this component is outside the report scope."] }];
+}
+
+function parseProfilerObservations(text: string, context: AnalysisContext): { files: CoverageFile[]; reportFiles: number; reason: string | null } {
+  let value;
+  try { value = support.parseJson(text); }
+  catch { return { files: [], reportFiles: 0, reason: "Malformed profiler observation JSON." }; }
+  if (!support.isJsonRecord(value) || value.format !== "qml-profiler-observations" || !Array.isArray(value.files)
+      || !support.isJsonRecord(value.environment) || !value.environment.qt || !value.environment.platform)
+    return { files: [], reportFiles: 0, reason: "Invalid profiler observation report or missing Qt/platform provenance." };
+  const files: CoverageFile[] = [];
+  let rejected = 0;
+  for (const entry of value.files) {
+    if (!support.isJsonRecord(entry)) { rejected++; continue; }
+    const source = context.sources.find((source) => source.relativePath === entry.file);
+    if (!source || createHash("sha256").update(source.text).digest("hex") !== entry.sha256) { rejected++; continue; }
+    const sites = (key: string): number[] => Array.isArray(entry[key]) ? entry[key].filter((line): line is number => typeof line === "number" && Number.isInteger(line) && line > 0) : [];
+    const observations = { objects: sites("objects"), bindings: sites("bindings"), executables: sites("executables") };
+    const lines = new Map(Object.values(observations).flat().map((line) => [line, 1]));
+    if (lines.size) files.push({ file: source.relativePath, lines, line_rate: null, observations });
+  }
+  return { files, reportFiles: value.files.length, reason: rejected ? `${rejected} profiler file(s) are stale, invalid, or unmapped.` : null };
 }
 
 function parseCobertura(xml: string, context: AnalysisContext, config: Config): { files: CoverageFile[]; reportFiles: number; reason: string | null } {

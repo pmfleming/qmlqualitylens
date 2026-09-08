@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding, type MeasureJsonValue as JsonValue, type MeasureToolExecution as ToolExecution } from "./foundation.js";
@@ -36,11 +37,12 @@ export function measureRuntimePerformance(config: Config, command: string, conte
   if (!report || !fs.existsSync(report)) return writeEmptyPerformanceArtifact(config, command, context, report, execution);
   const normalized = normalizePerformanceReport(readJsonReport(report));
   const budgetReason = performanceBudgetCoverageReason(normalized.scenarios, config);
-  const complete = normalized.complete && !budgetReason;
+  const sourceReason = performanceSourceReason(normalized.scenarios, context);
+  const complete = normalized.complete && !budgetReason && !sourceReason;
   const findings = support.applySuppressions(support.enrichFindings(performanceBudgetFindings(normalized.scenarios, config), config), config);
   const artifact = {
     ...baseArtifact(context, "performance.runtime", command),
-    summary: { status: performanceReportStatus(complete, execution), report, reason: [producerFailureReason(execution), normalized.reason, budgetReason].filter(Boolean).join("; ") || null, scenarios: normalized.scenarios.length, ...findingSummary(findings) },
+    summary: { status: performanceReportStatus(complete, execution), report, reason: [producerFailureReason(execution), normalized.reason, budgetReason, sourceReason].filter(Boolean).join("; ") || null, scenarios: normalized.scenarios.length, ...findingSummary(findings) },
     execution: execution ? support.publicToolExecution(execution) : null,
     scenarios: normalized.scenarios,
     findings,
@@ -166,14 +168,18 @@ function frameDurations(frames: JsonValue | undefined, traceEvents: JsonValue[])
 }
 
 function eventSummaries(input: JsonValue[]): RuntimeScenario["events"] {
-  const events = new Map<string, number[]>();
+  const events = new Map<string, { count: number; total_ms: number; max_ms: number }>();
   for (const event of input) {
     const category = eventCategory(event);
     const duration = durationMs(event);
     if (!category || duration === null || !Number.isFinite(duration) || duration < 0) continue;
-    events.set(category, [...(events.get(category) ?? []), duration]);
+    const summary = events.get(category) ?? { count: 0, total_ms: 0, max_ms: 0 };
+    summary.count++;
+    summary.total_ms += duration;
+    summary.max_ms = Math.max(summary.max_ms, duration);
+    events.set(category, summary);
   }
-  return Object.fromEntries([...events].map(([category, durations]) => [category, { count: durations.length, total_ms: round(durations.reduce((sum, duration) => sum + duration, 0)), max_ms: round(Math.max(...durations)) }]));
+  return Object.fromEntries([...events].map(([category, summary]) => [category, { ...summary, total_ms: round(summary.total_ms), max_ms: round(summary.max_ms) }]));
 }
 
 function eventHotspots(input: JsonValue[]): RuntimeScenario["hotspots"] {
@@ -205,6 +211,18 @@ function durationMs(value: JsonValue): number | null {
   if (!support.isJsonRecord(value)) return null;
   if (typeof value.duration_ms === "number") return value.duration_ms;
   return typeof value.dur === "number" ? value.dur / 1000 : null;
+}
+
+function performanceSourceReason(scenarios: RuntimeScenario[], context: AnalysisContext): string | null {
+  for (const scenario of scenarios) {
+    const hashes = scenario.environment.source_sha256;
+    if (hashes === undefined) continue;
+    if (!support.isJsonRecord(hashes)) return "Invalid profiler source manifest.";
+    const stale = context.sources.filter((source) => ["qml", "js"].includes(source.kind))
+      .some((source) => hashes[source.relativePath] !== createHash("sha256").update(source.text).digest("hex"));
+    if (stale) return "Profiler source manifest is stale or does not cover current sources.";
+  }
+  return null;
 }
 
 function performanceBudgetCoverageReason(scenarios: RuntimeScenario[], config: Config): string | null {

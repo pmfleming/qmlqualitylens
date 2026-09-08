@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { measureRuntimePerformance } from "../src/measures/runtime.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -61,6 +63,38 @@ test("v0.5 imports Cobertura QML observations without conflating object and bind
   assert.equal(artifact.files[0]?.covered_lines, 2);
   assert.equal(artifact.files[0]?.declarative_objects.observed, 1);
   assert.equal(artifact.files[0]?.bindings.observed, 1);
+});
+
+test("native profiler observations stay category-specific and reject stale source hashes", () => {
+  const source = "import QtQuick\nItem {\n property int answer: 42\n function work(): int { return answer }\n}\n";
+  const { root, config, context } = fixture({ "Main.qml": source }, { reports: { coverage: "coverage.json" } });
+  const value = { format: "qml-profiler-observations", environment: { qt: "6.11.1", platform: "offscreen" },
+    files: [{ file: "Main.qml", sha256: createHash("sha256").update(source).digest("hex"), objects: [], bindings: [3], executables: [4] }] };
+  fs.writeFileSync(path.join(root, "coverage.json"), JSON.stringify(value));
+  const result = measureCoverageEvidence(config, "test", context) as { summary: { status: string }; files: Array<{ line_rate: null; declarative_objects: { observed: number }; bindings: { observed: number }; executable_blocks: { observed: number } }> };
+  assert.equal(result.summary.status, "complete");
+  assert.equal(result.files[0]?.line_rate, null);
+  assert.equal(result.files[0]?.declarative_objects.observed, 0);
+  assert.equal(result.files[0]?.bindings.observed, 1);
+  assert.equal(result.files[0]?.executable_blocks.observed, 1);
+  value.files[0]!.sha256 = "stale";
+  fs.writeFileSync(path.join(root, "coverage.json"), JSON.stringify(value));
+  const stale = measureCoverageEvidence(config, "test", context) as { summary: { status: string } };
+  assert.equal(stale.summary.status, "incomplete");
+  fs.writeFileSync(path.join(root, "coverage.json"), "{broken");
+  assert.doesNotThrow(() => measureCoverageEvidence(config, "test", context));
+});
+
+test("runtime event aggregation handles traces larger than JavaScript argument limits", () => {
+  const { root, config, context } = fixture({ "Main.qml": "import QtQuick\nItem {}\n" }, { reports: { qml_profiler: "trace.json" } });
+  fs.writeFileSync(path.join(root, "trace.json"), JSON.stringify({ scenario: "large", environment: { qt: "6.11.1", platform: "offscreen" },
+    events: Array.from({ length: 150000 }, () => ({ category: "Binding", duration_ms: 0.25 })) }));
+  const result = measureRuntimePerformance(config, "test", context) as { scenarios: Array<{ events: Record<string, { count: number; max_ms: number; total_ms: number }> }> };
+  assert.deepEqual(result.scenarios[0]?.events.Binding, { count: 150000, max_ms: 0.25, total_ms: 37500 });
+  fs.writeFileSync(path.join(root, "trace.json"), JSON.stringify({ scenario: "stale", environment: { qt: "6.11.1", platform: "offscreen", source_sha256: { "Main.qml": "stale" } }, events: [{ category: "Binding", duration_ms: 1 }] }));
+  const stale = measureRuntimePerformance(config, "test", context) as { summary: { status: string; reason: string } };
+  assert.equal(stale.summary.status, "incomplete");
+  assert.match(stale.summary.reason, /stale/);
 });
 
 test("v0.5 compares qmlbench baselines with environment and noise provenance", () => {
