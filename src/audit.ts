@@ -4,6 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { createAnalysisContext } from "./analyzer.js";
 import { evidenceChecks, incompleteCheckReasons, qualityVerdict } from "./evidence-policy.js";
+import { attachSourceExcerpts } from "./finding-identity.js";
+import { findingMarkdown, sortedActiveFindings } from "./report.js";
 import { measureBenchmarkPerformance } from "./measures/benchmark.js";
 import { measureBuildEvidence } from "./measures/build.js";
 import { measureCorrectnessCatalog } from "./measures/correctness.js";
@@ -83,7 +85,7 @@ export function runAudit(config: Config, command: string, options: AuditOptions)
     const reason = artifactFreshness(context, artifact);
     return reason ? { task_id: isRecord(artifact) ? artifact.task_id : undefined, summary: { status: "incomplete", execution_status: "incomplete", reason }, findings: [] } : artifact;
   });
-  const allFindings = collectFindings(context.findings, evidenceArtifacts);
+  const allFindings = attachSourceExcerpts(collectFindings(context.findings, evidenceArtifacts), context.sources);
   const diff = diffContext(config, options.base);
   const base = baseSnapshot(config, options.base);
   const findings = classifyAuditFindings(allFindings, readBaseline(options.baseline), diff, base);
@@ -169,9 +171,10 @@ export function auditMarkdown(artifact: AuditArtifact): string {
     artifact.summary.base ? "## Top introduced findings" : "## Top active findings",
     "",
   ].filter((line): line is string => line !== null);
-  const topFindings = artifact.findings.filter((item) => !item.suppressed && (!artifact.summary.base || item.introduced));
-  for (const finding of topFindings.slice(0, 20)) {
-    lines.push(`- **${finding.severity}** ${finding.file ?? "project"}${finding.line ? `:${finding.line}` : ""} ${finding.kind}: ${finding.message}`);
+  const topFindings = sortedActiveFindings(artifact.findings.filter((item) => !artifact.summary.base || item.introduced));
+  for (const finding of topFindings.slice(0, 20)) lines.push(findingMarkdown(finding));
+  if (artifact.summary.incomplete_checks.length) {
+    lines.push("", "## Incomplete checks", "", ...artifact.summary.incomplete_checks.map((reason) => `- ${reason}`));
   }
   return `${lines.join("\n")}\n`;
 }

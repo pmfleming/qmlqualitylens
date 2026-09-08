@@ -3,7 +3,7 @@ import path from "node:path";
 import { detectClones } from "./clone-detector.js";
 import { cleanupFindings } from "./measures/cleanup.js";
 import { discoverSourceFiles } from "./file-walk.js";
-import { attachSemanticAnchors } from "./finding-identity.js";
+import { attachSemanticAnchors, attachSourceExcerpts } from "./finding-identity.js";
 import { boundedScore, complexityForCode, countMatches, lineNumberAt, locFor, stripComments, stripCommentsAndStrings } from "./metrics.js";
 import { isProcessBoundaryFile } from "./config.js";
 import { matchesAnyConfiguredTypeName } from "./qml-model.js";
@@ -82,7 +82,7 @@ export function createAnalysisContext(config: Config): AnalysisContext {
     ...qmllintFindings.map(qmllintDiagnostic),
   ], qmlDocuments);
   const rawFindings = deduplicateToolFindings(enrichFindings(candidates, config));
-  const findings = [...applySuppressions(rawFindings, config), ...enrichFindings(staleSuppressionFindings(rawFindings, config), config)];
+  const findings = attachSourceExcerpts([...applySuppressions(rawFindings, config), ...enrichFindings(staleSuppressionFindings(rawFindings, config), config)], sources);
   const scores = scoreProject(config, files, components, functions, clones, findings);
   return { ...baseContext, ruleCoverage: evaluation.coverage, findings, scores };
 }
@@ -102,6 +102,7 @@ export function legacyQualityArtifact(context: AnalysisContext): AnalysisArtifac
     project: { name: config.projectName, root: config.projectRoot },
     generated_at: new Date().toISOString(),
     provenance: provenance(config, "qmlqualitylens analyze", context.run),
+    rule_coverage: context.ruleCoverage,
     summary: {
       files: files.length,
       qmlFiles: files.filter((file) => file.kind === "qml").length,

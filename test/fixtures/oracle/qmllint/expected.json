@@ -4,6 +4,7 @@
     { "kind": "resolution.unresolved_import", "file": "UnresolvedImport.qml" },
     { "kind": "qml.layout_conflict.anchors_with_layout", "file": "LayoutConflict.qml" },
     { "kind": "qml.binding_cycle", "file": "BindingCycle.qml" },
+    { "kind": "qml.binding_cycle", "file": "SelfBinding.qml" },
     { "kind": "qml.connection_signal_mismatch", "file": "BadConnection.qml" },
     { "kind": "qml.binding_loss", "file": "BindingLoss.qml" }
   ],
@@ -14,7 +15,10 @@
     { "kind": "qml.binding_cycle", "file": "Good.qml" },
     { "kind": "qml.connection_signal_mismatch", "file": "Good.qml" },
     { "kind": "qml.binding_loss", "file": "Good.qml" },
-    { "kind": "qml.binding_loss", "file": "QtBindingRebind.qml" }
+    { "kind": "qml.binding_loss", "file": "QtBindingRebind.qml" },
+    { "kind": "qml.binding_loss", "file": "ScopedAssignments.qml" },
+    { "kind": "qml.binding_cycle", "file": "LocalBinding.qml" },
+    { "kind": "qml.connection_signal_mismatch", "file": "InlineSignals.qml" }
   ],
   "qmllint_categories": [
     {

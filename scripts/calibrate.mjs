@@ -15,6 +15,7 @@ fs.mkdirSync(workspace, { recursive: true });
 fs.mkdirSync(output, { recursive: true });
 
 run("npm", ["run", "build"], repositoryRoot);
+const { scoreLabeledFindings } = await import("../dist/src/calibration.js");
 const results = [];
 for (const project of manifest.projects.filter((candidate) => !selectedProject || candidate.name === selectedProject)) {
   const checkout = path.join(workspace, project.name);
@@ -41,7 +42,10 @@ for (const project of manifest.projects.filter((candidate) => !selectedProject |
   const cli = path.join(repositoryRoot, "dist/bin/qmlqualitylens.js");
   run(process.execPath, [cli, "measure", "all", "--config", configPath], repositoryRoot);
   const contract = JSON.parse(fs.readFileSync(path.join(output, project.name, "quality_contract.json"), "utf8"));
-  results.push({ name: project.name, revision: project.revision, profile: project.profile, summary: contract.summary, dimensions: contract.dimensions });
+  const labels = project.labels ? JSON.parse(fs.readFileSync(path.resolve(path.dirname(manifestPath), project.labels), "utf8")) : null;
+  const calibration = labels ? scoreLabeledFindings(labels, contract.findings) : null;
+  results.push({ name: project.name, revision: project.revision, profile: project.profile, summary: contract.summary, dimensions: contract.dimensions, calibration });
+  if (calibration?.missing.length || calibration?.unexpected.length) process.exitCode = 1;
 }
 const resultPath = path.join(output, "summary.json");
 fs.writeFileSync(resultPath, `${JSON.stringify({ schema_version: manifest.schema_version, generated_at: new Date().toISOString(), projects: results }, null, 2)}\n`);

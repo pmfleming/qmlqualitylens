@@ -4,21 +4,13 @@ import path from "node:path";
 import { createAnalysisContext } from "../src/analyzer.js";
 import { loadConfig } from "../src/config.js";
 import { parseQmllintOutput } from "../src/qmllint.js";
-import type { Config, Finding, QmllintFinding } from "../src/types.js";
+import type { Config, QmllintFinding } from "../src/types.js";
+import { scoreLabeledFindings as scoreBenchmark } from "../src/calibration.js";
 
 type Label = { kind: string; file: string };
 type Category = { name: string; patterns: string[] };
 type QmllintLabel = { category: string; file: string; min_qt?: string };
 type Expected = { positives: Label[]; negatives: Label[]; qmllint_categories: Category[]; qmllint_expected?: QmllintLabel[] };
-type RuleScore = { kind: string; true_positives: number; false_positives: number; false_negatives: number; precision: number; recall: number };
-
-type BenchmarkResult = {
-  labels: { positives: number; negatives: number };
-  scores: RuleScore[];
-  missing: Label[];
-  unexpected: Label[];
-};
-
 type QmllintOracleResult = {
   command: string;
   exit_code: number | null;
@@ -145,31 +137,6 @@ function splitPathEnv(value: string | undefined): string[] {
   return value ? value.split(path.delimiter).filter(Boolean) : [];
 }
 
-function scoreBenchmark(expected: Expected, findings: Finding[]): BenchmarkResult {
-  const actual = new Set(findings.filter((finding) => finding.file).map((finding) => key({ kind: finding.kind, file: finding.file ?? "" })));
-  const missing = expected.positives.filter((label) => !actual.has(key(label)));
-  const unexpected = expected.negatives.filter((label) => actual.has(key(label)));
-  const kinds = unique([...expected.positives, ...expected.negatives].map((label) => label.kind));
-  const scores = kinds.map((kind) => scoreRule(kind, expected, actual));
-  return { labels: { positives: expected.positives.length, negatives: expected.negatives.length }, scores, missing, unexpected };
-}
-
-function scoreRule(kind: string, expected: Expected, actual: Set<string>): RuleScore {
-  const positives = expected.positives.filter((label) => label.kind === kind);
-  const negatives = expected.negatives.filter((label) => label.kind === kind);
-  const truePositives = positives.filter((label) => actual.has(key(label))).length;
-  const falseNegatives = positives.length - truePositives;
-  const falsePositives = negatives.filter((label) => actual.has(key(label))).length;
-  return {
-    kind,
-    true_positives: truePositives,
-    false_positives: falsePositives,
-    false_negatives: falseNegatives,
-    precision: ratio(truePositives, truePositives + falsePositives),
-    recall: ratio(truePositives, truePositives + falseNegatives),
-  };
-}
-
 function categorizeDiagnostics(findings: QmllintFinding[], categories: Category[]): Array<{ name: string; diagnostics: number; files: string[] }> {
   return categories.map((category) => {
     const regexes = category.patterns.map((pattern) => new RegExp(pattern, "i"));
@@ -180,14 +147,6 @@ function categorizeDiagnostics(findings: QmllintFinding[], categories: Category[
 
 function categoryHasFile(categories: QmllintOracleResult["categories"], label: QmllintLabel): boolean {
   return categories.some((category) => category.name === label.category && category.files.includes(label.file));
-}
-
-function key(label: Label): string {
-  return `${label.kind}\u0000${label.file}`;
-}
-
-function ratio(numerator: number, denominator: number): number {
-  return denominator === 0 ? 1 : Number((numerator / denominator).toFixed(3));
 }
 
 function unique<T>(items: T[]): T[] {

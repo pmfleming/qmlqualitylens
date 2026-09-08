@@ -1,5 +1,15 @@
 import type { QmlDocument, QmlObjectNode } from "./qml-parser-types.js";
-import type { Finding } from "./types.js";
+import type { Finding, SourceFile } from "./types.js";
+
+export function attachSourceExcerpts(findings: Finding[], sources: SourceFile[]): Finding[] {
+  const byFile = new Map(sources.map((source) => [source.relativePath, source]));
+  return findings.map((finding) => {
+    const source = finding.file ? byFile.get(finding.file) : undefined;
+    if (!source || !finding.line || !Number.isInteger(finding.line) || finding.line < 1 || finding.line > source.lines.length) return finding;
+    const start = Math.max(0, finding.line - 2);
+    return { ...finding, source_excerpt: { start_line: start + 1, lines: source.lines.slice(start, finding.line + 1).map((line) => line.length > 300 ? `${line.slice(0, 300)}…` : line) } };
+  });
+}
 
 export function attachSemanticAnchors(findings: Finding[], documents: Array<{ file: string; document: QmlDocument }>): Finding[] {
   const byFile = new Map(documents.map((entry) => [entry.file, entry.document]));

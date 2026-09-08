@@ -11,6 +11,7 @@ export function summaryReport(artifact: AnalysisArtifact): string {
     `Bindings: ${artifact.summary.bindings}`,
     `Clone groups: ${artifact.summary.cloneGroups}`,
     `Parser diagnostics: ${artifact.summary.parserDiagnostics}`,
+    `Skipped rule evaluations: ${skippedEvaluations(artifact)}`,
     `Findings: ${artifact.summary.findings}`,
     "",
     "Heuristic dimensions (not compliance gates):",
@@ -19,7 +20,10 @@ export function summaryReport(artifact: AnalysisArtifact): string {
   const top = sortedActiveFindings(artifact.findings).slice(0, 8);
   if (top.length) {
     lines.push("", "Top findings:");
-    for (const finding of top) lines.push(`  [${finding.severity}] ${location(finding)} ${finding.message}`);
+    for (const finding of top) {
+      lines.push(`  [${finding.enforcement ?? "review"}; ${finding.evidence ?? "heuristic"}; ${finding.confidence ?? "low"} confidence] ${location(finding)} ${finding.message}`);
+      if (finding.actions[0]) lines.push(`    Next: ${finding.actions[0]}`);
+    }
   }
   return `${lines.join("\n")}\n`;
 }
@@ -43,6 +47,7 @@ export function markdownReport(artifact: AnalysisArtifact): string {
     `| Bindings | ${artifact.summary.bindings} |`,
     `| Clone groups | ${artifact.summary.cloneGroups} |`,
     `| Parser diagnostics | ${artifact.summary.parserDiagnostics} |`,
+    `| Skipped rule evaluations | ${skippedEvaluations(artifact)} |`,
     `| Findings | ${artifact.summary.findings} |`,
     "",
     "## Heuristic dimensions (not compliance gates)",
@@ -70,18 +75,32 @@ export function markdownReport(artifact: AnalysisArtifact): string {
   return `${lines.join("\n")}\n`;
 }
 
-function sortedActiveFindings(findings: Finding[]): Finding[] {
+export function sortedActiveFindings(findings: Finding[]): Finding[] {
   const severityRank: Record<Finding["severity"], number> = { high: 0, medium: 1, low: 2 };
+  const policyRank = { block: 0, warn: 1, review: 2 };
+  const evidenceRank = { tool: 0, semantic: 1, heuristic: 2 };
   return findings.filter((finding) => !finding.suppressed).slice().sort((left, right) =>
-    severityRank[left.severity] - severityRank[right.severity]
+    policyRank[left.enforcement ?? "review"] - policyRank[right.enforcement ?? "review"]
+    || evidenceRank[left.evidence ?? "heuristic"] - evidenceRank[right.evidence ?? "heuristic"]
+    || severityRank[left.confidence ?? "low"] - severityRank[right.confidence ?? "low"]
+    || severityRank[left.severity] - severityRank[right.severity]
     || ((right.metric ?? 0) - (right.threshold ?? 0)) - ((left.metric ?? 0) - (left.threshold ?? 0))
     || (left.file ?? "").localeCompare(right.file ?? "")
     || (left.line ?? 0) - (right.line ?? 0));
 }
 
-function findingMarkdown(finding: Finding): string {
+export function findingMarkdown(finding: Finding): string {
   const actions = finding.actions.map((action) => `  - ${action}`).join("\n");
-  return `### ${finding.kind} (${finding.severity})\n\n${location(finding)} ${finding.message}\n\nActions:\n${actions}\n`;
+  const evidence = `**Policy:** ${finding.enforcement ?? "review"} · **Evidence:** ${finding.evidence ?? "heuristic"} · **Confidence:** ${finding.confidence ?? "low"}`;
+  const excerpt = finding.source_excerpt;
+  const code = excerpt?.lines.map((line, index) => `${excerpt.start_line + index} | ${line}`).join("\n");
+  const fence = "`".repeat(Math.max(3, ...[...(code ?? "").matchAll(/`+/g)].map((match) => match[0].length + 1)));
+  const snippet = code ? `\n\n${fence}text\n${code}\n${fence}` : "";
+  return `### ${finding.kind} (${finding.severity} impact)\n\n${evidence}\n\n${location(finding)} ${finding.message}${snippet}\n\nActions:\n${actions}\n`;
+}
+
+function skippedEvaluations(artifact: AnalysisArtifact): number {
+  return artifact.rule_coverage?.reduce((sum, rule) => sum + rule.skipped, 0) ?? 0;
 }
 
 function location(finding: Finding): string {

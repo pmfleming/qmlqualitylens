@@ -239,6 +239,7 @@ export type Finding = {
   fingerprint?: string;
   suppressed?: boolean;
   suppression_reason?: string;
+  source_excerpt?: { start_line: number; lines: string[] };
 };
 
 export type ScoreBreakdown = { overall: number; complexity: number; cognitive: number; effort: number; locality: number; leverage: number; duplication: number; size: number; styling: number; boundary: number };
@@ -252,6 +253,7 @@ export type AnalysisArtifact = {
   };
   generated_at: string;
   provenance?: Record<string, JsonValue>;
+  rule_coverage?: RuleCoverageRecord[];
   summary: {
     files: number;
     qmlFiles: number;

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { evidenceChecks, evidenceDefinitions, incompleteCheckReasons, qualityVerdict, type CheckRecord } from "../evidence-policy.js";
 import { artifactFreshness, changedRunInputs } from "../run-evidence.js";
+import { attachSourceExcerpts } from "../finding-identity.js";
 import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding } from "./foundation.js";
 import { baseArtifact, writeArtifact } from "./shared.js";
 
@@ -9,7 +10,7 @@ export function measureQualityContract(config: Config, command: string, context:
   const inputChange = changedRunInputs(context);
   const artifacts = new Map(evidenceDefinitions(config).map((definition) => [definition.file, readArtifact(context, definition.file, definition.task === "correctness.catalog" ? "correctness.test_evidence" : definition.task, inputChange)]));
   const imported = [...artifacts.values()].flatMap((value) => support.isRecord(value) && Array.isArray(value.findings) ? value.findings.filter(support.isFindingRecord) : []);
-  const active = [...new Map([...context.findings, ...imported].filter((finding) => !finding.suppressed).map((finding) => [finding.fingerprint ?? finding.id, finding])).values()];
+  const active = attachSourceExcerpts([...new Map([...context.findings, ...imported].filter((finding) => !finding.suppressed).map((finding) => [finding.fingerprint ?? finding.id, finding])).values()], context.sources);
   const unresolved = context.resolution.unresolvedImports.length + context.resolution.unresolvedTypes.length;
   const checks: CheckRecord[] = [
     { id: "static.inputs", name: "Analysis input snapshot", required: true, status: inputChange ? "incomplete" : "pass", findings: 0, ...(inputChange ? { reason: inputChange } : {}) },
