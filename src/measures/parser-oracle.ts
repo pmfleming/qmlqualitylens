@@ -19,7 +19,7 @@ type TreeSitterOracle = { parser: Parser; query: Parser.Query };
 type LoadableModule = object | null | undefined;
 const COUNT_KEYS: Array<keyof OracleCounts> = ["imports", "objects", "properties", "bindings"];
 const COUNT_KEY_NAMES = new Set<string>(COUNT_KEYS);
-const TREE_SITTER_STRUCTURE_QUERY = "(ui_import) @imports (ui_object_definition) @objects (ui_property) @properties (ui_binding) @bindings (ui_property value: (_) @bindings)";
+const TREE_SITTER_STRUCTURE_QUERY = "(ui_import) @imports (ui_object_definition) @objects (ui_object_definition_binding) @objects (ui_property) @properties (ui_binding) @bindings (ui_property value: (_) @bindings)";
 
 export function measureParserOracle(config: Config, command: string, context: AnalysisContext) {
   if (!config.tools.parserOracleCheck) return skipped(config, command, context);
@@ -33,7 +33,7 @@ export function measureParserOracle(config: Config, command: string, context: An
   const artifact = {
     ...baseArtifact(context, "quality.parser_oracle", command, { qmldom: version }),
     summary: {
-      status: unavailableTreeSitter ? "incomplete" : failed ? "warn" : "pass",
+      status: unavailableTreeSitter ? "incomplete" : failed || findings.length ? "warn" : "pass",
       files: records.length,
       qmldom_version: version,
       tree_sitter_enabled: config.tools.parserOracleTreeSitter,
@@ -101,7 +101,28 @@ function skipped(config: Config, command: string, context: AnalysisContext) {
 
 function internalCounts(document: QmlDocument): OracleCounts { return { imports: document.imports.length, objects: document.objects.length, properties: document.objects.reduce((sum, object) => sum + object.properties.length, 0), bindings: document.bindings.length }; }
 
-function qmlDomCounts(xml: string): OracleCounts { return { imports: matches(xml, /<UiImport\b/g), objects: matches(xml, /<UiObjectDefinition\b/g), properties: matches(xml, /<UiPublicMember\b[^>]*\btype="Property"/g), bindings: matches(xml, /<UiScriptBinding\b/g) }; }
+export function qmlDomCounts(xml: string): OracleCounts {
+  const definitions = [...xml.matchAll(/<UiObjectDefinition>\s*<Node>\s*<UiQualifiedId\b[^>]*\bname="([^"]+)"/g)];
+  const groups = definitions.filter((match) => groupedPropertyName(match[1] ?? "")).length;
+  const bindings = new Set<string>();
+  let anonymous = 0;
+  for (const match of xml.matchAll(/<(UiScriptBinding|UiArrayBinding|UiObjectBinding|UiPublicMember)\b([^>]*)>/g)) {
+    const attributes = match[2] ?? "";
+    if (/hasOnToken="true"/.test(attributes)) continue;
+    const colon = attributes.match(/\bcolonToken="([^"]*)"/)?.[1];
+    if (match[1] === "UiPublicMember" && (!/type="Property"/.test(attributes) || !colon)) continue;
+    // Object-valued properties appear as both a public member and an object
+    // binding at the same colon. Count that initializer only once.
+    bindings.add(colon || `anonymous:${anonymous++}`);
+  }
+  return { imports: matches(xml, /<UiImport\b/g),
+    objects: matches(xml, /<UiObjectDefinition\b/g) - groups + matches(xml, /<UiObjectBinding\b/g),
+    properties: matches(xml, /<UiPublicMember\b[^>]*\btype="Property"/g), bindings: bindings.size };
+}
+
+function groupedPropertyName(name: string): boolean {
+  return /^[a-z_]/.test(name) || ["Accessible", "Drag", "Keys", "KeyNavigation", "Layout", "Material", "Palette", "Universal"].includes(name);
+}
 
 function matches(value: string, regex: RegExp): number { return value.match(regex)?.length ?? 0; }
 
@@ -140,7 +161,11 @@ function parseTreeSitter(oracle: TreeSitterOracle, source: string, timeoutMs: nu
 
 function treeSitterCounts(query: Parser.Query, root: Parser.SyntaxNode): OracleCounts {
   const counts: OracleCounts = { imports: 0, objects: 0, properties: 0, bindings: 0 };
-  for (const { name } of query.captures(root)) if (isCountKey(name)) counts[name] += 1;
+  for (const { name, node } of query.captures(root)) {
+    if (!isCountKey(name)) continue;
+    if (name === "objects" && groupedPropertyName(node.namedChildren[0]?.text.split(".")[0] ?? "")) continue;
+    counts[name] += 1;
+  }
   return counts;
 }
 

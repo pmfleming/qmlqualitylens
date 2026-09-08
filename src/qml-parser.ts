@@ -10,7 +10,6 @@ type PathRead = {
 
 const ATTACHED_GROUP_NAMES = new Set([
   "Accessible",
-  "Component",
   "Drag",
   "Keys",
   "KeyNavigation",
@@ -141,7 +140,8 @@ class Parser {
 
   private parseObject(startIndex: number, parent: QmlObjectNode | null, depth: number): QmlObjectNode {
     const typePath = this.readPath(startIndex);
-    if (!typePath || this.tokens[typePath.endIndex]?.value !== "{") throw new Error(`Internal parser error: invalid object start in ${this.file}`);
+    const braceIndex = this.objectBraceAt(startIndex);
+    if (!typePath || braceIndex === null) throw new Error(`Internal parser error: invalid object start in ${this.file}`);
     const typeToken = this.tokens[startIndex];
     const object: QmlObjectNode = {
       objectId: this.nextObjectId,
@@ -163,7 +163,7 @@ class Parser {
     this.nextObjectId += 1;
     parent?.children.push(object);
     this.objects.push(object);
-    this.index = typePath.endIndex + 1;
+    this.index = braceIndex + 1;
     const closed = this.parseMemberBlock(object, null, depth + 1, (token) => {
       object.endLine = token.line;
     });
@@ -470,7 +470,7 @@ class Parser {
   private isPropertyDeclaration(index: number): boolean {
     let cursor = index;
     while (["default", "readonly", "required"].includes(this.tokens[cursor]?.value ?? "")) cursor += 1;
-    return this.tokens[cursor]?.value === "property";
+    return this.tokens[cursor]?.value === "property" && this.tokens[cursor + 1]?.kind === "identifier";
   }
 
   private isHandlerBinding(index: number): boolean {
@@ -505,7 +505,19 @@ class Parser {
   private findObjectStartAt(index: number): number | null {
     const path = this.readPath(index);
     if (!path || !startsWithUppercase(path.segments[0] ?? "") || this.isAttachedGroupPath(path)) return null;
-    return this.tokens[path.endIndex]?.value === "{" ? index : null;
+    return this.objectBraceAt(index) !== null ? index : null;
+  }
+
+  private objectBraceAt(index: number): number | null {
+    const type = this.readPath(index);
+    if (!type) return null;
+    let end = type.endIndex;
+    if (this.tokens[end]?.value === "on") {
+      const target = this.readPath(end + 1);
+      if (!target) return null;
+      end = target.endIndex;
+    }
+    return this.tokens[end]?.value === "{" ? end : null;
   }
 
   private groupScopeAt(index: number): { path: string; braceIndex: number } | null {
