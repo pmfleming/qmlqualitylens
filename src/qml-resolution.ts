@@ -1,4 +1,5 @@
 import path from "node:path";
+import fs from "node:fs";
 import type { QmlDocument } from "./qml-parser-types.js";
 import { baseTypeName, isShellEntrypoint } from "./qml-model.js";
 import type { ComponentRecord, Config, ImportRecord, SourceFile } from "./types.js";
@@ -74,11 +75,12 @@ const BUILTIN_TYPES = new Set(`
 
 export function buildProjectResolution(sources: SourceFile[], documents: QmlDocumentEntry[], components: ComponentRecord[], config: Config): ProjectResolution {
   const sourcePaths = new Set(sources.map((source) => source.relativePath));
+  const canonicalFile = analyzedFileResolver(sourcePaths, config.projectRoot);
   const qmldirModules = parseQmldirModules(sources.filter((source) => source.kind === "qmldir"), sourcePaths);
   const componentNames = buildComponentMaps(components, qmldirModules);
   const componentsByName = componentNames.unique;
   const componentByFile = new Map(components.map((component) => [component.file, component]));
-  const imports = documents.flatMap(({ file, document }) => document.imports.map((record) => resolveImport(file, record, qmldirModules, sourcePaths, config)));
+  const imports = documents.flatMap(({ file, document }) => document.imports.map((record) => resolveImport(file, record, qmldirModules, sourcePaths, config, canonicalFile)));
   const componentUses = resolveComponentUses(documents, imports, components, componentByFile, qmldirModules, config);
   const referencedFiles = new Set(componentUses.flatMap((use) => use.target ? [use.target] : []));
   const publicFiles = publicComponentFiles(qmldirModules, sourcePaths);
@@ -237,22 +239,34 @@ function resolveTypeInScope(typeName: string, scope: ComponentScope): string | n
   return scope.unqualified.get(typeName) ?? null;
 }
 
-function resolveImport(from: string, record: ImportRecord, modules: QmldirModule[], sourcePaths: Set<string>, config: Config): ImportResolution {
-  if (isPathLikeImport(record.module)) return resolveLocalImport(from, record, sourcePaths);
+function analyzedFileResolver(sourcePaths: Set<string>, root: string): (candidate: string) => string | null {
+  const byRealPath = new Map<string, string>();
+  for (const source of sourcePaths) {
+    try { byRealPath.set(fs.realpathSync(path.resolve(root, source)), source); } catch { /* In-memory sources need no filesystem alias. */ }
+  }
+  return (candidate) => {
+    if (sourcePaths.has(candidate)) return candidate;
+    try { return byRealPath.get(fs.realpathSync(path.resolve(root, candidate))) ?? null; } catch { return null; }
+  };
+}
+
+function resolveImport(from: string, record: ImportRecord, modules: QmldirModule[], sourcePaths: Set<string>, config: Config, canonicalFile: (candidate: string) => string | null): ImportResolution {
+  if (isPathLikeImport(record.module)) return resolveLocalImport(from, record, sourcePaths, canonicalFile);
   const localModule = modules.find((module) => module.module === record.module);
   if (localModule) return { from, module: record.module, alias: record.alias, line: record.line, kind: "local_module", target: localModule.file };
   if ([...EXTERNAL_MODULE_PREFIXES, ...config.externalModules].some((prefix) => record.module === prefix || record.module.startsWith(`${prefix}.`) || (prefix === "Qt" && record.module.startsWith("Qt")))) return { from, module: record.module, alias: record.alias, line: record.line, kind: "external", target: null };
-  if (localDirectoryHasQml(normalizeRelative(path.posix.dirname(from), record.module), sourcePaths)) return resolveLocalImport(from, record, sourcePaths);
+  if (localDirectoryHasQml(normalizeRelative(path.posix.dirname(from), record.module), sourcePaths)) return resolveLocalImport(from, record, sourcePaths, canonicalFile);
   return { from, module: record.module, alias: record.alias, line: record.line, kind: "unresolved", target: null };
 }
 
-function resolveLocalImport(from: string, record: ImportRecord, sourcePaths: Set<string>): ImportResolution {
+function resolveLocalImport(from: string, record: ImportRecord, sourcePaths: Set<string>, canonicalFile: (candidate: string) => string | null): ImportResolution {
   const candidate = normalizeRelative(path.posix.dirname(from), record.module);
   const qmlCandidate = candidate ? `${candidate}.qml` : "";
   const qmldirCandidate = candidate ? `${candidate}/qmldir` : "qmldir";
-  if (sourcePaths.has(candidate)) return { from, module: record.module, alias: record.alias, line: record.line, kind: "local_file", target: candidate };
-  if (qmlCandidate && sourcePaths.has(qmlCandidate)) return { from, module: record.module, alias: record.alias, line: record.line, kind: "local_file", target: qmlCandidate };
-  if (sourcePaths.has(qmldirCandidate)) return { from, module: record.module, alias: record.alias, line: record.line, kind: "local_directory", target: qmldirCandidate };
+  const file = canonicalFile(candidate) ?? (qmlCandidate ? canonicalFile(qmlCandidate) : null);
+  if (file) return { from, module: record.module, alias: record.alias, line: record.line, kind: "local_file", target: file };
+  const directory = canonicalFile(qmldirCandidate);
+  if (directory) return { from, module: record.module, alias: record.alias, line: record.line, kind: "local_directory", target: directory };
   if (localDirectoryHasQml(candidate, sourcePaths)) return { from, module: record.module, alias: record.alias, line: record.line, kind: "local_directory", target: candidate };
   return { from, module: record.module, alias: record.alias, line: record.line, kind: "unresolved", target: null };
 }
