@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createAnalysisContext } from "./analyzer.js";
+import { evidenceChecks, incompleteCheckReasons, qualityVerdict } from "./evidence-policy.js";
 import { measureBenchmarkPerformance } from "./measures/benchmark.js";
 import { measureBuildEvidence } from "./measures/build.js";
 import { measureCorrectnessCatalog } from "./measures/correctness.js";
@@ -84,6 +85,9 @@ export function runAudit(config: Config, command: string, options: AuditOptions)
   const findings = classifyAuditFindings(allFindings, readBaseline(options.baseline), diff, base);
   const gateFindings = gateCandidates(findings, options.base, config.policy.newCodeOnly);
   const incompleteChecks = requiredCheckFailures(config, context, evidenceArtifacts);
+  if (options.base && (diff.status !== "available" || base.status !== "available")) {
+    incompleteChecks.push(`Git base comparison is unavailable: ${diff.reason ?? base.reason ?? "comparison did not complete"}`);
+  }
   const artifact = buildAuditArtifact(config, command, options.base, context, findings, gateFindings, incompleteChecks, diff, base);
   writeJsonArtifact(config.outputDir, "audit.json", artifact);
   if (options.saveBaseline) writeBaseline(options.saveBaseline, allFindings);
@@ -121,7 +125,7 @@ function buildAuditArtifact(config: Config, command: string, selectedBase: strin
     provenance: provenance(config, command),
     confidence: confidence(context),
     summary: {
-      verdict: auditVerdict(config, gateFindings, incompleteChecks),
+      verdict: qualityVerdict(config, gateFindings, incompleteChecks.length),
       base: selectedBase,
       findings: summary.findings,
       active: summary.active,
@@ -171,49 +175,9 @@ function findingsFromArtifact(value: object): Finding[] {
   return value.findings.filter(isFindingRecord);
 }
 
-function requiredCheckFailures(config: Config, context: ReturnType<typeof createAnalysisContext>, artifacts: object[]): string[] {
-  return [
-    ...qmllintFailures(config, context),
-    ...configuredEvidenceFailures(config, artifacts),
-  ];
-}
-
-function qmllintFailures(config: Config, context: ReturnType<typeof createAnalysisContext>): string[] {
-  if (!config.policy.requireQmllint) return [];
-  if (context.qmllint.source === "none" || context.qmllint.status === "not_run") return ["qmllint did not run and no report was available"];
-  if (context.qmllint.status !== "complete") return [`qmllint evidence is unusable: ${context.qmllint.error ?? "the tool run was incomplete"}`];
-  return [];
-}
-
-function configuredEvidenceFailures(config: Config, artifacts: object[]): string[] {
+function requiredCheckFailures(config: Config, context: AnalysisContext, artifacts: object[]): string[] {
   const byTask = new Map(artifacts.flatMap((artifact) => isRecord(artifact) && typeof artifact.task_id === "string" ? [[artifact.task_id, artifact]] : []));
-  const checks = [
-    { enabled: config.tools.parserOracleCheck, task: "quality.parser_oracle", status: "status", accepted: ["pass", "warn"], name: "parser oracle" },
-    { enabled: config.tools.qmlformatCheck, task: "quality.format", status: "status", accepted: ["pass", "warn"], name: "qmlformat check" },
-    { enabled: config.tools.cmakeCheck, task: "quality.build_evidence", status: "status", accepted: ["pass", "warn", "failed"], name: "CMake configure/build" },
-    { enabled: Boolean(config.reports.tests), task: "correctness.catalog", status: "execution_status", accepted: ["complete", "failed"], name: "test report" },
-    { enabled: Boolean(config.reports.coverage), task: "testing.coverage", status: "status", accepted: ["complete"], name: "coverage report" },
-    { enabled: Boolean(config.reports.runtimeWarnings) || config.tools.runtimeCheck, task: "correctness.runtime_warnings", status: "status", accepted: ["complete", "failed"], name: "runtime warning evidence" },
-    { enabled: Boolean(config.reports.qmlProfiler), task: "performance.runtime", status: "status", accepted: ["complete"], name: "runtime performance report" },
-    { enabled: Boolean(config.reports.qmlbench), task: "performance.benchmark", status: "status", accepted: ["complete", "warn"], name: "qmlbench report" },
-  ];
-  return checks.flatMap((check) => check.enabled ? unusableArtifact(byTask.get(check.task), check.status, check.accepted, check.name) : []);
-}
-
-function unusableArtifact(artifact: object | undefined, statusKey: string, accepted: string[], name: string): string[] {
-  if (!isRecord(artifact) || !isRecord(artifact.summary)) return [`${name} did not produce usable evidence`];
-  const status = String(artifact.summary[statusKey] ?? "missing");
-  if (accepted.includes(status)) return [];
-  const reason = typeof artifact.summary.reason === "string" ? `: ${artifact.summary.reason}` : typeof artifact.summary.execution_reason === "string" ? `: ${artifact.summary.execution_reason}` : "";
-  return [`${name} is ${status}${reason}`];
-}
-
-function auditVerdict(config: Config, findings: Finding[], incomplete: string[]): AuditArtifact["summary"]["verdict"] {
-  if (incomplete.length && config.policy.incomplete === "fail") return "fail";
-  if (findings.some((finding) => config.policy.failOn.includes(finding.enforcement ?? "review"))) return "fail";
-  if (incomplete.length && config.policy.incomplete === "warn") return "incomplete";
-  if (findings.some((finding) => finding.enforcement === "warn" || finding.enforcement === "block")) return "warn";
-  return "pass";
+  return incompleteCheckReasons(evidenceChecks(config, context, (definition) => byTask.get(definition.task)));
 }
 
 function auditFinding(finding: Finding, baselineIds: Set<string>, diff: DiffContext, base: BaseSnapshot): AuditFinding {

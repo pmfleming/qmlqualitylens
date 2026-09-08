@@ -6,6 +6,7 @@ import test from "node:test";
 import { createAnalysisContext } from "../src/analyzer.js";
 import { runAudit } from "../src/audit.js";
 import { loadConfig } from "../src/config.js";
+import { evidenceChecks, incompleteCheckReasons } from "../src/evidence-policy.js";
 import { measureQualityContract } from "../src/measures/contract.js";
 import { sarifForFindings } from "../src/sarif.js";
 
@@ -63,8 +64,22 @@ test("audit treats malformed configured evidence as incomplete", () => {
 
   assert.equal(artifact.summary.verdict, "incomplete");
   assert.equal(artifact.summary.incomplete_checks.length, 2);
-  assert.ok(artifact.summary.incomplete_checks.some((reason) => reason.includes("test report")));
-  assert.ok(artifact.summary.incomplete_checks.some((reason) => reason.includes("runtime performance report")));
+  assert.ok(artifact.summary.incomplete_checks.some((reason) => /Test execution/i.test(reason)));
+  assert.ok(artifact.summary.incomplete_checks.some((reason) => /Runtime performance/i.test(reason)));
+});
+
+test("enabled producers remain required without report paths and unknown statuses are incomplete", () => {
+  const { config } = project({});
+  const context = createAnalysisContext(config);
+  config.tools.qmltestrunnerCheck = true;
+  config.tools.qmlProfilerCheck = true;
+  const checks = evidenceChecks(config, context, () => ({ summary: { status: "unexpected", execution_status: "unexpected" } }));
+  assert.deepEqual(checks.filter((check) => check.required).map((check) => check.id), ["tests.execution", "runtime.performance"]);
+  assert.equal(incompleteCheckReasons(checks).length, 2);
+  const audit = runAudit(config, "test", { base: null, baseline: null, saveBaseline: null });
+  const contract = measureQualityContract(config, "test", createAnalysisContext(config));
+  assert.equal(audit.summary.verdict, "incomplete");
+  assert.equal(contract.summary.verdict, audit.summary.verdict);
 });
 
 test("tool diagnostics do not change the heuristic maintainability score", () => {
