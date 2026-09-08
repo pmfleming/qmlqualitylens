@@ -1,21 +1,12 @@
 import type { AnalysisContext } from "./analyzer.js";
 import { isProcessBoundaryFile } from "./config.js";
-import { measureSupport as support } from "./measure-support.js";
 import { stripCommentsAndStrings } from "./metrics.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./measures/shared.js";
 import { matchesAnyConfiguredTypeName } from "./qml-model.js";
-import { qmlSemanticFindings } from "./qml-rules.js";
-import { qmllintDiagnostic } from "./qmllint.js";
 import type { Config, Finding } from "./types.js";
 
 export function measureQmlHealth(config: Config, command: string, context: AnalysisContext) {
-  const findings: Finding[] = support.applySuppressions(support.deduplicateToolFindings(support.enrichFindings([
-    ...context.components.flatMap(componentHealthFindings),
-    ...context.bindings.flatMap(sideEffectBindingFinding),
-    ...context.qmlDocuments.flatMap((entry) => processPlacementFinding(entry, config)),
-    ...qmlSemanticFindings(context),
-    ...context.qmllintFindings.map(qmllintDiagnostic),
-  ], config)), config);
+  const findings = context.findings.filter((finding) => finding.kind.startsWith("qml.") || finding.kind.startsWith("quickshell.") || finding.kind.startsWith("cleanup.unused_public_") || finding.kind === "qmllint.diagnostic");
   const artifact = {
     ...baseArtifact(context, "quality.qml_health", command),
     summary: { ...findingSummary(findings), components: context.components.length, qmllint_findings: context.qmllintFindings.length },
@@ -23,6 +14,14 @@ export function measureQmlHealth(config: Config, command: string, context: Analy
   };
   writeArtifact(config, "qml_health.json", artifact);
   return artifact;
+}
+
+export function qmlHealthFindings(context: AnalysisContext): Finding[] {
+  return [
+    ...context.components.flatMap(componentHealthFindings),
+    ...context.bindings.filter((binding) => !/^on[A-Z]/.test(binding.property.split(".").at(-1) ?? "")).flatMap(sideEffectBindingFinding),
+    ...context.qmlDocuments.flatMap((entry) => processPlacementFinding(entry, context.config)),
+  ];
 }
 
 function componentHealthFindings(component: AnalysisContext["components"][number]): Finding[] {

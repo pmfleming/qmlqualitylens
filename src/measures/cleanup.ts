@@ -3,10 +3,7 @@ import { support, type MeasureConfig as Config, type MeasureContext as AnalysisC
 import { baseArtifact, writeArtifact } from "./shared.js";
 
 export function measureCleanup(config: Config, command: string, context: AnalysisContext) {
-  const findings: Finding[] = support.applySuppressions([
-    ...context.components.flatMap((component) => unusedComponentFinding(component, context)),
-    ...context.qmlDocuments.flatMap(unusedIdFindings),
-  ], config);
+  const findings = context.findings.filter((finding) => finding.kind.startsWith("cleanup."));
   const active = support.activeFindings(findings);
   const artifact = {
     ...baseArtifact(context, "quality.cleanup", command),
@@ -21,6 +18,13 @@ export function measureCleanup(config: Config, command: string, context: Analysi
   };
   writeArtifact(config, "cleanup.json", artifact);
   return artifact;
+}
+
+export function cleanupFindings(context: AnalysisContext): Finding[] {
+  return [
+    ...context.components.flatMap((component) => unusedComponentFinding(component, context)),
+    ...context.qmlDocuments.flatMap(unusedIdFindings),
+  ];
 }
 
 function unusedComponentFinding(component: AnalysisContext["components"][number], context: AnalysisContext): Finding[] {

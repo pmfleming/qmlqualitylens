@@ -1,9 +1,8 @@
-import { qmlSemanticFindings } from "../qml-rules.js";
-import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext } from "./foundation.js";
+import type { MeasureConfig as Config, MeasureContext as AnalysisContext } from "./foundation.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 
 export function measureSemanticRules(config: Config, command: string, context: AnalysisContext) {
-  const findings = support.applySuppressions(support.enrichFindings(qmlSemanticFindings(context), config), config);
+  const findings = context.findings.filter((finding) => finding.kind.startsWith("qml.") || finding.kind.startsWith("cleanup.unused_public_"));
   const artifact = {
     ...baseArtifact(context, "quality.semantic_rules", command),
     summary: {

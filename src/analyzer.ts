@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { detectClones } from "./clone-detector.js";
+import { cleanupFindings } from "./measures/cleanup.js";
+import { qmlHealthFindings } from "./qml-health-measure.js";
 import { discoverSourceFiles } from "./file-walk.js";
 import { attachSemanticAnchors } from "./finding-identity.js";
 import { boundedScore, complexityForCode, countMatches, lineNumberAt, locFor, stripComments, stripCommentsAndStrings } from "./metrics.js";
@@ -72,6 +74,8 @@ export function createAnalysisContext(config: Config): AnalysisContext {
     ...inputFindings(config, sources),
     ...deriveFindings(config, files, components, functions, bindings, clones, resolution),
     ...qmlSemanticFindings(baseContext),
+    ...qmlHealthFindings(baseContext),
+    ...cleanupFindings(baseContext),
     ...qmllintFindings.map(qmllintDiagnostic),
   ], qmlDocuments);
   const rawFindings = deduplicateToolFindings(enrichFindings(candidates, config));
