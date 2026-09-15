@@ -150,7 +150,7 @@ export const TASKS: TaskDefinition[] = [
     category: "correctness",
     title: "QML correctness catalog",
     artifact: "correctness_review.json",
-    description: "Discovers Qt Quick Test files, optionally executes qmltestrunner, and imports managed JUnit evidence.",
+    description: "Discovers Qt Quick Test files, optionally executes qmltestrunner or CTest after the configured build, and imports managed JUnit evidence.",
     dependsOn: ["quality.build_evidence"],
     handler: measureCorrectnessCatalog,
   },

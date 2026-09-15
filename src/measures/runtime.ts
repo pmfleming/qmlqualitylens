@@ -2,11 +2,13 @@ import fs from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
+import { buildPrerequisiteFailure } from "./build.js";
+import { unavailableToolExecution } from "../tool-execution.js";
 import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding, type MeasureJsonValue as JsonValue, type MeasureToolExecution as ToolExecution } from "./foundation.js";
 
 export function measureRuntimeWarnings(config: Config, command: string, context: AnalysisContext) {
   const report = config.reports.runtimeWarnings;
-  const execution = runRuntimeSmoke(config);
+  const execution = runRuntimeSmoke(config, context);
   const evidence = runtimeWarningEvidence(config, report, execution);
   const unique = [...new Map(evidence.findings.map((finding) => [`${finding.kind}\0${finding.file ?? ""}\0${finding.line ?? 0}\0${finding.message}`, finding])).values()];
   const findings = support.applySuppressions(support.enrichFindings(unique, config), config);
@@ -33,7 +35,7 @@ function runtimeWarningEvidence(config: Config, report: string | null, execution
 
 export function measureRuntimePerformance(config: Config, command: string, context: AnalysisContext) {
   const report = config.reports.qmlProfiler;
-  const execution = runProfilerProducer(config, report);
+  const execution = runProfilerProducer(config, report, context);
   if (!report || !fs.existsSync(report)) return writeEmptyPerformanceArtifact(config, command, context, report, execution);
   const normalized = normalizePerformanceReport(readJsonReport(report));
   const budgetReason = performanceBudgetCoverageReason(normalized.scenarios, config);
@@ -74,15 +76,19 @@ function producerFailureReason(execution: ToolExecution | null): string | null {
 
 function readJsonReport(file: string) { try { return support.parseJson(fs.readFileSync(file, "utf8")); } catch { return null; } }
 
-function runRuntimeSmoke(config: Config): ToolExecution | null {
+function runRuntimeSmoke(config: Config, context: AnalysisContext): ToolExecution | null {
   if (!config.tools.runtimeCheck || !config.tools.runtimeCommand) return null;
+  const blocked = buildPrerequisiteFailure(config, context);
+  if (blocked) return unavailableToolExecution("runtime", blocked);
   return support.executeTool(config.tools.runtimeCommand, config.tools.runtimeArguments, config.tools.runtimeWorkingDirectory, config.tools.runtimeTimeoutMs, { ...process.env, ...config.tools.runtimeEnvironment }, config.tools.runtimeRedactPatterns);
 }
 
-function runProfilerProducer(config: Config, report: string | null): ToolExecution | null {
+function runProfilerProducer(config: Config, report: string | null, context: AnalysisContext): ToolExecution | null {
   if (!config.tools.qmlProfilerCheck || !config.tools.qmlProfilerCommand || !report) return null;
   fs.mkdirSync(path.dirname(report), { recursive: true });
   fs.rmSync(report, { force: true });
+  const blocked = buildPrerequisiteFailure(config, context);
+  if (blocked) return unavailableToolExecution("qml_profiler", blocked);
   return support.executeTool(config.tools.qmlProfilerCommand, config.tools.qmlProfilerArguments, config.tools.qmlProfilerWorkingDirectory, config.tools.qmlProfilerTimeoutMs, { ...process.env, ...config.tools.qmlProfilerEnvironment, QMLQUALITYLENS_REPORT: report }, config.tools.qmlProfilerRedactPatterns);
 }
 

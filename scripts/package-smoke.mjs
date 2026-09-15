@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 const repository = path.resolve(import.meta.dirname, "..");
+assert.ok(process.argv.slice(2).every((arg) => arg === "--cmake"), "Only --cmake is supported");
 using temporary = fs.mkdtempDisposableSync(path.join(os.tmpdir(), "qmlqualitylens-package-"));
 const consumer = path.join(temporary.path, "consumer");
 fs.mkdirSync(consumer);
@@ -50,4 +51,15 @@ run(cli, ["measure", "correctness.runtime_warnings"], consumer);
 const runtime = JSON.parse(fs.readFileSync(path.join(consumer, "target/qmlqualitylens/runtime_warnings.json"), "utf8"));
 assert.equal(runtime.summary.status, "complete");
 assert.ok(fs.existsSync(path.join(installed, "qmlqualitylens.schema.json")));
-console.log(JSON.stringify({ status: "pass", package: archive, optional_peers: "absent", checks: ["bin", "init", "catalog", "analyze", "measure all", "audit", "subprocess runner"] }, null, 2));
+assert.ok(fs.existsSync(path.join(installed, "cmake/QmlQualityLens.cmake")));
+const checks = ["bin", "init", "catalog", "analyze", "measure all", "audit", "subprocess runner"];
+if (process.argv.includes("--cmake")) {
+  config.tools.runtime.check = false;
+  fs.writeFileSync(configFile, JSON.stringify(config));
+  fs.writeFileSync(path.join(consumer, "CMakeLists.txt"), `cmake_minimum_required(VERSION 3.21)\nproject(LensConsumer LANGUAGES NONE)\ninclude("${path.join(installed, "cmake/QmlQualityLens.cmake").replaceAll("\\", "/")}")\nqmlqualitylens_add_target(NAME quality CONFIG qmlqualitylens.config.json)\n`);
+  run("cmake", ["-S", consumer, "-B", path.join(consumer, "build"), "-G", "Ninja"], consumer);
+  run("cmake", ["--build", path.join(consumer, "build"), "--target", "quality"], consumer);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(consumer, "target/qmlqualitylens/audit.json"), "utf8")).summary.verdict, "pass");
+  checks.push("installed CMake module target");
+}
+console.log(JSON.stringify({ status: "pass", package: archive, optional_peers: "absent", checks }, null, 2));

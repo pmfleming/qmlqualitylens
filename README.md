@@ -12,6 +12,7 @@ qmlqualitylens combines a dependency-free QML parser with optional Qt tool, test
 - [0.5 migration guide](docs/migration-0.5.md)
 - [Oracle calibration](docs/oracle-calibration.md)
 - [Audit and execution hardening / migration notes](docs/review-hardening.md)
+- [CMake and CTest integration](docs/cmake-integration.md)
 - [Historical implementation plan](docs/qml-quality-improvement-plan.md)
 
 ## Requirements
@@ -38,11 +39,13 @@ node dist/bin/qmlqualitylens.js audit --config qmlqualitylens.config.json --form
 Optional checks:
 
 ```sh
-npm run integration:qt       # Qt 6, CMake, and Ninja required
+npm run integration:qt       # CMake/CTest 3.21+, Ninja, C++ compiler, Qt 6.4+ QuickTest
+npm run integration:qt:nix   # Full CMake/Qt toolchain through Nix
 npm run oracle:qmllint       # Qt diagnostics skip if qmllint is unavailable
 npm run oracle:qmllint:nix   # Nix/NixOS convenience environment
 npm run analyze:shelllist    # Analyze a local ../shelllist checkout
 npm run package:smoke        # Install and exercise the tarball without optional peers
+npm run package:smoke -- --cmake # Also exercise the installed CMake module (CMake/Ninja required)
 npm run benchmark:clones     # Profile overlapping clone-window detection
 ```
 
@@ -112,8 +115,9 @@ All execution is opt-in. Enable commands only for trusted projects in controlled
 
 - `tools.qmllint`: runs `qmllint --json -` over discovered QML/JavaScript files with configured `-I`, `-i`, and optional `-E` inputs.
 - `tools.qmlformat`: performs a non-mutating formatting comparison.
-- `tools.cmake`: optionally configures and builds selected targets without a shell.
-- `tools.qmltestrunner`: runs Qt Quick Test and manages JUnit output.
+- `tools.cmake`: configures and builds selected targets, with explicit source/build directories, configure presets, and multi-configuration support.
+- `tools.ctest`: runs registered tests after the build and produces managed JUnit evidence.
+- `tools.qmltestrunner`: alternatively runs Qt Quick Test directly and manages JUnit output.
 - `tools.runtime`: runs an explicit smoke scenario and inspects captured warnings.
 - `tools.qml_profiler`: runs an adapter that writes normalized JSON to `QMLQUALITYLENS_REPORT`.
 - `tools.parser_oracle`: compares the internal parser with `qmldom` and optional Tree-sitter.
@@ -123,6 +127,12 @@ Prefer a CMake-generated `all_qmllint` or `*_qmllint` target when it provides th
 Adapters support project-relative working directories, environment variables, timeouts, bounded output tails, and redaction patterns. Timed-out process groups are terminated, including descendants that ignore the initial termination signal. The starter config disables every execution check.
 
 `tools.qmllint` and `tools.qmlformat` accept `command` (an executable path), `arguments`, `timeout_ms`, `working_directory`, `environment`, and `redact_patterns`. Put flags in `arguments`, not in `command`; formatting runs without a shell. Defaults are 120 seconds for qmllint and 30 seconds per formatting check. Version probes are bounded too. The deprecated top-level `qmllint_command` remains an explicit shell-command compatibility mode, using the qmllint execution controls.
+
+### CMake projects
+
+Enable `tools.cmake.check` and `tools.ctest.check` for a configure/build/test workflow. Set `configure: true` for configure, `configure_preset` to reuse a preset, `build_config` for Debug/Release selection, and `build_targets` for application and qmllint targets. Failed builds block dependent test/runtime execution. CTest and qmltestrunner cannot both produce the same test report.
+
+For the reverse integration, include `cmake/QmlQualityLens.cmake` from this checkout or an installed package and call `qmlqualitylens_add_target(NAME qml_quality CONFIG quality-static.config.json)`. The resulting explicit target runs audit; use a static/import-only config to avoid recursive builds. See [CMake and CTest integration](docs/cmake-integration.md) for complete examples and supported controls.
 
 ### Imported evidence
 

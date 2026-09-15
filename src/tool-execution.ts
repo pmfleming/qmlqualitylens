@@ -52,6 +52,10 @@ export function toolVersion(executable: string, cwd: string, timeoutMs = 10_000,
   return (result.stdout.trim() || result.stderr.trim()).split(/\r?\n/)[0] || null;
 }
 
+export function unavailableToolExecution(tool: string, reason: string): ToolExecution {
+  return { status: "incomplete", command: tool, exit_code: null, signal: null, duration_ms: 0, error: reason, stdout: "", stderr: "", stdout_tail: [], stderr_tail: [] };
+}
+
 export function publicToolExecution(execution: ToolExecution): Omit<ToolExecution, "stdout" | "stderr"> {
   const { stdout: _stdout, stderr: _stderr, ...summary } = execution;
   return summary;

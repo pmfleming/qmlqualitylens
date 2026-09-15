@@ -1,0 +1,10 @@
+{
+  "project_name": "qmlqualitylens-cmake-target",
+  "project_root": ".",
+  "source_roots": ["."],
+  "output_dir": "target/static-quality",
+  "profile": "qtquick",
+  "external_modules": ["QmlQualityLens.Fixture"],
+  "external_types": ["TestCase"],
+  "exclude": ["build", "target"]
+}

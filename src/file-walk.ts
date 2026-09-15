@@ -50,7 +50,19 @@ function sourceKind(file: string): SourceKind | null {
   return EXTENSION_KIND.get(path.extname(file)) ?? null;
 }
 
-function isExcluded(file: string, config: Config): boolean {
+export function isExcluded(file: string, config: Config): boolean {
+  // Generated QML must not enter the source snapshot after a configure/build,
+  // even when callers choose a non-default build/output directory.
+  for (const directory of [config.outputDir, config.tools.cmakeBuildDir]) {
+    const projectRelative = path.relative(directory, config.projectRoot);
+    // An in-source/ancestor binary directory must not hide the entire project.
+    if (isContainedPath(projectRelative)) continue;
+    if (isContainedPath(path.relative(directory, file))) return true;
+  }
   const relative = path.relative(config.projectRoot, file).split(path.sep).join("/");
   return config.exclude.some((pattern) => relative === pattern || relative.startsWith(`${pattern}/`) || relative.includes(`/${pattern}/`));
+}
+
+function isContainedPath(relative: string): boolean {
+  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }

@@ -13,7 +13,8 @@ Current work is calibration-driven; the baseline product milestones are complete
 - Dependency-free QML lexer/parser with scopes, grouped/attached properties, handlers, functions, bindings, ids, references, and recovery diagnostics.
 - Project-wide imports, qmldir modules, type evidence, component uses, entrypoint reachability, Loader/sourceComponent edges, and configured dynamic edges.
 - Complexity, effort, locality, leverage, styling, boundary, clone, cleanup, semantic, accessibility, i18n, and performance-review artifacts.
-- Optional qmllint, qmlformat, qmldom, Tree-sitter, CMake, qmltestrunner, runtime-smoke, profiler-adapter, coverage, and qmlbench evidence.
+- Optional qmllint, qmlformat, qmldom, Tree-sitter, CMake, CTest/qmltestrunner, runtime-smoke, profiler-adapter, coverage, and qmlbench evidence.
+- CMake configure presets and multi-configuration builds, managed CTest JUnit evidence, consumer-side audit targets, and real Qt build/test/smoke integration with failure scenarios.
 - Policy-based audit, base-worktree comparison, stable identities, baselines, suppressions, SARIF, and Code Climate output.
 - QtQuick, Kirigami, Quickshell, generic, and custom profile scaffolding.
 - Labeled qmllint fixtures, representative-project calibration, and Nix/direnv tooling.

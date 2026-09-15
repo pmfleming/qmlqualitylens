@@ -11,7 +11,7 @@ export function evidenceDefinitions(config: Config): EvidenceDefinition[] {
     { id: "tool.parser_oracle", name: "Parser oracle", task: "quality.parser_oracle", file: "parser_oracle.json", required: config.tools.parserOracleCheck },
     { id: "tool.qmlformat", name: "qmlformat", task: "quality.format", file: "formatting.json", required: config.tools.qmlformatCheck },
     { id: "tool.cmake", name: "CMake configure/build", task: "quality.build_evidence", file: "build_evidence.json", required: config.tools.cmakeCheck },
-    { id: "tests.execution", name: "Test execution", task: "correctness.catalog", file: "test_evidence.json", required: Boolean(config.reports.tests) || config.tools.qmltestrunnerCheck, statusKey: "execution_status" },
+    { id: "tests.execution", name: "Test execution", task: "correctness.catalog", file: "test_evidence.json", required: Boolean(config.reports.tests) || config.tools.qmltestrunnerCheck || config.tools.ctestCheck, statusKey: "execution_status" },
     { id: "tests.coverage", name: "QML coverage", task: "testing.coverage", file: "coverage_evidence.json", required: Boolean(config.reports.coverage) },
     { id: "runtime.warnings", name: "Runtime QML warnings", task: "correctness.runtime_warnings", file: "runtime_warnings.json", required: Boolean(config.reports.runtimeWarnings) || config.tools.runtimeCheck },
     { id: "runtime.performance", name: "Runtime performance", task: "performance.runtime", file: "runtime_performance.json", required: Boolean(config.reports.qmlProfiler) || config.tools.qmlProfilerCheck },

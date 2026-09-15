@@ -327,7 +327,7 @@ function configForWorktree(config: Config, repositoryRoot: string, worktree: str
     outputDir: path.join(temp, "out"),
     qmllintReport: null,
     qmllintCommand: null,
-    tools: { ...config.tools, qmllintImportPaths: config.tools.qmllintImportPaths.map(remap), qmllintQmltypes: config.tools.qmllintQmltypes.map(remap), parserOracleCheck: false, cmakeCheck: false, qmllintCheck: false, qmlformatCheck: false, qmltestrunnerCheck: false, runtimeCheck: false, qmlProfilerCheck: false },
+    tools: { ...config.tools, cmakeSourceDir: remap(config.tools.cmakeSourceDir), cmakeBuildDir: remap(config.tools.cmakeBuildDir), qmllintImportPaths: config.tools.qmllintImportPaths.map(remap), qmllintQmltypes: config.tools.qmllintQmltypes.map(remap), parserOracleCheck: false, cmakeCheck: false, qmllintCheck: false, qmlformatCheck: false, qmltestrunnerCheck: false, ctestCheck: false, runtimeCheck: false, qmlProfilerCheck: false },
     reports: { tests: null, runtimeWarnings: null, qmlProfiler: null, coverage: null, qmlbench: null, qmlbenchBaseline: null },
   };
 }

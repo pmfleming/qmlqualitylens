@@ -17,24 +17,25 @@
       "check": true,
       "build_dir": "build",
       "configure": true,
-      "configure_arguments": ["-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release"],
-      "build_targets": ["all_qmllint", "qmlqualitylens_fixture"],
-      "build_arguments": ["--parallel"]
+      "configure_preset": "quality",
+      "build_config": "Release",
+      "build_targets": ["all_qmllint", "qmlqualitylens_smoke"],
+      "build_arguments": ["--parallel", "2"]
     },
     "qmllint": { "check": false },
     "qmlformat": { "command": "qmlformat", "check": true },
-    "qmltestrunner": {
-      "command": "qmltestrunner",
+    "ctest": {
+      "command": "ctest",
       "check": true,
-      "arguments": ["-input", "tests", "-import", "build"],
       "timeout_ms": 120000,
-      "environment": { "QT_QPA_PLATFORM": "offscreen" }
+      "environment": { "QT_QPA_PLATFORM": "offscreen", "QT_QUICK_BACKEND": "software" }
     },
     "runtime": {
-      "command": "scripts/runtime-smoke.sh",
+      "command": "build/bin/qmlqualitylens_smoke",
       "check": true,
       "arguments": [],
-      "timeout_ms": 60000
+      "timeout_ms": 60000,
+      "environment": { "QT_QPA_PLATFORM": "offscreen", "QT_QUICK_BACKEND": "software" }
     },
     "qml_profiler": {
       "command": "node",
@@ -54,6 +55,7 @@
   "performance_budgets": [
     { "scenario": "fixture-smoke", "platform": "offscreen", "frame_p95_ms": 20, "max_event_ms": 5 }
   ],
+  "external_modules": ["QmlQualityLens.Fixture"],
   "external_types": ["TestCase"],
   "exclude": ["build", "target"]
 }

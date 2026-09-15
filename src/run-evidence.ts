@@ -4,6 +4,7 @@ import fs from "node:fs";
 import { createRequire } from "node:module";
 import type { AnalysisContext } from "./analyzer.js";
 import { discoverSourceFiles } from "./file-walk.js";
+import { discoverCmakeFiles } from "./cmake-project.js";
 import type { Config, SourceFile } from "./types.js";
 import { isRecord } from "./value-utils.js";
 import { LENS_VERSION } from "./version.js";
@@ -29,7 +30,7 @@ export function createAnalysisRun(config: Config, sources: SourceFile[], qmllint
 
 export function changedRunInputs(context: AnalysisContext): string | null {
   if (configHash(context.config) !== context.run.config_hash) return "Analysis configuration changed during the run; rerun analysis.";
-  if (sourceHash(context.config, discoverSourceFiles(context.config)) !== context.run.source_hash) return "QML/JavaScript sources or configured type metadata changed during the run; rerun analysis.";
+  if (sourceHash(context.config, discoverSourceFiles(context.config)) !== context.run.source_hash) return "QML/JavaScript sources, local CMake definitions, or configured type metadata changed during the run; rerun analysis.";
   return null;
 }
 
@@ -61,6 +62,7 @@ export function artifactFreshness(context: AnalysisContext, artifact: unknown): 
 function sourceHash(config: Config, sources: SourceFile[]): string {
   return hash({
     sources: [...sources].sort((a, b) => a.relativePath.localeCompare(b.relativePath)).map((source) => [source.relativePath, hash(source.text)]),
+    cmake_inputs: discoverCmakeFiles(config).map((file) => [file.relative, fileHash(file.absolute)]),
     type_metadata: [...config.tools.qmllintQmltypes].sort().map((file) => [file, fileHash(file)]),
   });
 }

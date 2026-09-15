@@ -20,6 +20,7 @@ jobs:
 
   qt-integration:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -36,12 +37,17 @@ jobs:
             qml6-module-qttest
           echo /usr/lib/qt6/bin >> "$GITHUB_PATH"
       - run: npm run integration:qt
+      - run: npm run package:smoke -- --cmake
       - name: Upload Qt quality evidence
         if: always()
         uses: actions/upload-artifact@v5
         with:
           name: qt-integration-evidence
-          path: test/fixtures/integration/qtquick/target/qmlqualitylens
+          path: |
+            target/integration-qt/**/evidence/
+            target/integration-qt/**/static-evidence/
+            target/integration-qt/**/*.log
+            target/integration-qt/summary.json
 
   package:
     runs-on: ubuntu-latest

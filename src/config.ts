@@ -78,6 +78,9 @@ function resolveTools(raw: RawConfig, root: string): Config["tools"] {
     cmakeCommand: tools?.cmake?.command ?? "cmake",
     cmakeCheck: tools?.cmake?.check ?? false,
     cmakeBuildDir: resolveFrom(root, tools?.cmake?.build_dir ?? "build"),
+    cmakeSourceDir: resolveFrom(root, tools?.cmake?.source_dir ?? "."),
+    cmakeConfigurePreset: tools?.cmake?.configure_preset ?? null,
+    cmakeBuildConfig: tools?.cmake?.build_config ?? null,
     cmakeConfigure: tools?.cmake?.configure ?? false,
     cmakeConfigureArguments: tools?.cmake?.configure_arguments ?? [],
     cmakeBuildTargets: tools?.cmake?.build_targets ?? [],
@@ -110,6 +113,13 @@ function resolveTools(raw: RawConfig, root: string): Config["tools"] {
     qmltestrunnerWorkingDirectory: resolveFrom(root, tools?.qmltestrunner?.working_directory ?? "."),
     qmltestrunnerEnvironment: tools?.qmltestrunner?.environment ?? {},
     qmltestrunnerRedactPatterns: tools?.qmltestrunner?.redact_patterns ?? [],
+    ctestCommand: tools?.ctest?.command ?? "ctest",
+    ctestCheck: tools?.ctest?.check ?? false,
+    ctestArguments: tools?.ctest?.arguments ?? [],
+    ctestTimeoutMs: tools?.ctest?.timeout_ms ?? 120_000,
+    ctestWorkingDirectory: resolveFrom(root, tools?.ctest?.working_directory ?? "."),
+    ctestEnvironment: tools?.ctest?.environment ?? {},
+    ctestRedactPatterns: tools?.ctest?.redact_patterns ?? [],
     runtimeCommand: tools?.runtime?.command ?? null,
     runtimeCheck: tools?.runtime?.check ?? false,
     runtimeArguments: tools?.runtime?.arguments ?? [],
@@ -133,7 +143,7 @@ function unique(defaults: string[], configured: string[] | undefined): string[] 
 
 function resolveReports(raw: RawConfig, root: string, outputDir: string): Config["reports"] {
   return {
-    tests: resolveOptionalPath(root, raw.reports?.tests) ?? (raw.tools?.qmltestrunner?.check ? path.join(outputDir, "qmltestrunner.junit.xml") : null),
+    tests: resolveOptionalPath(root, raw.reports?.tests) ?? (raw.tools?.ctest?.check ? path.join(outputDir, "ctest.junit.xml") : raw.tools?.qmltestrunner?.check ? path.join(outputDir, "qmltestrunner.junit.xml") : null),
     runtimeWarnings: resolveOptionalPath(root, raw.reports?.runtime_warnings),
     qmlProfiler: resolveOptionalPath(root, raw.reports?.qml_profiler) ?? (raw.tools?.qml_profiler?.check ? path.join(outputDir, "qml-profiler.normalized.json") : null),
     coverage: resolveOptionalPath(root, raw.reports?.coverage),
@@ -158,10 +168,11 @@ export function starterConfig(): RawConfig {
     policy: { require_qmllint: false, new_code_only: true, fail_on: ["block"], incomplete: "warn" },
     tools: {
       parser_oracle: { check: false, qmldom_command: "qmldom", tree_sitter: false, timeout_ms: 30000 },
-      cmake: { command: "cmake", check: false, build_dir: "build", configure: false, configure_arguments: [], build_targets: ["all_qmllint"], build_arguments: [], timeout_ms: 600000, working_directory: ".", environment: {}, redact_patterns: [] },
+      cmake: { command: "cmake", check: false, source_dir: ".", build_dir: "build", configure: false, configure_arguments: [], build_targets: ["all_qmllint"], build_arguments: [], timeout_ms: 600000, working_directory: ".", environment: {}, redact_patterns: [] },
       qmllint: { command: "qmllint", check: false, arguments: [], import_paths: [], qmltypes: [], use_environment_imports: false, timeout_ms: 120000, working_directory: ".", environment: {}, redact_patterns: [] },
       qmlformat: { command: "qmlformat", check: false, arguments: [], timeout_ms: 30000, working_directory: ".", environment: {}, redact_patterns: [] },
       qmltestrunner: { command: "qmltestrunner", check: false, arguments: [], timeout_ms: 120000, working_directory: ".", environment: {}, redact_patterns: [] },
+      ctest: { command: "ctest", check: false, arguments: [], timeout_ms: 120000, working_directory: ".", environment: {}, redact_patterns: [] },
       runtime: { check: false, arguments: [], timeout_ms: 60000, working_directory: ".", environment: {}, redact_patterns: [] },
       qml_profiler: { check: false, arguments: [], timeout_ms: 300000, working_directory: ".", environment: {}, redact_patterns: [] },
     },
@@ -296,7 +307,7 @@ function validatePolicy(value: JsonValue | undefined, errors: string[]): void {
 }
 
 function validateTools(value: JsonValue | undefined, errors: string[]): void {
-  validateObjectKeys(value, "tools", new Set(["parser_oracle", "cmake", "qmllint", "qmlformat", "qmltestrunner", "runtime", "qml_profiler"]), errors);
+  validateObjectKeys(value, "tools", new Set(["parser_oracle", "cmake", "qmllint", "qmlformat", "qmltestrunner", "ctest", "runtime", "qml_profiler"]), errors);
   if (!isJsonRecord(value)) return;
   validateParserOracle(value.parser_oracle, errors);
   validateCmakeTool(value.cmake, errors);
@@ -304,6 +315,11 @@ function validateTools(value: JsonValue | undefined, errors: string[]): void {
   validateQmlformatTool(value.qmlformat, errors);
   validateExecutableTool(value.qmltestrunner, "tools.qmltestrunner", errors, true);
   if (isJsonRecord(value.qmltestrunner) && hasManagedArgument(value.qmltestrunner.arguments, /^-o(?:=|$)/)) errors.push("tools.qmltestrunner.arguments must not set -o; qmlqualitylens manages the JUnit report");
+  validateExecutableTool(value.ctest, "tools.ctest", errors, true);
+  if (isJsonRecord(value.ctest)) {
+    if (value.ctest.check === true && isJsonRecord(value.qmltestrunner) && value.qmltestrunner.check === true) errors.push("tools.ctest.check and tools.qmltestrunner.check cannot both be enabled; choose one test report producer");
+    if (hasManagedArgument(value.ctest.arguments, /^(?:--(?:output-junit|test-dir|preset|no-tests|show-only|build-and-test|help|version)(?:=|$)|-[CNSTMDO])/)) errors.push("tools.ctest.arguments must not override managed test directory, configuration, report, or execution mode");
+  }
   validateExecutableTool(value.runtime, "tools.runtime", errors, false);
   validateExecutableTool(value.qml_profiler, "tools.qml_profiler", errors, false);
 }
@@ -317,17 +333,17 @@ function validateParserOracle(value: JsonValue | undefined, errors: string[]): v
 }
 
 function validateCmakeTool(value: JsonValue | undefined, errors: string[]): void {
-  validateObjectKeys(value, "tools.cmake", new Set(["command", "check", "build_dir", "configure", "configure_arguments", "build_targets", "build_arguments", "timeout_ms", "working_directory", "environment", "redact_patterns"]), errors);
+  validateObjectKeys(value, "tools.cmake", new Set(["command", "check", "source_dir", "build_dir", "configure_preset", "build_config", "configure", "configure_arguments", "build_targets", "build_arguments", "timeout_ms", "working_directory", "environment", "redact_patterns"]), errors);
   if (!isJsonRecord(value)) return;
-  for (const key of ["command", "build_dir"]) validateOptionalValue(value[key], isNonEmptyString, `tools.cmake.${key} must be a non-empty string`, errors);
+  for (const key of ["command", "source_dir", "build_dir", "configure_preset", "build_config"]) validateOptionalValue(value[key], isNonEmptyString, `tools.cmake.${key} must be a non-empty string`, errors);
   for (const key of ["check", "configure"]) validateOptionalValue(value[key], (item) => typeof item === "boolean", `tools.cmake.${key} must be a boolean`, errors);
   for (const key of ["configure_arguments", "build_targets", "build_arguments"]) {
     validateStringArray(value[key], `tools.cmake.${key}`, errors);
     validateNonEmptyStrings(value[key], `tools.cmake.${key}`, errors);
   }
   validateUniqueStrings(value.build_targets, "tools.cmake.build_targets", errors);
-  if (hasManagedArgument(value.configure_arguments, /^(?:-[SB]|--build(?:=|$))/)) errors.push("tools.cmake.configure_arguments must not override managed -S/-B/build options");
-  if (hasManagedArgument(value.build_arguments, /^(?:(?:--build|--target)(?:=|$)|-t)/)) errors.push("tools.cmake.build_arguments must not override managed build/target options");
+  if (hasManagedArgument(value.configure_arguments, /^(?:-[SBP]|--(?:build|preset|workflow|install|open)(?:=|$))/)) errors.push("tools.cmake.configure_arguments must not override managed -S/-B/build options");
+  if (hasManagedArgument(value.build_arguments, /^(?:(?:--build|--target|--config|--preset)(?:=|$)|-t)/)) errors.push("tools.cmake.build_arguments must not override managed build/target options");
   validateExecutionControls(value, "tools.cmake", errors);
 }
 

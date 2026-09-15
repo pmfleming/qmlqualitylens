@@ -1,0 +1,19 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "quality",
+      "displayName": "Release Qt quality fixture",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "quality-multi",
+      "displayName": "Multi-configuration Qt quality fixture",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build"
+    }
+  ]
+}

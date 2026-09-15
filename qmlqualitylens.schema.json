@@ -35,6 +35,13 @@
     },
     "tools": {
       "type": "object", "additionalProperties": false,
+      "not": {
+        "required": ["ctest", "qmltestrunner"],
+        "properties": {
+          "ctest": { "type": "object", "required": ["check"], "properties": { "check": { "const": true } } },
+          "qmltestrunner": { "type": "object", "required": ["check"], "properties": { "check": { "const": true } } }
+        }
+      },
       "properties": {
         "parser_oracle": {
           "type": "object", "additionalProperties": false,
@@ -51,10 +58,13 @@
             "command": { "type": "string", "pattern": "\\S" },
             "check": { "type": "boolean" },
             "build_dir": { "type": "string", "pattern": "\\S" },
+            "source_dir": { "type": "string", "pattern": "\\S" },
+            "configure_preset": { "type": "string", "pattern": "\\S" },
+            "build_config": { "type": "string", "pattern": "\\S" },
             "configure": { "type": "boolean" },
-            "configure_arguments": { "type": "array", "items": { "type": "string", "pattern": "\\S", "not": { "pattern": "^(?:-[SB]|--build(?:=|$))" } } },
+            "configure_arguments": { "type": "array", "items": { "type": "string", "pattern": "\\S", "not": { "pattern": "^(?:-[SBP]|--(?:build|preset|workflow|install|open)(?:=|$))" } } },
             "build_targets": { "type": "array", "items": { "type": "string", "pattern": "\\S" }, "uniqueItems": true },
-            "build_arguments": { "type": "array", "items": { "type": "string", "pattern": "\\S", "not": { "pattern": "^(?:(?:--build|--target)(?:=|$)|-t)" } } },
+            "build_arguments": { "type": "array", "items": { "type": "string", "pattern": "\\S", "not": { "pattern": "^(?:(?:--build|--target|--config|--preset)(?:=|$)|-t)" } } },
             "timeout_ms": { "type": "integer", "exclusiveMinimum": 0 },
             "working_directory": { "type": "string", "pattern": "\\S" },
             "environment": { "type": "object", "additionalProperties": { "type": "string" } },
@@ -94,6 +104,18 @@
             "command": { "type": "string", "pattern": "\\S" },
             "check": { "type": "boolean" },
             "arguments": { "type": "array", "items": { "type": "string", "pattern": "\\S", "not": { "pattern": "^-o(?:=|$)" } } },
+            "timeout_ms": { "type": "integer", "exclusiveMinimum": 0 },
+            "working_directory": { "type": "string", "pattern": "\\S" },
+            "environment": { "type": "object", "additionalProperties": { "type": "string" } },
+            "redact_patterns": { "type": "array", "items": { "type": "string", "pattern": "\\S", "format": "regex" } }
+          }
+        },
+        "ctest": {
+          "type": "object", "additionalProperties": false,
+          "properties": {
+            "command": { "type": "string", "pattern": "\\S" },
+            "check": { "type": "boolean" },
+            "arguments": { "type": "array", "items": { "type": "string", "pattern": "\\S", "not": { "pattern": "^(?:--(?:output-junit|test-dir|preset|no-tests|show-only|build-and-test|help|version)(?:=|$)|-[CNSTMDO])" } } },
             "timeout_ms": { "type": "integer", "exclusiveMinimum": 0 },
             "working_directory": { "type": "string", "pattern": "\\S" },
             "environment": { "type": "object", "additionalProperties": { "type": "string" } },

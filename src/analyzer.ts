@@ -36,6 +36,7 @@ import type {
 
 export type AnalysisContext = {
   config: Config;
+  buildStatus?: { status: "skipped" | "pass" | "warn" | "failed" | "incomplete"; reason: string | null };
   run: AnalysisRun;
   sources: SourceFile[];
   qmlDocuments: Array<{ file: string; document: QmlDocument }>;

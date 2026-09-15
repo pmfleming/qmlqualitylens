@@ -50,7 +50,7 @@ The default remains static and side-effect free. Trusted projects can enable:
 - `tools.parser_oracle.check`: compare the internal parser with `qmldom` and optional Tree-sitter;
 - `tools.cmake.check`: configure or build selected CMake targets;
 - `tools.qmllint.check` and `tools.qmlformat.check`: run Qt static tools;
-- `tools.qmltestrunner.check`: run Qt Quick Test and produce JUnit evidence;
+- `tools.qmltestrunner.check` or `tools.ctest.check`: run Qt Quick Test directly or registered CTest tests and produce JUnit evidence;
 - `tools.runtime.check`: run a smoke scenario and inspect QML warnings;
 - `tools.qml_profiler.check`: run an adapter that exports normalized profiler evidence.
 
@@ -70,6 +70,10 @@ Output is bounded to 20 MiB by the shared runner, with at most 200 lines retaine
 - JSON with a `tests` or `testCases` array and per-case `status`, `name`, `file`, `line`, and `message`.
 
 Discovery, execution, and passing are represented separately. Malformed reports, unsupported JSON shapes/statuses, and configured reports containing zero tests are incomplete rather than clean passes. When `tools.qmltestrunner.check` is enabled, qmlqualitylens appends a managed `-o <report>,junitxml` argument and records the runner's command, version, timeout outcome, output tails, and exit status.
+
+With `tools.ctest.check`, CTest uses the configured CMake build directory and configuration, and writes a fresh managed `ctest.junit.xml` (or `reports.tests`). Zero selected tests are an execution error. The CTest and qmltestrunner adapters are mutually exclusive report producers. After a failed/incomplete configured CMake build, tests and runtime/profiler execution are blocked rather than using stale binaries. See [CMake integration](cmake-integration.md).
+
+Local CMake definitions and standard preset files join the input snapshot; generated build/output directories are excluded. This does not claim a complete native compiler/toolchain dependency hash.
 
 ### Runtime warnings
 

@@ -1,6 +1,6 @@
-import fs from "node:fs";
 import path from "node:path";
 import { hasCaptures } from "../value-utils.js";
+import { discoverCmakeFiles, discoverQmlModules } from "../cmake-project.js";
 import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding } from "./foundation.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 
@@ -38,13 +38,11 @@ type CmakeExecution = {
 const CMAKE_HELP = "https://cmake.org/cmake/help/latest/manual/cmake.1.html";
 
 export function measureBuildEvidence(config: Config, command: string, context: AnalysisContext) {
-  const cmakeFiles = discoverCmake(config);
-  const modules = cmakeFiles.flatMap((file) => {
-    const text = fs.readFileSync(file.absolute, "utf8");
-    return [...text.matchAll(/\b(?:qt_add_qml_module|ecm_add_qml_module)\s*\(\s*([^\s)]+)/g)].map((match) => ({ file: file.relative, target: match[1] ?? "unknown", has_qmllint_reference: /(?:all_qmllint|_qmllint|NO_LINT|run-qmllint)/.test(text), no_lint: /\bNO_LINT\b/.test(text) }));
-  });
-  const cmakeProject = cmakeFiles.length > 0;
+  const cmakeFiles = discoverCmakeFiles(config);
+  const modules = discoverQmlModules(cmakeFiles);
+  const cmakeProject = cmakeFiles.some((file) => path.basename(file.absolute) === "CMakeLists.txt");
   const execution = runCmake(config);
+  context.buildStatus = { status: execution.status, reason: execution.reason };
   const raw: Finding[] = [];
   if (cmakeProject && modules.length === 0 && context.sources.some((source) => source.kind === "qml")) raw.push({ id: "build.qml_module_missing", kind: "build.qml_module_missing", severity: "low", message: "CMake files were found, but no qt_add_qml_module() declaration was discovered", actions: ["Use qt_add_qml_module() for application QML modules where appropriate so tooling receives type/import information and QML can be compiled ahead of time."] });
   raw.push(...execution.steps.flatMap(stepFindings));
@@ -60,9 +58,13 @@ export function measureBuildEvidence(config: Config, command: string, context: A
       no_lint_modules: modules.filter((module) => module.no_lint).length,
       cmake_version: execution.version,
       build_dir: execution.build_dir,
+      source_dir: config.tools.cmakeSourceDir,
+      configure_preset: config.tools.cmakeConfigurePreset,
+      build_config: config.tools.cmakeBuildConfig,
       steps: execution.steps.length,
       ...findingSummary(findings),
     },
+    build_inputs: cmakeFiles.map((file) => file.relative),
     modules,
     execution,
     findings,
@@ -73,13 +75,16 @@ export function measureBuildEvidence(config: Config, command: string, context: A
 
 function runCmake(config: Config): CmakeExecution {
   if (!config.tools.cmakeCheck) return { enabled: false, status: "skipped", version: null, build_dir: config.tools.cmakeBuildDir, reason: "tools.cmake.check is disabled", steps: [] };
+  if (process.env.QMLQUALITYLENS_IN_CMAKE === "1") return { enabled: true, status: "incomplete", version: null, build_dir: config.tools.cmakeBuildDir, reason: "Recursive CMake execution is disabled inside a qmlqualitylens CMake target. Use a static/import-only config for that target.", steps: [] };
   const steps: CmakeStep[] = [];
   if (config.tools.cmakeConfigure) {
-    steps.push(runCmakeStep(config, "configure", ["-S", config.projectRoot, "-B", config.tools.cmakeBuildDir, ...config.tools.cmakeConfigureArguments]));
+    const preset = config.tools.cmakeConfigurePreset ? ["--preset", config.tools.cmakeConfigurePreset] : [];
+    steps.push(runCmakeStep(config, "configure", [...preset, "-S", config.tools.cmakeSourceDir, "-B", config.tools.cmakeBuildDir, ...config.tools.cmakeConfigureArguments]));
   }
   if (!steps.some((step) => step.status === "failed" || step.status === "incomplete")) {
     const targets = config.tools.cmakeBuildTargets.length ? ["--target", ...config.tools.cmakeBuildTargets] : [];
-    steps.push(runCmakeStep(config, "build", ["--build", config.tools.cmakeBuildDir, ...targets, ...config.tools.cmakeBuildArguments]));
+    const configuration = config.tools.cmakeBuildConfig ? ["--config", config.tools.cmakeBuildConfig] : [];
+    steps.push(runCmakeStep(config, "build", ["--build", config.tools.cmakeBuildDir, ...configuration, ...targets, ...config.tools.cmakeBuildArguments]));
   }
   const status = cmakeStatus(steps);
   return { enabled: true, status, version: support.toolVersion(config.tools.cmakeCommand, config.tools.cmakeWorkingDirectory, config.tools.cmakeTimeoutMs, { ...process.env, ...config.tools.cmakeEnvironment }, config.tools.cmakeRedactPatterns), build_dir: config.tools.cmakeBuildDir, reason: cmakeFailureReason(status, steps), steps };
@@ -111,7 +116,16 @@ function runCmakeStep(config: Config, phase: CmakeStep["phase"], args: string[])
 }
 
 function parseCmakeDiagnostics(output: string, phase: CmakeStep["phase"], config: Config): CmakeDiagnostic[] {
-  const diagnostics = output.split(/\r?\n/).flatMap((line) => diagnosticForLine(line.trimEnd(), phase, config));
+  const diagnostics: CmakeDiagnostic[] = [];
+  let pending: CmakeDiagnostic | undefined;
+  for (const line of output.replace(/\x1b\[[0-9;]*m/g, "").split(/\r?\n/)) {
+    if (pending && /^\s+\S/.test(line)) { pending.message += `\n${line.trim()}`; continue; }
+    if (!line.trim()) continue;
+    pending = undefined;
+    const found = diagnosticForLine(line.trimEnd(), phase, config);
+    diagnostics.push(...found);
+    if (/^CMake\s+(?:Warning|Error)\b/.test(line)) pending = found[0];
+  }
   return [...new Map(diagnostics.map((item) => [[item.phase, item.severity, item.file ?? "", item.line ?? 0, item.column ?? 0, item.message].join("\0"), item])).values()];
 }
 
@@ -123,18 +137,18 @@ function diagnosticForLine(line: string, phase: CmakeStep["phase"], config: Conf
   if (hasCaptures(compiler, 1, 2, 4, 5)) return [diagnostic(phase, compiler[4] ?? "error", compiler[5] ?? "", config, compiler[1], compiler[2], compiler[3])];
   const msvc = line.match(/^(.*?)\((\d+)(?:,(\d+))?\)\s*:\s*(warning|error|fatal error)\b[^:]*:\s*(.*)$/i);
   if (hasCaptures(msvc, 1, 2, 4, 5)) return [diagnostic(phase, msvc[4] ?? "error", msvc[5] ?? "", config, msvc[1], msvc[2], msvc[3])];
-  const cmake = line.match(/^CMake\s+(Warning|Error)(?:\s+at\s+(.+?):(\d+)(?:\s+\([^)]*\))?)?:?\s*(.*)$/i);
-  if (hasCaptures(cmake, 1)) return [diagnostic(phase, cmake[1] ?? "error", cmake[4] || line, config, cmake[2], cmake[3], undefined)];
+  const cmake = line.match(/^CMake\s+(Warning|Error)(?:\s+\(dev\))?(?:\s+at\s+(.+?):(\d+)(?:\s+\([^)]*\))?)?:?\s*(.*)$/i);
+  if (hasCaptures(cmake, 1)) return [diagnostic(phase, cmake[1] ?? "error", cmake[4] || line, config, cmake[2], cmake[3], undefined, config.tools.cmakeSourceDir)];
   const generic = line.match(/^(?:ninja|make(?:\[\d+\])?|g?make(?:\[\d+\])?).*?:\s*(warning|error|fatal error)\s*:\s*(.*)$/i);
   if (hasCaptures(generic, 1, 2)) return [diagnostic(phase, generic[1] ?? "error", generic[2] ?? "", config)];
   return [];
 }
 
-function diagnostic(phase: CmakeStep["phase"], severity: string, message: string, config: Config, file?: string, line?: string, column?: string): CmakeDiagnostic {
+function diagnostic(phase: CmakeStep["phase"], severity: string, message: string, config: Config, file?: string, line?: string, column?: string, relativeTo = phase === "configure" ? config.tools.cmakeSourceDir : config.tools.cmakeBuildDir): CmakeDiagnostic {
   return {
     phase,
     severity: /error|fatal/i.test(severity) ? "error" : "warning",
-    ...(file ? { file: support.projectRelativePath(file, config.projectRoot) } : {}),
+    ...(file ? { file: support.projectRelativePath(path.resolve(relativeTo, file.replace(/^file:\/\//, "")), config.projectRoot) } : {}),
     ...(line ? { line: Number(line) } : {}),
     ...(column ? { column: Number(column) } : {}),
     message: message.trim(),
@@ -172,19 +186,8 @@ function stepFindings(step: CmakeStep): Finding[] {
   return findings;
 }
 
-function discoverCmake(config: Config): Array<{ absolute: string; relative: string }> {
-  const results: Array<{ absolute: string; relative: string }> = [];
-  const excluded = new Set(config.exclude);
-  const visit = (directory: string): void => {
-    let entries: fs.Dirent[];
-    try { entries = fs.readdirSync(directory, { withFileTypes: true }); } catch { return; }
-    for (const entry of entries) {
-      if (excluded.has(entry.name)) continue;
-      const absolute = path.join(directory, entry.name);
-      if (entry.isDirectory()) visit(absolute);
-      else if (entry.name === "CMakeLists.txt") results.push({ absolute, relative: path.relative(config.projectRoot, absolute).split(path.sep).join("/") });
-    }
-  };
-  for (const root of config.sourceRoots) if (fs.existsSync(root)) visit(root);
-  return [...new Map(results.map((result) => [result.absolute, result])).values()];
+export function buildPrerequisiteFailure(config: Config, context: AnalysisContext): string | null {
+  if (!config.tools.cmakeCheck) return null;
+  if (context.buildStatus?.status === "pass" || context.buildStatus?.status === "warn") return null;
+  return `CMake prerequisite is ${context.buildStatus?.status ?? "not run"}: ${context.buildStatus?.reason ?? "Run quality.build_evidence successfully before executing dependent tools."}`;
 }

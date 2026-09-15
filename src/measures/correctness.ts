@@ -2,17 +2,21 @@ import fs from "node:fs";
 import path from "node:path";
 import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding, type MeasureJsonValue as JsonValue, type MeasureToolExecution as ToolExecution } from "./foundation.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
+import { buildPrerequisiteFailure } from "./build.js";
+import { unavailableToolExecution } from "../tool-execution.js";
 
 export function measureCorrectnessCatalog(config: Config, command: string, context: AnalysisContext) {
   const tests = discoverTests(context);
-  const toolExecution = runQmlTests(config);
+  const runner = config.tools.ctestCheck ? "ctest" : "qmltestrunner";
+  const toolExecution = runTests(config, context, runner);
   const execution = loadTestEvidence(config.reports.tests);
-  const rawFindings = catalogFindings(tests.length, toolExecution, execution);
+  const rawFindings = catalogFindings(tests.length, toolExecution, execution, runner);
   const findings = support.applySuppressions(support.enrichFindings(rawFindings, config), config);
-  const version = config.tools.qmltestrunnerCheck ? support.toolVersion(config.tools.qmltestrunnerCommand, config.tools.qmltestrunnerWorkingDirectory, config.tools.qmltestrunnerTimeoutMs, { ...process.env, ...config.tools.qmltestrunnerEnvironment }, config.tools.qmltestrunnerRedactPatterns) : null;
+  const version = toolExecution && toolExecution.status !== "incomplete" ? support.toolVersion(config.tools[`${runner}Command`], config.tools[`${runner}WorkingDirectory`], config.tools[`${runner}TimeoutMs`], { ...process.env, ...config.tools[`${runner}Environment`] }, config.tools[`${runner}RedactPatterns`]) : null;
   const artifact = {
-    ...baseArtifact(context, "correctness.catalog", command, { qmltestrunner: version }),
+    ...baseArtifact(context, "correctness.catalog", command, { [runner]: version }),
     summary: {
+      runner: toolExecution ? runner : null,
       test_files: tests.length,
       test_cases: tests.reduce((sum, test) => sum + test.test_cases.length, 0),
       discovery_status: tests.length ? "discovered" : "missing",
@@ -30,7 +34,7 @@ export function measureCorrectnessCatalog(config: Config, command: string, conte
   };
   writeArtifact(config, "correctness_review.json", artifact);
   writeArtifact(config, "test_catalog.json", { ...baseArtifact(context, "correctness.test_catalog", command), tests });
-  writeArtifact(config, "test_evidence.json", { ...baseArtifact(context, "correctness.test_evidence", command, { qmltestrunner: version }), summary: artifact.summary, execution: artifact.execution, findings: findings.filter((finding) => finding.kind === "tests.failure" || finding.kind === "tests.execution_failed") });
+  writeArtifact(config, "test_evidence.json", { ...baseArtifact(context, "correctness.test_evidence", command, { [runner]: version }), summary: artifact.summary, execution: artifact.execution, findings: findings.filter((finding) => finding.kind === "tests.failure" || finding.kind === "tests.execution_failed") });
   return artifact;
 }
 
@@ -47,32 +51,36 @@ function discoverTests(context: AnalysisContext) {
     }));
 }
 
-function catalogFindings(testFiles: number, execution: ToolExecution | null, evidence: TestEvidence): Finding[] {
+function catalogFindings(testFiles: number, execution: ToolExecution | null, evidence: TestEvidence, runner: string): Finding[] {
   return [
     ...(testFiles ? [] : [noTestsFinding()]),
-    ...(execution?.status === "failed" && evidence.failures.length === 0 ? [testExecutionFailed(execution)] : []),
+    ...(execution?.status === "failed" && evidence.failures.length === 0 ? [testExecutionFailed(execution, runner)] : []),
     ...evidence.failures.map((failure, index): Finding => ({ id: `tests.failure.${index}.${failure.name}`, kind: "tests.failure", severity: "high", file: failure.file, line: failure.line, message: `Test '${failure.name}' failed${failure.message ? `: ${failure.message}` : ""}`, actions: ["Reproduce and fix the failing test, or update the expectation only when the behavior change is intentional."] })),
   ];
 }
 
-function runQmlTests(config: Config): ToolExecution | null {
-  if (!config.tools.qmltestrunnerCheck) return null;
+function runTests(config: Config, context: AnalysisContext, runner: "ctest" | "qmltestrunner"): ToolExecution | null {
+  if (!config.tools[`${runner}Check`]) return null;
   const report = config.reports.tests;
   if (!report) return null;
   fs.mkdirSync(path.dirname(report), { recursive: true });
   fs.rmSync(report, { force: true });
+  const blocked = runner === "ctest" && process.env.QMLQUALITYLENS_IN_CMAKE === "1" ? "Recursive CTest execution is disabled inside a qmlqualitylens CMake target." : buildPrerequisiteFailure(config, context);
+  if (blocked) return unavailableToolExecution(runner, blocked);
+  const configuration = config.tools.cmakeBuildConfig ? ["-C", config.tools.cmakeBuildConfig] : [];
+  const args = runner === "ctest"
+    ? [...config.tools.ctestArguments, "--test-dir", config.tools.cmakeBuildDir, ...configuration, "--output-on-failure", "--no-tests=error", "--output-junit", report]
+    : [...config.tools.qmltestrunnerArguments, "-o", `${report},junitxml`];
   return support.executeTool(
-    config.tools.qmltestrunnerCommand,
-    [...config.tools.qmltestrunnerArguments, "-o", `${report},junitxml`],
-    config.tools.qmltestrunnerWorkingDirectory,
-    config.tools.qmltestrunnerTimeoutMs,
-    { ...process.env, ...config.tools.qmltestrunnerEnvironment, QMLQUALITYLENS_REPORT: report },
-    config.tools.qmltestrunnerRedactPatterns,
+    config.tools[`${runner}Command`], args,
+    config.tools[`${runner}WorkingDirectory`], config.tools[`${runner}TimeoutMs`],
+    { ...process.env, ...config.tools[`${runner}Environment`], QMLQUALITYLENS_REPORT: report },
+    config.tools[`${runner}RedactPatterns`],
   );
 }
 
-function testExecutionFailed(execution: ToolExecution): Finding {
-  return { id: "tests.execution_failed", kind: "tests.execution_failed", severity: "high", message: `qmltestrunner failed with exit code ${execution.exit_code ?? "unknown"} without a reported test failure`, actions: ["Inspect test_evidence.json output tails and fix the test runner, test setup, imports, or crash."] };
+function testExecutionFailed(execution: ToolExecution, runner: string): Finding {
+  return { id: "tests.execution_failed", kind: "tests.execution_failed", severity: "high", message: `${runner} failed with exit code ${execution.exit_code ?? "unknown"} without a reported test failure`, actions: ["Inspect test_evidence.json output tails and fix the test runner, test setup, imports, or crash."] };
 }
 
 function noTestsFinding(): Finding {
