@@ -446,10 +446,28 @@ class Parser {
   }
 
   private resolveReferences(): void {
-    const ids = new Map<string, QmlObjectNode>();
-    for (const object of this.objects) if (object.idName) ids.set(object.idName, object);
+    // A Component factory has its own id namespace. Its contents may capture
+    // the enclosing context, but must never resolve ids from sibling factories.
+    const scopes = new Map<number, { parent: number | null; ids: Map<string, QmlObjectNode> }>();
+    const objectScopes = new Map<number, number>();
+    const objects = new Map(this.objects.map((object) => [object.objectId, object]));
+    for (const object of this.objects) {
+      const parent = object.parentObjectId === null ? undefined : objects.get(object.parentObjectId);
+      const parentScope = parent ? objectScopes.get(parent.objectId) ?? null : null;
+      const newScope = !parent || parent.typeName === "Component" || parent.typeName === "QtQml.Component";
+      const scope = newScope ? object.objectId : parentScope!;
+      if (newScope) scopes.set(scope, { parent: parentScope, ids: new Map() });
+      objectScopes.set(object.objectId, scope);
+      if (object.idName) scopes.get(scope)!.ids.set(object.idName, object);
+    }
     for (const reference of this.idReferences) {
-      const target = ids.get(reference.name) ?? null;
+      let scope = objectScopes.get(reference.ownerObjectId) ?? null;
+      let target: QmlObjectNode | null = null;
+      while (scope !== null && !target) {
+        const context = scopes.get(scope)!;
+        target = context.ids.get(reference.name) ?? null;
+        scope = context.parent;
+      }
       reference.targetObjectId = target?.objectId ?? null;
       reference.external = Boolean(target && target.objectId !== reference.ownerObjectId);
     }

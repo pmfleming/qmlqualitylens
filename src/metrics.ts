@@ -35,12 +35,11 @@ export function countMatches(text: string, regex: RegExp): number {
 
 export function complexityForCode(code: string): { cyclomatic: number; cognitive: number; maxNesting: number } {
   const withoutComments = stripCommentsAndStrings(code);
-  const decisionRegex = /\b(if|for|while|case|catch)\b|\?|&&|\|\|/g;
   let cyclomatic = 1;
   let cognitive = 0;
   let depth = 0;
   let maxNesting = 0;
-  const tokens = withoutComments.match(/\bif\b|\belse\s+if\b|\bfor\b|\bwhile\b|\bswitch\b|\bcase\b|\bcatch\b|\breturn\b|[{}?]|&&|\|\|/g) ?? [];
+  const tokens = withoutComments.match(/\bif\b|\belse\s+if\b|\bfor\b|\bwhile\b|\bswitch\b|\bcase\b|\bcatch\b|\breturn\b|\?\?|\?\.|[{}?]|&&|\|\|/g) ?? [];
   for (const token of tokens) {
     if (token === "{") {
       depth += 1;
@@ -51,13 +50,13 @@ export function complexityForCode(code: string): { cyclomatic: number; cognitive
       depth = Math.max(0, depth - 1);
       continue;
     }
-    if (/^(if|else\s+if|for|while|switch|case|catch|\?|&&|\|\|)$/.test(token)) {
+    if (/^(if|else\s+if|for|while|switch|case|catch|\?\?|\?|&&|\|\|)$/.test(token)) {
+      if (token !== "switch") cyclomatic += 1;
       cognitive += 1 + Math.max(0, depth - 1);
     } else if (token === "return" && depth > 1) {
       cognitive += 1;
     }
   }
-  for (const _match of withoutComments.matchAll(decisionRegex)) cyclomatic += 1;
   return { cyclomatic, cognitive, maxNesting };
 }
 

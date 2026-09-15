@@ -47,14 +47,13 @@ function unusedComponentFinding(component: AnalysisContext["components"][number]
 
 function unusedIdFindings({ file, document }: AnalysisContext["qmlDocuments"][number]): Finding[] {
   const referencedObjectIds = new Set(document.idReferences.flatMap((reference) => reference.targetObjectId ? [reference.targetObjectId] : []));
-  const aliasTargetIds = new Set(document.objects.flatMap((object) => object.properties.flatMap((property) => property.aliasTarget?.match(/^([A-Za-z_]\w*)\./)?.[1] ?? [])));
-  return document.objects.flatMap((object) => object.idName && object.idName !== "root" && !referencedObjectIds.has(object.objectId) && !aliasTargetIds.has(object.idName) ? [{
+  return document.objects.flatMap((object) => object.idName && object.idName !== "root" && !referencedObjectIds.has(object.objectId) ? [{
     id: `cleanup.unused_id.${file}.${object.idName}`,
     kind: "cleanup.unused_id",
     severity: "low",
     file,
     line: object.line,
-    message: `id '${object.idName}' is declared but not referenced through id.property syntax`,
+    message: `id '${object.idName}' is declared but has no resolved reference in its component scope`,
     actions: ["Remove the id if it is not required by bindings, debugging, or external conventions."],
   }] : []);
 }
