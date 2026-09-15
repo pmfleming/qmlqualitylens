@@ -11,6 +11,7 @@ qmlqualitylens combines a dependency-free QML parser with optional Qt tool, test
 - [Roadmap](ROADMAP.md)
 - [0.5 migration guide](docs/migration-0.5.md)
 - [Oracle calibration](docs/oracle-calibration.md)
+- [Shelllist refactoring trial and measured results](docs/shelllist-refactoring-trial.md)
 - [Audit and execution hardening / migration notes](docs/review-hardening.md)
 - [CMake and CTest integration](docs/cmake-integration.md)
 - [Historical implementation plan](docs/qml-quality-improvement-plan.md)
