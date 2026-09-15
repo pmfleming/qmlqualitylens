@@ -8,27 +8,24 @@
     "$schema": { "type": "string" },
     "project_name": { "type": "string" },
     "project_root": { "type": "string" },
-    "source_roots": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "source_roots": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "\\S" } },
     "output_dir": { "type": "string" },
     "exclude": { "type": "array", "items": { "type": "string" } },
     "profile": { "enum": ["generic", "qtquick", "kirigami", "quickshell", "custom"] },
     "qmllint_report": { "type": "string" },
-    "qmllint_command": { "type": "string" },
-    "external_modules": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
-    "external_types": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
-    "entrypoints": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+    "qmllint_command": { "type": "string", "description": "Deprecated shell command. Prefer tools.qmllint.command and arguments." },
+    "external_modules": { "type": "array", "items": { "type": "string", "pattern": "\\S" }, "uniqueItems": true },
+    "external_types": { "type": "array", "items": { "type": "string", "pattern": "\\S" }, "uniqueItems": true },
+    "entrypoints": { "type": "array", "items": { "type": "string", "pattern": "\\S" }, "uniqueItems": true },
     "dynamic_component_edges": {
       "type": "array",
       "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["from", "to"],
-        "properties": { "from": { "type": "string", "minLength": 1 }, "to": { "type": "string", "minLength": 1 } }
+        "type": "object", "additionalProperties": false, "required": ["from", "to"],
+        "properties": { "from": { "type": "string", "pattern": "\\S" }, "to": { "type": "string", "pattern": "\\S" } }
       }
     },
     "policy": {
-      "type": "object",
-      "additionalProperties": false,
+      "type": "object", "additionalProperties": false,
       "properties": {
         "require_qmllint": { "type": "boolean" },
         "new_code_only": { "type": "boolean" },
@@ -37,103 +34,104 @@
       }
     },
     "tools": {
-      "type": "object",
-      "additionalProperties": false,
+      "type": "object", "additionalProperties": false,
       "properties": {
         "parser_oracle": {
-          "type": "object",
-          "additionalProperties": false,
+          "type": "object", "additionalProperties": false,
           "properties": {
             "check": { "type": "boolean" },
-            "qmldom_command": { "type": "string", "minLength": 1 },
+            "qmldom_command": { "type": "string", "pattern": "\\S" },
             "tree_sitter": { "type": "boolean" },
             "timeout_ms": { "type": "integer", "exclusiveMinimum": 0 }
           }
         },
         "cmake": {
-          "type": "object",
-          "additionalProperties": false,
+          "type": "object", "additionalProperties": false,
           "properties": {
-            "command": { "type": "string", "minLength": 1 },
+            "command": { "type": "string", "pattern": "\\S" },
             "check": { "type": "boolean" },
-            "build_dir": { "type": "string", "minLength": 1 },
+            "build_dir": { "type": "string", "pattern": "\\S" },
             "configure": { "type": "boolean" },
-            "configure_arguments": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-            "build_targets": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
-            "build_arguments": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "configure_arguments": { "type": "array", "items": { "type": "string", "pattern": "\\S", "not": { "pattern": "^(?:-[SB]|--build(?:=|$))" } } },
+            "build_targets": { "type": "array", "items": { "type": "string", "pattern": "\\S" }, "uniqueItems": true },
+            "build_arguments": { "type": "array", "items": { "type": "string", "pattern": "\\S", "not": { "pattern": "^(?:(?:--build|--target)(?:=|$)|-t)" } } },
             "timeout_ms": { "type": "integer", "exclusiveMinimum": 0 },
-            "working_directory": { "type": "string", "minLength": 1 },
+            "working_directory": { "type": "string", "pattern": "\\S" },
             "environment": { "type": "object", "additionalProperties": { "type": "string" } },
-            "redact_patterns": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+            "redact_patterns": { "type": "array", "items": { "type": "string", "pattern": "\\S", "format": "regex" } }
           }
         },
         "qmllint": {
-          "type": "object",
-          "additionalProperties": false,
+          "type": "object", "additionalProperties": false,
           "properties": {
-            "command": { "type": "string", "minLength": 1 },
+            "command": { "type": "string", "pattern": "\\S" },
             "check": { "type": "boolean" },
-            "arguments": {
-              "type": "array",
-              "items": { "type": "string", "not": { "pattern": "^--json(?:=|$)" } }
-            },
-            "import_paths": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
-            "qmltypes": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
-            "use_environment_imports": { "type": "boolean" }
+            "arguments": { "type": "array", "items": { "type": "string", "not": { "pattern": "^--json(?:=|$)" } } },
+            "import_paths": { "type": "array", "items": { "type": "string", "pattern": "\\S" }, "uniqueItems": true },
+            "qmltypes": { "type": "array", "items": { "type": "string", "pattern": "\\S" }, "uniqueItems": true },
+            "use_environment_imports": { "type": "boolean" },
+            "timeout_ms": { "type": "integer", "exclusiveMinimum": 0 },
+            "working_directory": { "type": "string", "pattern": "\\S" },
+            "environment": { "type": "object", "additionalProperties": { "type": "string" } },
+            "redact_patterns": { "type": "array", "items": { "type": "string", "pattern": "\\S", "format": "regex" } }
           }
         },
         "qmlformat": {
-          "type": "object",
-          "additionalProperties": false,
+          "type": "object", "additionalProperties": false,
           "properties": {
-            "command": { "type": "string" },
-            "check": { "type": "boolean" }
+            "command": { "type": "string", "pattern": "\\S", "not": { "pattern": "(?:^|\\s)(?:-i|--inplace|-F|--files|--write-defaults)(?:\\s|=|$)" } },
+            "check": { "type": "boolean" },
+            "arguments": { "type": "array", "items": { "type": "string", "pattern": "\\S", "not": { "pattern": "^(?:-(?:i|F).*|--(?:inplace|files|write-defaults)(?:=|$))" } } },
+            "timeout_ms": { "type": "integer", "exclusiveMinimum": 0 },
+            "working_directory": { "type": "string", "pattern": "\\S" },
+            "environment": { "type": "object", "additionalProperties": { "type": "string" } },
+            "redact_patterns": { "type": "array", "items": { "type": "string", "pattern": "\\S", "format": "regex" } }
           }
         },
         "qmltestrunner": {
-          "type": "object",
-          "additionalProperties": false,
+          "type": "object", "additionalProperties": false,
           "properties": {
-            "command": { "type": "string", "minLength": 1 },
+            "command": { "type": "string", "pattern": "\\S" },
             "check": { "type": "boolean" },
-            "arguments": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "arguments": { "type": "array", "items": { "type": "string", "pattern": "\\S", "not": { "pattern": "^-o(?:=|$)" } } },
             "timeout_ms": { "type": "integer", "exclusiveMinimum": 0 },
-            "working_directory": { "type": "string", "minLength": 1 },
+            "working_directory": { "type": "string", "pattern": "\\S" },
             "environment": { "type": "object", "additionalProperties": { "type": "string" } },
-            "redact_patterns": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+            "redact_patterns": { "type": "array", "items": { "type": "string", "pattern": "\\S", "format": "regex" } }
           }
         },
         "runtime": {
-          "type": "object",
-          "additionalProperties": false,
+          "type": "object", "additionalProperties": false,
+          "if": { "properties": { "check": { "const": true } }, "required": ["check"] },
+          "then": { "required": ["command"] },
           "properties": {
-            "command": { "type": "string", "minLength": 1 },
+            "command": { "type": "string", "pattern": "\\S" },
             "check": { "type": "boolean" },
-            "arguments": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "arguments": { "type": "array", "items": { "type": "string", "pattern": "\\S" } },
             "timeout_ms": { "type": "integer", "exclusiveMinimum": 0 },
-            "working_directory": { "type": "string", "minLength": 1 },
+            "working_directory": { "type": "string", "pattern": "\\S" },
             "environment": { "type": "object", "additionalProperties": { "type": "string" } },
-            "redact_patterns": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+            "redact_patterns": { "type": "array", "items": { "type": "string", "pattern": "\\S", "format": "regex" } }
           }
         },
         "qml_profiler": {
-          "type": "object",
-          "additionalProperties": false,
+          "type": "object", "additionalProperties": false,
+          "if": { "properties": { "check": { "const": true } }, "required": ["check"] },
+          "then": { "required": ["command"] },
           "properties": {
-            "command": { "type": "string", "minLength": 1 },
+            "command": { "type": "string", "pattern": "\\S" },
             "check": { "type": "boolean" },
-            "arguments": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "arguments": { "type": "array", "items": { "type": "string", "pattern": "\\S" } },
             "timeout_ms": { "type": "integer", "exclusiveMinimum": 0 },
-            "working_directory": { "type": "string", "minLength": 1 },
+            "working_directory": { "type": "string", "pattern": "\\S" },
             "environment": { "type": "object", "additionalProperties": { "type": "string" } },
-            "redact_patterns": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+            "redact_patterns": { "type": "array", "items": { "type": "string", "pattern": "\\S", "format": "regex" } }
           }
         }
       }
     },
     "type_roles": {
-      "type": "object",
-      "additionalProperties": false,
+      "type": "object", "additionalProperties": false,
       "properties": {
         "interactive_types": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
         "layout_types": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
@@ -141,20 +139,14 @@
       }
     },
     "reports": {
-      "type": "object",
-      "additionalProperties": false,
+      "type": "object", "additionalProperties": false,
       "properties": {
-        "tests": { "type": "string" },
-        "runtime_warnings": { "type": "string" },
-        "qml_profiler": { "type": "string" },
-        "coverage": { "type": "string" },
-        "qmlbench": { "type": "string" },
-        "qmlbench_baseline": { "type": "string" }
+        "tests": { "type": "string" }, "runtime_warnings": { "type": "string" }, "qml_profiler": { "type": "string" },
+        "coverage": { "type": "string" }, "qmlbench": { "type": "string" }, "qmlbench_baseline": { "type": "string" }
       }
     },
     "benchmark_policy": {
-      "type": "object",
-      "additionalProperties": false,
+      "type": "object", "additionalProperties": false,
       "properties": {
         "max_regression_percent": { "type": "number", "minimum": 0 },
         "max_coefficient_of_variation": { "type": "number", "minimum": 0 },
@@ -164,58 +156,41 @@
     "performance_budgets": {
       "type": "array",
       "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["scenario"],
+        "type": "object", "additionalProperties": false, "required": ["scenario"],
         "properties": {
-          "scenario": { "type": "string", "minLength": 1 },
-          "platform": { "type": "string" },
-          "frame_p95_ms": { "type": "number", "exclusiveMinimum": 0 },
-          "max_event_ms": { "type": "number", "exclusiveMinimum": 0 }
+          "scenario": { "type": "string", "pattern": "\\S" }, "platform": { "type": "string" },
+          "frame_p95_ms": { "type": "number", "exclusiveMinimum": 0 }, "max_event_ms": { "type": "number", "exclusiveMinimum": 0 }
         }
       }
     },
     "rules": {
       "type": "object",
       "additionalProperties": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "enabled": { "type": "boolean" },
-          "enforcement": { "enum": ["block", "warn", "review"] }
-        }
+        "type": "object", "additionalProperties": false,
+        "properties": { "enabled": { "type": "boolean" }, "enforcement": { "enum": ["block", "warn", "review"] } }
       }
     },
     "suppressions": {
       "type": "array",
       "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "anyOf": [
-          { "required": ["id"] },
-          { "required": ["kind"] },
-          { "required": ["file"] }
-        ],
+        "type": "object", "additionalProperties": false,
+        "anyOf": [{ "required": ["id"] }, { "required": ["kind"] }, { "required": ["file"] }],
         "properties": {
-          "id": { "type": "string" },
-          "kind": { "type": "string" },
-          "file": { "type": "string" },
-          "reason": { "type": "string" }
+          "id": { "type": "string", "pattern": "\\S" }, "kind": { "type": "string", "pattern": "\\S" },
+          "file": { "type": "string", "pattern": "\\S" }, "reason": { "type": "string" }
         }
       }
     },
     "process_boundary": {
-      "type": "object",
-      "additionalProperties": false,
+      "type": "object", "additionalProperties": false,
       "properties": {
         "objectTypes": { "type": "array", "items": { "type": "string" } },
-        "textPatterns": { "type": "array", "items": { "type": "string" } },
-        "allowedFilePatterns": { "type": "array", "items": { "type": "string" } }
+        "textPatterns": { "type": "array", "items": { "type": "string", "format": "regex" } },
+        "allowedFilePatterns": { "type": "array", "items": { "type": "string", "format": "regex" } }
       }
     },
     "thresholds": {
-      "type": "object",
-      "additionalProperties": false,
+      "type": "object", "additionalProperties": false,
       "properties": {
         "fileSlocHigh": { "type": "number", "exclusiveMinimum": 0 },
         "componentObjectCountHigh": { "type": "number", "exclusiveMinimum": 0 },

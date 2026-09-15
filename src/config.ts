@@ -31,6 +31,7 @@ const DEFAULT_POLICY: PolicyConfig = {
 export function loadConfig(configPath: string | null): Config {
   const configPathResolved = path.resolve(configPath ?? "qmlqualitylens.config.json");
   const configDir = path.dirname(configPathResolved);
+  if (configPath !== null && !fs.existsSync(configPathResolved)) throw new Error(`Config file does not exist: ${configPathResolved}`);
   const raw = readRawConfig(configPathResolved);
   const projectRoot = resolveFrom(configDir, raw.project_root ?? ".");
   const outputDir = resolveFrom(projectRoot, raw.output_dir ?? "target/qmlqualitylens");
@@ -91,8 +92,17 @@ function resolveTools(raw: RawConfig, root: string): Config["tools"] {
     qmllintImportPaths: (tools?.qmllint?.import_paths ?? []).map((item) => resolveFrom(root, item)),
     qmllintQmltypes: (tools?.qmllint?.qmltypes ?? []).map((item) => resolveFrom(root, item)),
     qmllintUseEnvironmentImports: tools?.qmllint?.use_environment_imports ?? false,
+    qmllintTimeoutMs: tools?.qmllint?.timeout_ms ?? 120_000,
+    qmllintWorkingDirectory: resolveFrom(root, tools?.qmllint?.working_directory ?? "."),
+    qmllintEnvironment: tools?.qmllint?.environment ?? {},
+    qmllintRedactPatterns: tools?.qmllint?.redact_patterns ?? [],
     qmlformatCommand: tools?.qmlformat?.command ?? null,
     qmlformatCheck: tools?.qmlformat?.check ?? false,
+    qmlformatArguments: tools?.qmlformat?.arguments ?? [],
+    qmlformatTimeoutMs: tools?.qmlformat?.timeout_ms ?? 30_000,
+    qmlformatWorkingDirectory: resolveFrom(root, tools?.qmlformat?.working_directory ?? "."),
+    qmlformatEnvironment: tools?.qmlformat?.environment ?? {},
+    qmlformatRedactPatterns: tools?.qmlformat?.redact_patterns ?? [],
     qmltestrunnerCommand: tools?.qmltestrunner?.command ?? "qmltestrunner",
     qmltestrunnerCheck: tools?.qmltestrunner?.check ?? false,
     qmltestrunnerArguments: tools?.qmltestrunner?.arguments ?? [],
@@ -149,8 +159,8 @@ export function starterConfig(): RawConfig {
     tools: {
       parser_oracle: { check: false, qmldom_command: "qmldom", tree_sitter: false, timeout_ms: 30000 },
       cmake: { command: "cmake", check: false, build_dir: "build", configure: false, configure_arguments: [], build_targets: ["all_qmllint"], build_arguments: [], timeout_ms: 600000, working_directory: ".", environment: {}, redact_patterns: [] },
-      qmllint: { command: "qmllint", check: false, arguments: [], import_paths: [], qmltypes: [], use_environment_imports: false },
-      qmlformat: { command: "qmlformat", check: false },
+      qmllint: { command: "qmllint", check: false, arguments: [], import_paths: [], qmltypes: [], use_environment_imports: false, timeout_ms: 120000, working_directory: ".", environment: {}, redact_patterns: [] },
+      qmlformat: { command: "qmlformat", check: false, arguments: [], timeout_ms: 30000, working_directory: ".", environment: {}, redact_patterns: [] },
       qmltestrunner: { command: "qmltestrunner", check: false, arguments: [], timeout_ms: 120000, working_directory: ".", environment: {}, redact_patterns: [] },
       runtime: { check: false, arguments: [], timeout_ms: 60000, working_directory: ".", environment: {}, redact_patterns: [] },
       qml_profiler: { check: false, arguments: [], timeout_ms: 300000, working_directory: ".", environment: {}, redact_patterns: [] },
@@ -218,6 +228,8 @@ function validateCoreFields(value: Record<string, JsonValue>, errors: string[]):
   for (const key of ["$schema", "project_name", "project_root", "output_dir", "qmllint_report", "qmllint_command"]) validateOptionalValue(value[key], (item) => typeof item === "string", `${key} must be a string`, errors);
   validateOptionalValue(value.profile, (item) => isOneOf(item, ["generic", "qtquick", "kirigami", "quickshell", "custom"] satisfies ProjectProfile[]), "profile must be one of: generic, qtquick, kirigami, quickshell, custom", errors);
   for (const key of ["source_roots", "exclude", "external_modules", "external_types", "entrypoints"]) validateStringArray(value[key], key, errors);
+  for (const key of ["source_roots", "external_modules", "external_types", "entrypoints"]) validateNonEmptyStrings(value[key], key, errors);
+  for (const key of ["external_modules", "external_types", "entrypoints"]) validateUniqueStrings(value[key], key, errors);
   validateDynamicEdges(value.dynamic_component_edges, errors);
   if (Array.isArray(value.source_roots) && value.source_roots.length === 0) errors.push("source_roots must not be empty");
 }
@@ -249,6 +261,10 @@ function validateStringArray(value: JsonValue | undefined, name: string, errors:
   if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) errors.push(`${name} must be an array of strings`);
 }
 
+function validateUniqueStrings(value: JsonValue | undefined, name: string, errors: string[]): void {
+  if (Array.isArray(value) && new Set(value).size !== value.length) errors.push(`${name} must not contain duplicates`);
+}
+
 function validateNonEmptyStrings(value: JsonValue | undefined, name: string, errors: string[]): void {
   if (Array.isArray(value) && value.some((item) => typeof item === "string" && !item.trim())) errors.push(`${name} must not contain empty strings`);
 }
@@ -275,6 +291,7 @@ function validatePolicy(value: JsonValue | undefined, errors: string[]): void {
   if (!isJsonRecord(value)) return;
   for (const key of ["require_qmllint", "new_code_only"]) if (value[key] !== undefined && typeof value[key] !== "boolean") errors.push(`policy.${key} must be a boolean`);
   if (value.fail_on !== undefined && (!Array.isArray(value.fail_on) || value.fail_on.some((item) => !isOneOf(item, ["block", "warn", "review"] satisfies Enforcement[])))) errors.push("policy.fail_on must contain only block, warn, or review");
+  validateUniqueStrings(value.fail_on, "policy.fail_on", errors);
   if (value.incomplete !== undefined && !isOneOf(value.incomplete, ["fail", "warn", "pass"])) errors.push("policy.incomplete must be one of: fail, warn, pass");
 }
 
@@ -308,30 +325,34 @@ function validateCmakeTool(value: JsonValue | undefined, errors: string[]): void
     validateStringArray(value[key], `tools.cmake.${key}`, errors);
     validateNonEmptyStrings(value[key], `tools.cmake.${key}`, errors);
   }
-  if (hasManagedArgument(value.configure_arguments, /^(?:(?:-S|-B)$|--build(?:=|$))/)) errors.push("tools.cmake.configure_arguments must not override managed -S/-B/build options");
-  if (hasManagedArgument(value.build_arguments, /^(?:--build|--target|-t)$/)) errors.push("tools.cmake.build_arguments must not override managed build/target options");
+  validateUniqueStrings(value.build_targets, "tools.cmake.build_targets", errors);
+  if (hasManagedArgument(value.configure_arguments, /^(?:-[SB]|--build(?:=|$))/)) errors.push("tools.cmake.configure_arguments must not override managed -S/-B/build options");
+  if (hasManagedArgument(value.build_arguments, /^(?:(?:--build|--target)(?:=|$)|-t)/)) errors.push("tools.cmake.build_arguments must not override managed build/target options");
   validateExecutionControls(value, "tools.cmake", errors);
 }
 
 function validateQmllintTool(value: JsonValue | undefined, errors: string[]): void {
-  validateObjectKeys(value, "tools.qmllint", new Set(["command", "check", "arguments", "import_paths", "qmltypes", "use_environment_imports"]), errors);
+  validateObjectKeys(value, "tools.qmllint", new Set(["command", "check", "arguments", "import_paths", "qmltypes", "use_environment_imports", "timeout_ms", "working_directory", "environment", "redact_patterns"]), errors);
   if (!isJsonRecord(value)) return;
   validateOptionalValue(value.command, isNonEmptyString, "tools.qmllint.command must be a non-empty string", errors);
   validateOptionalValue(value.check, (item) => typeof item === "boolean", "tools.qmllint.check must be a boolean", errors);
   validateOptionalValue(value.use_environment_imports, (item) => typeof item === "boolean", "tools.qmllint.use_environment_imports must be a boolean", errors);
   for (const key of ["arguments", "import_paths", "qmltypes"]) validateStringArray(value[key], `tools.qmllint.${key}`, errors);
-  for (const key of ["import_paths", "qmltypes"]) validateNonEmptyStrings(value[key], `tools.qmllint.${key}`, errors);
+  for (const key of ["import_paths", "qmltypes"]) {
+    validateNonEmptyStrings(value[key], `tools.qmllint.${key}`, errors);
+    validateUniqueStrings(value[key], `tools.qmllint.${key}`, errors);
+  }
   if (hasManagedArgument(value.arguments, /^--json(?:=|$)/)) errors.push("tools.qmllint.arguments must not set --json; qmlqualitylens manages structured output");
+  validateExecutionControls(value, "tools.qmllint", errors);
 }
 
 function hasManagedArgument(value: JsonValue | undefined, pattern: RegExp): boolean { return Array.isArray(value) && value.some((argument) => typeof argument === "string" && pattern.test(argument)); }
 
 function validateQmlformatTool(value: JsonValue | undefined, errors: string[]): void {
-  validateObjectKeys(value, "tools.qmlformat", new Set(["command", "check"]), errors);
+  validateExecutableTool(value, "tools.qmlformat", errors, true);
   if (!isJsonRecord(value)) return;
-  if (value.command !== undefined && typeof value.command !== "string") errors.push("tools.qmlformat.command must be a string");
   if (typeof value.command === "string" && /(?:^|\s)(?:-i|--inplace|-F|--files|--write-defaults)(?:\s|=|$)/.test(value.command)) errors.push("tools.qmlformat.command must not contain mutating qmlformat options (-i, --inplace, -F, --files, --write-defaults)");
-  if (value.check !== undefined && typeof value.check !== "boolean") errors.push("tools.qmlformat.check must be a boolean");
+  if (hasManagedArgument(value.arguments, /^(?:-(?:i|F).*|--(?:inplace|files|write-defaults)(?:=|$))/)) errors.push("tools.qmlformat.arguments must not contain mutating qmlformat options (-i, --inplace, -F, --files, --write-defaults)");
 }
 
 function validateExecutableTool(value: JsonValue | undefined, name: string, errors: string[], defaultCommand: boolean): void {
@@ -357,7 +378,10 @@ function validateExecutionControls(value: Record<string, JsonValue>, name: strin
 function validateTypeRoles(value: JsonValue | undefined, errors: string[]): void {
   validateObjectKeys(value, "type_roles", new Set(["interactive_types", "layout_types", "delegate_owner_types"]), errors);
   if (!isJsonRecord(value)) return;
-  for (const key of ["interactive_types", "layout_types", "delegate_owner_types"]) validateStringArray(value[key], `type_roles.${key}`, errors);
+  for (const key of ["interactive_types", "layout_types", "delegate_owner_types"]) {
+    validateStringArray(value[key], `type_roles.${key}`, errors);
+    validateUniqueStrings(value[key], `type_roles.${key}`, errors);
+  }
 }
 
 function validateReports(value: JsonValue | undefined, errors: string[]): void {
@@ -391,7 +415,7 @@ function validatePerformanceBudget(value: JsonValue, index: number, errors: stri
   const name = `performance_budgets[${index}]`;
   validateObjectKeys(value, name, new Set(["scenario", "platform", "frame_p95_ms", "max_event_ms"]), errors);
   if (!isJsonRecord(value)) return;
-  if (typeof value.scenario !== "string" || !value.scenario) errors.push(`${name}.scenario must be a non-empty string`);
+  if (!isNonEmptyString(value.scenario)) errors.push(`${name}.scenario must be a non-empty string`);
   if (value.platform !== undefined && typeof value.platform !== "string") errors.push(`${name}.platform must be a string`);
   for (const key of ["frame_p95_ms", "max_event_ms"]) validatePositiveNumber(value[key], `${name}.${key}`, errors);
 }
@@ -426,6 +450,7 @@ function validateSuppression(value: JsonValue, index: number, errors: string[]):
   const keys = new Set(["id", "kind", "file", "reason"]);
   for (const key of Object.keys(value)) if (!keys.has(key)) errors.push(`unknown property 'suppressions[${index}].${key}'`);
   for (const key of keys) if (value[key] !== undefined && typeof value[key] !== "string") errors.push(`suppressions[${index}].${key} must be a string`);
+  for (const key of ["id", "kind", "file"]) validateOptionalValue(value[key], isNonEmptyString, `suppressions[${index}].${key} must be a non-empty string`, errors);
   if (!value.id && !value.kind && !value.file) errors.push(`suppressions[${index}] must specify id, kind, or file`);
 }
 

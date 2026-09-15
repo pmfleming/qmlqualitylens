@@ -19,6 +19,8 @@
     "analyze:shelllist": "npm run build && node dist/bin/qmlqualitylens.js analyze --config examples/shelllist.config.json --format summary",
     "measure:shelllist": "npm run build && node dist/bin/qmlqualitylens.js measure all --config examples/shelllist.config.json",
     "calibrate": "node scripts/calibrate.mjs",
+    "benchmark:clones": "npm run build && node scripts/benchmark-clones.mjs",
+    "package:smoke": "node scripts/package-smoke.mjs",
     "prepack": "npm run build"
   },
   "engines": {
@@ -49,6 +51,7 @@
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^26.2.0",
+    "ajv": "^8.20.0",
     "tree-sitter": "^0.25.1",
     "tree-sitter-qmljs": "^0.3.1",
     "typescript": "^7.0.2"

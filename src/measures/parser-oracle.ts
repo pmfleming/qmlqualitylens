@@ -29,7 +29,7 @@ export function measureParserOracle(config: Config, command: string, context: An
   const findings = support.applySuppressions(support.enrichFindings(evidence.flatMap((item) => item.findings), config), config);
   const unavailableTreeSitter = config.tools.parserOracleTreeSitter && !treeSitter;
   const failed = records.some((record) => record.qmldom?.status !== "pass" || record.tree_sitter?.status === "failed");
-  const version = support.toolVersion(config.tools.parserOracleQmldomCommand, config.projectRoot);
+  const version = support.toolVersion(config.tools.parserOracleQmldomCommand, config.projectRoot, config.tools.parserOracleTimeoutMs);
   const artifact = {
     ...baseArtifact(context, "quality.parser_oracle", command, { qmldom: version }),
     summary: {

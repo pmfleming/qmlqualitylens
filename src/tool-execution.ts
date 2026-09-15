@@ -14,21 +14,23 @@ type ToolExecution = {
   stderr_tail: string[];
 };
 
-export function executeTool(executable: string, args: string[], cwd: string, timeoutMs: number, environment: NodeJS.ProcessEnv = process.env, redactPatterns: string[] = []): ToolExecution {
+export function executeTool(executable: string, args: string[], cwd: string, timeoutMs: number, environment: NodeJS.ProcessEnv = process.env, redactPatterns: string[] = [], inspectStdout?: (stdout: string) => void): ToolExecution {
   const started = Date.now();
   const runner = path.resolve(import.meta.dirname, "../bin/tool-process-runner.js");
   const result = spawnSync(process.execPath, [runner, executable, ...args], { cwd, env: environment, timeout: timeoutMs, killSignal: "SIGTERM", encoding: "utf8", maxBuffer: 20 * 1024 * 1024 });
+  // Comparisons may inspect raw output without retaining it in public evidence.
+  inspectStdout?.(result.stdout ?? "");
   const stdout = redact(result.stdout ?? "", redactPatterns);
   const stderr = redact(result.stderr ?? "", redactPatterns);
   const runnerError = stderr.match(/^QMLQUALITYLENS_EXEC_ERROR:\s*(.*)$/m)?.[1] ?? null;
   const error = result.error?.message ?? runnerError ?? (result.status === null ? `Tool did not return an exit code${result.signal ? ` (signal ${result.signal})` : ""}` : null);
   return {
     status: error ? "incomplete" : result.status === 0 ? "pass" : "failed",
-    command: commandDisplay(executable, args),
+    command: redact(commandDisplay(executable, args), redactPatterns),
     exit_code: result.status,
     signal: result.signal,
     duration_ms: Date.now() - started,
-    error,
+    error: error ? redact(error, redactPatterns) : null,
     stdout,
     stderr,
     stdout_tail: outputTail(stdout),
@@ -36,10 +38,18 @@ export function executeTool(executable: string, args: string[], cwd: string, tim
   };
 }
 
-export function toolVersion(executable: string, cwd: string): string | null {
-  const result = spawnSync(executable, ["--version"], { cwd, encoding: "utf8", timeout: 10_000 });
-  if (result.status !== 0) return null;
-  return `${result.stdout ?? result.stderr ?? ""}`.split(/\r?\n/)[0]?.trim() || null;
+// Compatibility only: legacy qmllint_command is explicitly a shell command.
+// Native adapters must call executeTool with an executable and argument array.
+export function executeShellTool(command: string, cwd: string, timeoutMs: number, environment: NodeJS.ProcessEnv = process.env, redactPatterns: string[] = []): ToolExecution {
+  const executable = process.platform === "win32" ? process.env.ComSpec ?? "cmd.exe" : "/bin/sh";
+  const args = process.platform === "win32" ? ["/d", "/s", "/c", command] : ["-c", command];
+  return executeTool(executable, args, cwd, timeoutMs, environment, redactPatterns);
+}
+
+export function toolVersion(executable: string, cwd: string, timeoutMs = 10_000, environment: NodeJS.ProcessEnv = process.env, redactPatterns: string[] = []): string | null {
+  const result = executeTool(executable, ["--version"], cwd, Math.min(timeoutMs, 10_000), environment, redactPatterns);
+  if (result.status !== "pass") return null;
+  return (result.stdout.trim() || result.stderr.trim()).split(/\r?\n/)[0] || null;
 }
 
 export function publicToolExecution(execution: ToolExecution): Omit<ToolExecution, "stdout" | "stderr"> {

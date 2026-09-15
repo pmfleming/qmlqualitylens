@@ -3,7 +3,7 @@ import { baseArtifact, writeArtifact } from "./shared.js";
 
 export function measureClones(config: Config, command: string, context: AnalysisContext) {
   const structural = qmlStructuralClones(context);
-  const cloneGroups = [...context.clones, ...structural];
+  const cloneGroups = [...context.clones, ...structural.groups];
   const byFile = new Map<string, number>();
   for (const group of cloneGroups) {
     for (const instance of group.instances) byFile.set(instance.file, (byFile.get(instance.file) ?? 0) + group.lines);
@@ -14,11 +14,14 @@ export function measureClones(config: Config, command: string, context: Analysis
   const artifact = {
     ...baseArtifact(context, "quality.clones", command),
     summary: {
+      status: context.cloneDetection.status === "partial" || structural.omitted_groups ? "partial" : "complete",
       groups: cloneGroups.length,
       normalized_line_groups: context.clones.length,
-      qml_structural_groups: structural.length,
+      qml_structural_groups: structural.groups.length,
+      omitted_structural_groups: structural.omitted_groups,
       files_with_duplication: duplicationPressure.length,
     },
+    clone_detection: context.cloneDetection,
     groups: cloneGroups,
     duplication_pressure: duplicationPressure,
   };
@@ -26,13 +29,13 @@ export function measureClones(config: Config, command: string, context: Analysis
   return artifact;
 }
 
-function qmlStructuralClones(context: AnalysisContext): CloneGroup[] {
+function qmlStructuralClones(context: AnalysisContext): { groups: CloneGroup[]; omitted_groups: number } {
   const signatures = new Map<string, Array<{ file: string; line: number; typeName: string; sample: string[] }>>();
   for (const { file, document } of context.qmlDocuments) {
     for (const object of document.objects) {
       if (object.bindings.length < 3 && object.children.length < 1) continue;
-      const bindingNames = object.bindings.map((binding) => binding.propertyPath.replace(/^.+\./, "")).sort().slice(0, 12);
-      const childTypes = object.children.map((child) => child.typeName).sort().slice(0, 8);
+      const bindingNames = object.bindings.map((binding) => binding.propertyPath.replace(/^.+\./, "")).sort();
+      const childTypes = object.children.map((child) => child.typeName).sort();
       const signature = `${object.typeName}|b:${bindingNames.join(",")}|c:${childTypes.join(",")}`;
       if (signature.length < 18) continue;
       const entries = signatures.get(signature) ?? [];
@@ -54,5 +57,5 @@ function qmlStructuralClones(context: AnalysisContext): CloneGroup[] {
     });
     sequence += 1;
   }
-  return groups.slice(0, 100);
+  return { groups: groups.slice(0, 100), omitted_groups: Math.max(0, groups.length - 100) };
 }

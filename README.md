@@ -11,6 +11,7 @@ qmlqualitylens combines a dependency-free QML parser with optional Qt tool, test
 - [Roadmap](ROADMAP.md)
 - [0.5 migration guide](docs/migration-0.5.md)
 - [Oracle calibration](docs/oracle-calibration.md)
+- [Audit and execution hardening / migration notes](docs/review-hardening.md)
 - [Historical implementation plan](docs/qml-quality-improvement-plan.md)
 
 ## Requirements
@@ -41,6 +42,8 @@ npm run integration:qt       # Qt 6, CMake, and Ninja required
 npm run oracle:qmllint       # Qt diagnostics skip if qmllint is unavailable
 npm run oracle:qmllint:nix   # Nix/NixOS convenience environment
 npm run analyze:shelllist    # Analyze a local ../shelllist checkout
+npm run package:smoke        # Install and exercise the tarball without optional peers
+npm run benchmark:clones     # Profile overlapping clone-window detection
 ```
 
 The default analyzer and test suite do not require Qt or execute QML applications.
@@ -84,7 +87,7 @@ The internal parser models imports, object and property scopes, aliases, signals
 }
 ```
 
-Use [`qmlqualitylens.schema.json`](qmlqualitylens.schema.json) for all fields and constraints. Invalid configuration fails fast.
+Use [`qmlqualitylens.schema.json`](qmlqualitylens.schema.json) for all fields and constraints. Invalid configuration or an explicitly requested missing `--config` file fails fast. When `--config` is omitted, an absent default file still permits default settings.
 
 ### Paths and reachability
 
@@ -117,7 +120,9 @@ All execution is opt-in. Enable commands only for trusted projects in controlled
 
 Prefer a CMake-generated `all_qmllint` or `*_qmllint` target when it provides the production import and type environment. Do not also enable native qmllint if that would duplicate diagnostics.
 
-Adapters support project-relative working directories, environment variables, timeouts, bounded output tails, and redaction patterns. Timed-out process groups are terminated. The starter config disables every execution check.
+Adapters support project-relative working directories, environment variables, timeouts, bounded output tails, and redaction patterns. Timed-out process groups are terminated, including descendants that ignore the initial termination signal. The starter config disables every execution check.
+
+`tools.qmllint` and `tools.qmlformat` accept `command` (an executable path), `arguments`, `timeout_ms`, `working_directory`, `environment`, and `redact_patterns`. Put flags in `arguments`, not in `command`; formatting runs without a shell. Defaults are 120 seconds for qmllint and 30 seconds per formatting check. Version probes are bounded too. The deprecated top-level `qmllint_command` remains an explicit shell-command compatibility mode, using the qmllint execution controls.
 
 ### Imported evidence
 
@@ -165,7 +170,7 @@ qmlqualitylens audit [--config file] [--baseline file] [--save-baseline file]
 
 - `catalog` lists task ids, artifacts, dependencies, and rules.
 - `measure task-id` runs one task and its dependencies.
-- `audit --base <ref>` compares against a base worktree and can gate only introduced findings.
+- `audit --base <ref>` compares against a base worktree and can gate only introduced findings. Static identities—not just edited lines—detect new findings on unchanged declarations and consumers. Nested Git projects and Git-detected renames are supported. Invalid analysis inputs always participate in the gate.
 - `--save-baseline` records current identities; `--baseline` suppresses matching reviewed findings.
 - `--fail-on` and `--incomplete` override configured policy for one invocation.
 
@@ -179,12 +184,16 @@ qmlqualitylens audit --config qmlqualitylens.config.json \
 
 Pin Qt versions for deterministic tool output. Keep suppressions narrow and review stale suppressions.
 
+## Analysis limits
+
+Clone reports expose `clone_detection.status`, internal limits, and omitted window/group counts. A partial scan also emits `duplication.analysis_limit`; its duplication metrics must not be treated as exhaustive. `clones.json` separately records omitted structural groups. Presentation limits do not discard findings for retained normalized groups.
+
 ## Current priorities
 
 Version 0.5 added reachability, Cobertura/Qoverage import, qmlbench comparisons, and GitLab Code Quality output. Current work focuses on:
 
 - parser recovery for malformed JavaScript and uncommon QML grammar;
-- moved-finding attribution in audit mode;
+- moved-finding attribution across refactors beyond Git-detected file renames;
 - deeper keyboard, focus, accessibility, and framework-specific rules;
 - calibrated native QML Profiler adapters;
 - continued manual labeling against representative Qt, Kirigami, QGroundControl, and Quickshell projects.

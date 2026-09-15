@@ -12,8 +12,8 @@ type RuleOverride = { enabled?: boolean; enforcement?: Enforcement };
 type TypeRolesConfig = { interactiveTypes: string[]; layoutTypes: string[]; delegateOwnerTypes: string[] };
 type ParserOracleTools = { parserOracleCheck: boolean; parserOracleQmldomCommand: string; parserOracleTreeSitter: boolean; parserOracleTimeoutMs: number };
 type CmakeTools = { cmakeCommand: string; cmakeCheck: boolean; cmakeBuildDir: string; cmakeConfigure: boolean; cmakeConfigureArguments: string[]; cmakeBuildTargets: string[]; cmakeBuildArguments: string[]; cmakeTimeoutMs: number; cmakeWorkingDirectory: string; cmakeEnvironment: Record<string, string>; cmakeRedactPatterns: string[] };
-type QmllintTools = { qmllintCommand: string; qmllintCheck: boolean; qmllintArguments: string[]; qmllintImportPaths: string[]; qmllintQmltypes: string[]; qmllintUseEnvironmentImports: boolean };
-type QmlformatTools = { qmlformatCommand: string | null; qmlformatCheck: boolean };
+type QmllintTools = ExecutionTools<"qmllint"> & { qmllintCommand: string; qmllintCheck: boolean; qmllintImportPaths: string[]; qmllintQmltypes: string[]; qmllintUseEnvironmentImports: boolean };
+type QmlformatTools = ExecutionTools<"qmlformat"> & { qmlformatCommand: string | null; qmlformatCheck: boolean };
 type ExecutionTools<Prefix extends string> = Record<`${Prefix}Arguments`, string[]> & Record<`${Prefix}TimeoutMs`, number> & Record<`${Prefix}WorkingDirectory`, string> & Record<`${Prefix}Environment`, Record<string, string>> & Record<`${Prefix}RedactPatterns`, string[]>;
 type QmltestrunnerTools = ExecutionTools<"qmltestrunner"> & { qmltestrunnerCommand: string; qmltestrunnerCheck: boolean };
 type RuntimeTools = ExecutionTools<"runtime"> & { runtimeCommand: string | null; runtimeCheck: boolean };
@@ -27,7 +27,7 @@ type DynamicComponentEdge = { from: string; to: string };
 type RawPolicy = { require_qmllint?: boolean; new_code_only?: boolean; fail_on?: Enforcement[]; incomplete?: "fail" | "warn" | "pass" };
 type RawExecutionTool = { command?: string; check?: boolean; arguments?: string[]; timeout_ms?: number; working_directory?: string; environment?: Record<string, string>; redact_patterns?: string[] };
 type RawCmakeTool = Omit<RawExecutionTool, "arguments"> & { build_dir?: string; configure?: boolean; configure_arguments?: string[]; build_targets?: string[]; build_arguments?: string[] };
-type RawTools = { parser_oracle?: { check?: boolean; qmldom_command?: string; tree_sitter?: boolean; timeout_ms?: number }; cmake?: RawCmakeTool; qmllint?: { command?: string; check?: boolean; arguments?: string[]; import_paths?: string[]; qmltypes?: string[]; use_environment_imports?: boolean }; qmlformat?: { command?: string; check?: boolean }; qmltestrunner?: RawExecutionTool; runtime?: RawExecutionTool; qml_profiler?: RawExecutionTool };
+type RawTools = { parser_oracle?: { check?: boolean; qmldom_command?: string; tree_sitter?: boolean; timeout_ms?: number }; cmake?: RawCmakeTool; qmllint?: RawExecutionTool & { import_paths?: string[]; qmltypes?: string[]; use_environment_imports?: boolean }; qmlformat?: RawExecutionTool; qmltestrunner?: RawExecutionTool; runtime?: RawExecutionTool; qml_profiler?: RawExecutionTool };
 type RawTypeRoles = { interactive_types?: string[]; layout_types?: string[]; delegate_owner_types?: string[] };
 type RawReports = { tests?: string; runtime_warnings?: string; qml_profiler?: string; coverage?: string; qmlbench?: string; qmlbench_baseline?: string };
 type RawBenchmarkPolicy = { max_regression_percent?: number; max_coefficient_of_variation?: number; min_samples?: number };
@@ -187,6 +187,15 @@ export type FileRecord = {
 
 type CloneInstance = { file: string; startLine: number; endLine: number };
 
+export type CloneDetectionCoverage = {
+  status: "complete" | "partial";
+  limits: { keys: number; windows_per_key: number; groups: number };
+  omitted_windows: number;
+  omitted_groups: number;
+  expanded_windows: number;
+  skipped_covered_windows: number;
+};
+
 export type CloneGroup = {
   id: string;
   kind: "normalized_line_window" | "style_literal" | "qml_structural";
@@ -276,5 +285,6 @@ export type AnalysisArtifact = {
     parserDiagnostics: ParserDiagnosticRecord[];
   };
   clones: CloneGroup[];
+  clone_detection?: CloneDetectionCoverage;
   findings: Finding[];
 };

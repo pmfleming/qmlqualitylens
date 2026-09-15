@@ -82,7 +82,7 @@ function runCmake(config: Config): CmakeExecution {
     steps.push(runCmakeStep(config, "build", ["--build", config.tools.cmakeBuildDir, ...targets, ...config.tools.cmakeBuildArguments]));
   }
   const status = cmakeStatus(steps);
-  return { enabled: true, status, version: support.toolVersion(config.tools.cmakeCommand, config.projectRoot), build_dir: config.tools.cmakeBuildDir, reason: cmakeFailureReason(status, steps), steps };
+  return { enabled: true, status, version: support.toolVersion(config.tools.cmakeCommand, config.tools.cmakeWorkingDirectory, config.tools.cmakeTimeoutMs, { ...process.env, ...config.tools.cmakeEnvironment }, config.tools.cmakeRedactPatterns), build_dir: config.tools.cmakeBuildDir, reason: cmakeFailureReason(status, steps), steps };
 }
 
 function cmakeStatus(steps: CmakeStep[]): CmakeExecution["status"] { if (steps.some((step) => step.status === "incomplete")) return "incomplete"; if (steps.some((step) => step.status === "failed")) return "failed"; return steps.some((step) => step.status === "warn") ? "warn" : "pass"; }

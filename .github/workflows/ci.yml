@@ -45,14 +45,17 @@ jobs:
 
   package:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: ['24.4.0', '24']
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
-          node-version: 24
+          node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
-      - run: npm pack --dry-run
+      - run: npm run package:smoke
 
   oracle-qmllint:
     runs-on: ubuntu-latest

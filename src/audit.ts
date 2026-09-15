@@ -15,7 +15,7 @@ import { measureParserOracle } from "./measures/parser-oracle.js";
 import { measureRuntimePerformance, measureRuntimeWarnings } from "./measures/runtime.js";
 import { findingSummary } from "./measures/shared.js";
 import { confidence, provenance } from "./provenance.js";
-import { isFindingRecord } from "./rules.js";
+import { fingerprintFor, isFindingRecord } from "./rules.js";
 import { artifactFreshness, changedRunInputs } from "./run-evidence.js";
 import type { Config, Finding } from "./types.js";
 import { errorMessage, isRecord, parseJson, writeJsonArtifact } from "./value-utils.js";
@@ -42,6 +42,9 @@ type DiffContext = {
   hunks: number;
   status: "disabled" | "available" | "unavailable";
   reason?: string;
+  repositoryRoot?: string;
+  commit?: string;
+  renames: Map<string, string>;
 };
 
 type BaseSnapshot = {
@@ -87,7 +90,7 @@ export function runAudit(config: Config, command: string, options: AuditOptions)
   });
   const allFindings = attachSourceExcerpts(collectFindings(context.findings, evidenceArtifacts), context.sources);
   const diff = diffContext(config, options.base);
-  const base = baseSnapshot(config, options.base);
+  const base = baseSnapshot(config, diff);
   const findings = classifyAuditFindings(allFindings, readBaseline(options.baseline), diff, base);
   const gateFindings = gateCandidates(findings, options.base, config.policy.newCodeOnly);
   const incompleteChecks = requiredCheckFailures(config, context, evidenceArtifacts);
@@ -121,7 +124,8 @@ function collectFindings(contextFindings: Finding[], artifacts: object[]): Findi
 function classifyAuditFindings(findings: Finding[], baselineIds: Set<string>, diff: DiffContext, base: BaseSnapshot): AuditFinding[] { return findings.map((finding) => auditFinding(finding, baselineIds, diff, base)); }
 function gateCandidates(findings: AuditFinding[], base: string | null, newCodeOnly: boolean): AuditFinding[] {
   const active = findings.filter((finding) => !finding.suppressed);
-  return base && newCodeOnly ? active.filter((finding) => finding.introduced || (!finding.file && finding.evidence === "tool" && finding.enforcement === "block")) : active;
+  // Input validity is a prerequisite for any comparison, not a changed-code rule.
+  return base && newCodeOnly ? active.filter((finding) => finding.kind.startsWith("input.") || finding.introduced || (!finding.file && finding.evidence === "tool" && finding.enforcement === "block")) : active;
 }
 
 function buildAuditArtifact(config: Config, command: string, selectedBase: string | null, context: AnalysisContext, findings: AuditFinding[], gateFindings: AuditFinding[], incompleteChecks: string[], diff: DiffContext, base: BaseSnapshot): AuditArtifact {
@@ -206,29 +210,54 @@ function auditFinding(finding: Finding, baselineIds: Set<string>, diff: DiffCont
 
 function introducedFinding(finding: Finding, changedFile: boolean, inChangedHunk: boolean, presentInBase: boolean | null, diff: DiffContext): boolean {
   if (diff.status === "disabled") return false;
-  if (!changedFile) return false;
-  const changedLocation = finding.line ? inChangedHunk : changedFile;
-  if (!changedLocation) return false;
-  return presentInBase === null ? true : !presentInBase;
+  // Static findings can appear on unchanged declarations (or in another file)
+  // when a dependency or a multiline body changes. Hunks are attribution only.
+  if (presentInBase !== null && finding.evidence !== "tool") return !presentInBase;
+  // Base analysis deliberately does not execute tools: retain location-based
+  // attribution for evidence that cannot be compared against the base snapshot.
+  return changedFile && (finding.line ? inChangedHunk : true) && presentInBase !== true;
 }
 
 function diffContext(config: Config, base: string | null): DiffContext {
-  if (!base) return { base, files: new Set(), linesByFile: new Map(), hunks: 0, status: "disabled" };
-  const result = spawnSync("git", ["-C", config.projectRoot, "diff", "--unified=0", "--no-ext-diff", base, "--", "."], { encoding: "utf8", maxBuffer: 20 * 1024 * 1024 });
-  if (result.status !== 0) return { base, files: new Set(), linesByFile: new Map(), hunks: 0, status: "unavailable", reason: result.stderr || result.error?.message || "git diff failed" };
-  return parseDiff(result.stdout, base);
+  const empty: DiffContext = { base, files: new Set(), linesByFile: new Map(), renames: new Map(), hunks: 0, status: base ? "unavailable" : "disabled" };
+  if (!base) return empty;
+  const git = (args: string[]) => spawnSync("git", ["-C", config.projectRoot, ...args], { encoding: "utf8", timeout: 30_000, maxBuffer: 20 * 1024 * 1024 });
+  const root = git(["rev-parse", "--show-toplevel"]);
+  const revision = git(["rev-parse", "--verify", "--end-of-options", `${base}^{commit}`]);
+  if (root.status !== 0 || revision.status !== 0) return { ...empty, reason: root.stderr || revision.stderr || "Cannot resolve Git root/base commit" };
+  const repositoryRoot = root.stdout.trim(), commit = revision.stdout.trim();
+  const common = ["diff", "--no-ext-diff", "--no-textconv", "--no-color", "--no-relative", "--find-renames"];
+  const names = git([...common, "--name-status", "-z", commit, "--", "."]);
+  const patch = git([...common, "--unified=0", "--src-prefix=a/", "--dst-prefix=b/", commit, "--", "."]);
+  if (names.status !== 0 || patch.status !== 0) return { ...empty, reason: names.stderr || patch.stderr || names.error?.message || patch.error?.message || "git diff failed" };
+  const projectPath = (file: string) => path.relative(config.projectRoot, path.resolve(repositoryRoot, file)).split(path.sep).join("/");
+  const diff = parseDiff(patch.stdout, base, projectPath);
+  const fields = names.stdout.split("\0");
+  for (let index = 0; index < fields.length - 1;) {
+    const status = fields[index++], before = projectPath(fields[index++]);
+    if (status.startsWith("R") || status.startsWith("C")) {
+      const after = projectPath(fields[index++]);
+      diff.files.add(after);
+      if (status.startsWith("R")) { diff.files.add(before); diff.renames.set(before, after); }
+    } else diff.files.add(before);
+  }
+  return { ...diff, repositoryRoot, commit };
 }
 
-function parseDiff(diff: string, base: string): DiffContext {
+function parseDiff(diff: string, base: string, projectPath: (file: string) => string): DiffContext {
   const files = new Set<string>();
   const linesByFile = new Map<string, Set<number>>();
   let currentFile: string | null = null;
   let hunks = 0;
   for (const line of diff.split(/\r?\n/)) {
-    if (line.startsWith("+++ b/")) {
-      currentFile = line.slice("+++ b/".length);
-      files.add(currentFile);
-      if (!linesByFile.has(currentFile)) linesByFile.set(currentFile, new Set());
+    if (line.startsWith("diff --git ")) currentFile = null;
+    if (line.startsWith("+++ ")) {
+      const file = decodeGitPath(line.slice(4).replace(/\t$/, ""));
+      currentFile = file.startsWith("b/") ? projectPath(file.slice(2)) : null;
+      if (currentFile) {
+        files.add(currentFile);
+        if (!linesByFile.has(currentFile)) linesByFile.set(currentFile, new Set());
+      }
       continue;
     }
     if (!currentFile || !line.startsWith("@@")) continue;
@@ -241,34 +270,64 @@ function parseDiff(diff: string, base: string): DiffContext {
     for (let offset = 0; offset < count; offset += 1) lines.add(start + offset);
     linesByFile.set(currentFile, lines);
   }
-  return { base, files, linesByFile, hunks, status: "available" };
+  return { base, files, linesByFile, hunks, status: "available", renames: new Map() };
 }
 
-function baseSnapshot(config: Config, base: string | null): BaseSnapshot {
-  if (!base) return { findingIds: new Set(), status: "disabled" };
+// Git C-quotes paths containing control characters, quotes, or non-ASCII bytes.
+function decodeGitPath(value: string): string {
+  if (!value.startsWith('"')) return value;
+  const escapes: Record<string, string> = { a: "\x07", b: "\b", t: "\t", n: "\n", v: "\v", f: "\f", r: "\r", '"': '"', "\\": "\\" };
+  const bytes: Buffer[] = [];
+  for (const part of value.slice(1, -1).matchAll(/\\([0-7]{1,3}|.)|[^\\]+/g)) {
+    bytes.push(part[1] && /^[0-7]+$/.test(part[1]) ? Buffer.from([parseInt(part[1], 8)]) : Buffer.from(part[1] ? escapes[part[1]] ?? part[1] : part[0]));
+  }
+  return Buffer.concat(bytes).toString("utf8");
+}
+
+function baseSnapshot(config: Config, diff: DiffContext): BaseSnapshot {
+  if (!diff.base) return { findingIds: new Set(), status: "disabled" };
+  if (!diff.commit || !diff.repositoryRoot) return { findingIds: new Set(), status: "unavailable", reason: diff.reason };
   using temp = fs.mkdtempDisposableSync(path.join(os.tmpdir(), "qmlqualitylens-audit-"));
   const worktree = path.join(temp.path, "base");
   try {
-    const add = spawnSync("git", ["-C", config.projectRoot, "worktree", "add", "--detach", "--quiet", worktree, base], { encoding: "utf8", maxBuffer: 10 * 1024 * 1024 });
+    const add = spawnSync("git", ["-C", config.projectRoot, "worktree", "add", "--detach", "--quiet", worktree, diff.commit], { encoding: "utf8", timeout: 30_000, maxBuffer: 10 * 1024 * 1024 });
     if (add.status !== 0) return { findingIds: new Set(), status: "unavailable", reason: add.stderr || add.error?.message || "git worktree add failed" };
-    const baseConfig = configForWorktree(config, worktree, temp.path);
-    return { findingIds: new Set(createAnalysisContext(baseConfig).findings.map(findingKey)), status: "available" };
+    const baseConfig = configForWorktree(config, diff.repositoryRoot, worktree, temp.path);
+    const context = createAnalysisContext(baseConfig);
+    // Include static findings from evidence tasks (e.g. missing test catalogs and
+    // CMake module declarations), not just the core analyzer. All execution and
+    // imported reports remain disabled in this temporary base configuration.
+    const findings = collectFindings(context.findings, collectEvidence(baseConfig, "qmlqualitylens audit base", context)).map((finding) => {
+      const renamed = finding.file ? diff.renames.get(finding.file) : undefined;
+      if (!renamed || !finding.file) return findingKey(finding);
+      const originalFile = finding.file;
+      const replace = (value: string) => value.replaceAll(originalFile, renamed);
+      return fingerprintFor({ ...finding, file: renamed, message: replace(finding.message), semantic_anchor: finding.semantic_anchor ? replace(finding.semantic_anchor) : undefined });
+    });
+    return { findingIds: new Set(findings), status: "available" };
   } catch (error) {
     return { findingIds: new Set(), status: "unavailable", reason: errorMessage(error) };
   } finally {
-    spawnSync("git", ["-C", config.projectRoot, "worktree", "remove", "--force", worktree], { encoding: "utf8" });
+    spawnSync("git", ["-C", config.projectRoot, "worktree", "remove", "--force", worktree], { encoding: "utf8", timeout: 30_000 });
   }
 }
 
-function configForWorktree(config: Config, worktree: string, temp: string): Config {
+function configForWorktree(config: Config, repositoryRoot: string, worktree: string, temp: string): Config {
+  const remap = (file: string): string => {
+    const relative = path.relative(repositoryRoot, file);
+    return relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative) ? file : path.resolve(worktree, relative);
+  };
+  if (config.sourceRoots.some((root) => remap(root) === root)) throw new Error("Cannot compare source roots outside the Git repository");
   return {
     ...config,
-    projectRoot: worktree,
-    sourceRoots: config.sourceRoots.map((root) => path.resolve(worktree, path.relative(config.projectRoot, root))),
+    configPath: remap(config.configPath),
+    configDir: remap(config.configDir),
+    projectRoot: remap(config.projectRoot),
+    sourceRoots: config.sourceRoots.map(remap),
     outputDir: path.join(temp, "out"),
     qmllintReport: null,
     qmllintCommand: null,
-    tools: { ...config.tools, parserOracleCheck: false, cmakeCheck: false, qmllintCheck: false, qmlformatCheck: false, qmltestrunnerCheck: false, runtimeCheck: false, qmlProfilerCheck: false },
+    tools: { ...config.tools, qmllintImportPaths: config.tools.qmllintImportPaths.map(remap), qmllintQmltypes: config.tools.qmllintQmltypes.map(remap), parserOracleCheck: false, cmakeCheck: false, qmllintCheck: false, qmlformatCheck: false, qmltestrunnerCheck: false, runtimeCheck: false, qmlProfilerCheck: false },
     reports: { tests: null, runtimeWarnings: null, qmlProfiler: null, coverage: null, qmlbench: null, qmlbenchBaseline: null },
   };
 }

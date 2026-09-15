@@ -31,12 +31,12 @@ function run(executable: string, executableArgs: string[]): void {
 }
 
 function scheduleForcedExit(child: ChildProcess): void {
-  const timer = setTimeout(() => {
+  // Keep the runner alive for the full grace period even when the immediate
+  // child exits: descendants may ignore SIGTERM and still belong to its group.
+  setTimeout(() => {
     if (child.pid && process.platform !== "win32") try { process.kill(-child.pid, "SIGKILL"); } catch { /* already exited */ }
     process.exit(128);
   }, 500);
-  timer.unref();
-  child.once("exit", () => process.exit(128));
 }
 
 function terminateTree(child: ChildProcess, signal: NodeJS.Signals): void {

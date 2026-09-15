@@ -9,7 +9,7 @@ export function measureCorrectnessCatalog(config: Config, command: string, conte
   const execution = loadTestEvidence(config.reports.tests);
   const rawFindings = catalogFindings(tests.length, toolExecution, execution);
   const findings = support.applySuppressions(support.enrichFindings(rawFindings, config), config);
-  const version = config.tools.qmltestrunnerCheck ? support.toolVersion(config.tools.qmltestrunnerCommand, config.tools.qmltestrunnerWorkingDirectory) : null;
+  const version = config.tools.qmltestrunnerCheck ? support.toolVersion(config.tools.qmltestrunnerCommand, config.tools.qmltestrunnerWorkingDirectory, config.tools.qmltestrunnerTimeoutMs, { ...process.env, ...config.tools.qmltestrunnerEnvironment }, config.tools.qmltestrunnerRedactPatterns) : null;
   const artifact = {
     ...baseArtifact(context, "correctness.catalog", command, { qmltestrunner: version }),
     summary: {

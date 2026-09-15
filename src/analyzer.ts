@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { detectClones } from "./clone-detector.js";
+import { analyzeClones } from "./clone-detector.js";
 import { cleanupFindings } from "./measures/cleanup.js";
 import { discoverSourceFiles } from "./file-walk.js";
 import { attachSemanticAnchors, attachSourceExcerpts } from "./finding-identity.js";
@@ -50,6 +50,7 @@ export type AnalysisContext = {
   qmllint: QmllintResult;
   qmllintFindings: QmllintFinding[];
   clones: CloneGroup[];
+  cloneDetection: ReturnType<typeof analyzeClones>["coverage"];
   findings: Finding[];
   scores: ScoreBreakdown;
 };
@@ -70,12 +71,13 @@ export function createAnalysisContext(config: Config): AnalysisContext {
   const parserDiagnostics = files.flatMap((file) => file.parserDiagnostics);
   const qmllint = loadQmllintResult(config, sources.filter((source) => source.kind === "qml" || source.kind === "js").map((source) => source.relativePath));
   const qmllintFindings = qmllint.findings;
-  const clones = detectClones(sources, config.thresholds.cloneWindow);
+  const { groups: clones, coverage: cloneDetection } = analyzeClones(sources, config.thresholds.cloneWindow);
   const run = createAnalysisRun(config, sources, qmllint.version);
-  const baseContext: AnalysisContext = { config, run, sources, qmlDocuments, resolution, typeEvidence, ruleCoverage: [], files, components, functions, bindings, parserDiagnostics, qmllint, qmllintFindings, clones, findings: [], scores: emptyScores() };
+  const baseContext: AnalysisContext = { config, run, sources, qmlDocuments, resolution, typeEvidence, ruleCoverage: [], files, components, functions, bindings, parserDiagnostics, qmllint, qmllintFindings, clones, cloneDetection, findings: [], scores: emptyScores() };
   const evaluation = evaluateQmlRules(baseContext);
   const candidates = attachSemanticAnchors([
     ...inputFindings(config, sources),
+    ...(cloneDetection.status === "partial" ? [{ id: "duplication.analysis_limit", kind: "duplication.analysis_limit", severity: "low" as const, message: `Clone analysis reached its limits: ${cloneDetection.omitted_windows} windows and ${cloneDetection.omitted_groups} groups omitted; duplication metrics are partial`, actions: ["Inspect clone_detection in the quality report; analyze smaller source scopes for complete duplication coverage."] }] : []),
     ...deriveFindings(config, files, components, functions, bindings, clones, resolution),
     ...evaluation.findings,
     ...cleanupFindings(baseContext),
@@ -119,6 +121,7 @@ export function legacyQualityArtifact(context: AnalysisContext): AnalysisArtifac
     scores,
     records: { files, components, functions, bindings, parserDiagnostics },
     clones,
+    clone_detection: context.cloneDetection,
     findings,
   };
 }
@@ -284,9 +287,17 @@ function configuredPatternMatches(text: string, patterns: string[]): number {
 }
 
 function applyReuseMetrics(components: ComponentRecord[], resolution: ProjectResolution): void {
+  const uses = new Map<string, number>(), targets = new Map<string, Set<string>>();
+  for (const use of resolution.componentUses) {
+    if (!use.target || use.target === use.from) continue;
+    uses.set(use.target, (uses.get(use.target) ?? 0) + 1);
+    const outgoing = targets.get(use.from) ?? new Set<string>();
+    outgoing.add(use.target);
+    targets.set(use.from, outgoing);
+  }
   for (const component of components) {
-    component.useCount = resolution.componentUses.filter((use) => use.target === component.file && use.from !== component.file).length;
-    component.fanOut = new Set(resolution.componentUses.filter((use) => use.from === component.file && use.target && use.target !== component.file).map((use) => use.target)).size;
+    component.useCount = uses.get(component.file) ?? 0;
+    component.fanOut = targets.get(component.file)?.size ?? 0;
     component.leverageScore = boundedScore(50 + component.useCount * 15 - component.effort * 0.15 - component.fanOut * 2);
   }
 }
@@ -314,7 +325,7 @@ function deriveFindings(
     ...components.flatMap((component) => componentFindings(component, config)),
     ...functions.flatMap((fn) => functionFindings(fn, config)),
     ...bindings.flatMap((binding) => bindingFindings(binding, config)),
-    ...clones.slice(0, 20).map(cloneFinding),
+    ...clones.map(cloneFinding),
     ...resolutionFindings(resolution),
   ];
 }

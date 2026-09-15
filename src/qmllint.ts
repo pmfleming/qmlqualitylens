@@ -1,7 +1,6 @@
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { commandDisplay, projectRelativePath } from "./tool-execution.js";
+import { executeShellTool, executeTool, projectRelativePath, toolVersion } from "./tool-execution.js";
 import type { Config, Finding, JsonValue, QmllintFinding, QmllintSource } from "./types.js";
 import { errorMessage, hasCaptures, isJsonRecord, isRecord, numberValue, parseJson, stringValue } from "./value-utils.js";
 
@@ -62,17 +61,17 @@ export function qmllintDiagnostic(item: QmllintFinding): Finding {
 }
 
 function runQmllintCommand(config: Config, expectedFiles: string[]): QmllintResult {
-  const result = spawnSync(config.qmllintCommand ?? "", { cwd: config.projectRoot, shell: true, encoding: "utf8", maxBuffer: 10 * 1024 * 1024 });
+  const result = executeShellTool(config.qmllintCommand ?? "", config.tools.qmllintWorkingDirectory, config.tools.qmllintTimeoutMs, { ...process.env, ...config.tools.qmllintEnvironment }, config.tools.qmllintRedactPatterns);
   const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
   const parsed = safeParseQmllintOutput(output, config);
-  const noDiagnosticFailure = result.status !== 0 && parsed.findings.length === 0 ? `qmllint exited with ${result.status} without parseable diagnostics` : null;
-  const error = [result.error?.message, parsed.error, noDiagnosticFailure].filter(Boolean).join("; ") || null;
+  const noDiagnosticFailure = result.exit_code !== 0 && parsed.findings.length === 0 ? `qmllint exited with ${result.exit_code} without parseable diagnostics` : null;
+  const error = [result.error, parsed.error, noDiagnosticFailure].filter(Boolean).join("; ") || null;
   return {
     source: "command",
     status: error ? "incomplete" : "complete",
-    command: config.qmllintCommand,
+    command: result.command,
     report: null,
-    exitCode: result.status,
+    exitCode: result.exit_code,
     version: qmllintVersion(config.qmllintCommand, config),
     ...qmllintSettings(config, config.qmllintCommand),
     expectedFiles,
@@ -94,24 +93,24 @@ function runNativeQmllint(config: Config, expectedFiles: string[]): QmllintResul
     ...config.tools.qmllintQmltypes.flatMap((item) => ["-i", item]),
     ...(config.tools.qmllintUseEnvironmentImports ? ["-E"] : []),
     "--",
-    ...expectedFiles,
+    ...expectedFiles.map((file) => path.resolve(config.projectRoot, file)),
   ];
-  const result = spawnSync(config.tools.qmllintCommand, args, { cwd: config.projectRoot, encoding: "utf8", maxBuffer: 20 * 1024 * 1024 });
+  const result = executeTool(config.tools.qmllintCommand, args, config.tools.qmllintWorkingDirectory, config.tools.qmllintTimeoutMs, { ...process.env, ...config.tools.qmllintEnvironment }, config.tools.qmllintRedactPatterns);
   const stdout = result.stdout ?? "";
   const stderr = result.stderr ?? "";
   const parseInput = stdout.trim() ? stdout : stderr;
   const parsed = safeParseQmllintOutput(parseInput, config);
   const reportedFiles = filesFromStructuredReport(stdout, config);
   const coverage = hasStructuredFileManifest(stdout) ? reportCoverage(expectedFiles, reportedFiles, true) : "complete";
-  const noDiagnosticFailure = result.status !== 0 && parsed.findings.length === 0 ? `qmllint exited with ${result.status} without parseable diagnostics` : null;
+  const noDiagnosticFailure = result.exit_code !== 0 && parsed.findings.length === 0 ? `qmllint exited with ${result.exit_code} without parseable diagnostics` : null;
   const coverageError = coverage === "partial" ? `qmllint output covers ${reportedFiles.length} of ${expectedFiles.length} expected files` : null;
-  const error = [result.error?.message, parsed.error, noDiagnosticFailure, coverageError].filter(Boolean).join("; ") || null;
+  const error = [result.error, parsed.error, noDiagnosticFailure, coverageError].filter(Boolean).join("; ") || null;
   return {
     source: "tool",
     status: error ? "incomplete" : "complete",
-    command: commandDisplay(config.tools.qmllintCommand, args),
+    command: result.command,
     report: null,
-    exitCode: result.status,
+    exitCode: result.exit_code,
     version: qmllintExecutableVersion(config.tools.qmllintCommand, config),
     ...nativeQmllintSettings(config),
     expectedFiles,
@@ -257,9 +256,7 @@ function qmllintVersion(command: string | null, config: Config): string | null {
 }
 
 function qmllintExecutableVersion(executable: string, config: Config): string | null {
-  const result = spawnSync(executable, ["--version"], { cwd: config.projectRoot, encoding: "utf8" });
-  if (result.status !== 0) return null;
-  return `${result.stdout ?? result.stderr ?? ""}`.trim() || null;
+  return toolVersion(executable, config.tools.qmllintWorkingDirectory, config.tools.qmllintTimeoutMs, { ...process.env, ...config.tools.qmllintEnvironment }, config.tools.qmllintRedactPatterns);
 }
 
 function qmllintSettings(config: Config, command: string | null = null): { settings: string | null; disabledCategories: string[]; compilerWarningsEnabled: boolean | null; importPaths: string[] } {

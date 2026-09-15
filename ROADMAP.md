@@ -28,7 +28,10 @@ Current work is calibration-driven; the baseline product milestones are complete
 
 ### Adoption workflow
 
-- [ ] Attribute moved findings across refactors.
+- [x] Harden audit inputs, nested-project paths, multiline/dependency-change attribution, and Git-detected renames.
+- [ ] Attribute moved findings across more general cross-file refactors.
+- [x] Exercise real tarball installation without optional peers on the minimum and current Node 24 release.
+- [x] Add schema/runtime parity checks and explicit clone-analysis limits with overlapping-window performance regression tests.
 - [ ] Continue rule-by-rule precision/noise labeling before strengthening enforcement.
 - [ ] Add project-board/dashboard integrations beyond the existing machine-readable catalog.
 

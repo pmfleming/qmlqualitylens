@@ -1,32 +1,46 @@
 import { createHash } from "node:crypto";
 import { stripComments } from "./metrics.js";
-import type { CloneGroup, SourceFile } from "./types.js";
+import type { CloneDetectionCoverage, CloneGroup, SourceFile } from "./types.js";
 
 type CloneWindow = { file: string; startLine: number; endLine: number };
-type CloneWindowBucket = { instances: CloneWindow[]; sample: string[] };
+type CloneWindowBucket = { instances: CloneWindow[] };
 type SourceLookup = { normalized: Map<string, string[]>; original: Map<string, string[]> };
 
-const MAX_CLONE_KEYS = 50_000;
-const MAX_WINDOWS_PER_KEY = 25;
+type CloneLimits = CloneDetectionCoverage["limits"];
+const DEFAULT_LIMITS: CloneLimits = { keys: 50_000, windows_per_key: 25, groups: 100 };
 
 export function detectClones(sources: SourceFile[], windowSize: number): CloneGroup[] {
-  const windows = collectCloneWindows(sources, windowSize);
-  return cloneGroups(windows, windowSize, sourceLookup(sources)).slice(0, 100);
+  return analyzeClones(sources, windowSize).groups;
 }
 
-function collectCloneWindows(sources: SourceFile[], windowSize: number): Map<string, CloneWindowBucket> {
+export function analyzeClones(sources: SourceFile[], windowSize: number, overrides: Partial<CloneLimits> = {}): { groups: CloneGroup[]; coverage: CloneDetectionCoverage } {
+  const limits = { ...DEFAULT_LIMITS, ...overrides };
+  if (!Number.isInteger(windowSize) || windowSize < 2 || Object.values(limits).some((value) => !Number.isInteger(value) || value < 1)) throw new Error("Clone window and limits must be positive integers (window >= 2)");
+  const coverage: CloneDetectionCoverage = { status: "complete", limits, omitted_windows: 0, omitted_groups: 0, expanded_windows: 0, skipped_covered_windows: 0 };
+  const lookup = sourceLookup([...sources].filter((source) => source.kind === "qml" || source.kind === "js").sort((a, b) => a.relativePath.localeCompare(b.relativePath)));
+  const windows = collectCloneWindows(lookup, windowSize, coverage);
+  const groups = cloneGroups(windows, windowSize, lookup, coverage);
+  coverage.omitted_groups = Math.max(0, groups.length - limits.groups);
+  if (coverage.omitted_windows || coverage.omitted_groups) coverage.status = "partial";
+  return { groups: groups.slice(0, limits.groups), coverage };
+}
+
+function collectCloneWindows(lookup: SourceLookup, windowSize: number, coverage: CloneDetectionCoverage): Map<string, CloneWindowBucket> {
   const windows = new Map<string, CloneWindowBucket>();
-  for (const file of sources.filter((item) => item.kind === "qml" || item.kind === "js")) collectFileWindows(windows, file, windowSize);
-  return windows;
-}
-
-function collectFileWindows(windows: Map<string, CloneWindowBucket>, file: SourceFile, windowSize: number): void {
-  const normalized = stripComments(file.text).split(/\r?\n/).map(normalizeCloneLine);
-  for (let index = 0; index <= normalized.length - windowSize; index += 1) {
-    const key = cloneKey(normalized, index, windowSize);
-    if (!key || (!windows.has(key) && windows.size >= MAX_CLONE_KEYS)) continue;
-    addCloneWindow(windows, key, { file: file.relativePath, startLine: index + 1, endLine: index + windowSize }, file.lines.slice(index, index + windowSize));
+  for (const [file, normalized] of lookup.normalized) {
+    for (let index = 0; index <= normalized.length - windowSize; index += 1) {
+      const key = cloneKey(normalized, index, windowSize);
+      if (!key) continue;
+      if ((!windows.has(key) && windows.size >= coverage.limits.keys) || (windows.get(key)?.instances.length ?? 0) >= coverage.limits.windows_per_key) {
+        coverage.omitted_windows += 1;
+        continue;
+      }
+      const bucket = windows.get(key) ?? { instances: [] };
+      bucket.instances.push({ file, startLine: index + 1, endLine: index + windowSize });
+      windows.set(key, bucket);
+    }
   }
+  return windows;
 }
 
 function cloneKey(lines: string[], index: number, windowSize: number): string | null {
@@ -35,13 +49,26 @@ function cloneKey(lines: string[], index: number, windowSize: number): string | 
   return slice.filter(Boolean).length >= windowSize - 1 && key.length >= 40 ? key : null;
 }
 
-function cloneGroups(windows: Map<string, CloneWindowBucket>, windowSize: number, lookup: SourceLookup): CloneGroup[] {
+function cloneGroups(windows: Map<string, CloneWindowBucket>, windowSize: number, lookup: SourceLookup, coverage: CloneDetectionCoverage): CloneGroup[] {
   const merged = new Map<string, Omit<CloneGroup, "id">>();
+  const expandedRanges = new Map<string, { start: number; end: number }>();
   for (const bucket of windows.values()) {
     const locations = uniqueBy(bucket.instances, (entry) => `${entry.file}:${entry.startLine}`);
     if (locations.length < 2 || new Set(locations.map((entry) => entry.file)).size < 2) continue;
+    const first = locations[0];
+    // A tuple of files and relative offsets identifies one aligned set of
+    // occurrences. Only skip a seed when that exact tuple was already expanded;
+    // a subset/superset of occurrences may reveal a different maximal clone.
+    const alignment = JSON.stringify(locations.map((location) => [location.file, location.startLine - first.startLine]));
+    const covered = expandedRanges.get(alignment);
+    if (covered && first.startLine >= covered.start && first.endLine <= covered.end) {
+      coverage.skipped_covered_windows += 1;
+      continue;
+    }
+    coverage.expanded_windows += 1;
     const expanded = expandClone(locations, windowSize, lookup);
     if (!expanded) continue;
+    expandedRanges.set(alignment, { start: expanded.instances[0].startLine, end: expanded.instances[0].endLine });
     const key = contentKey(expanded.instances[0], lookup);
     const existing = merged.get(key);
     if (existing) existing.instances = uniqueBy([...existing.instances, ...expanded.instances], (entry) => `${entry.file}:${entry.startLine}:${entry.endLine}`);
@@ -116,12 +143,6 @@ function sourceLookup(sources: SourceFile[]): SourceLookup {
     normalized: new Map(sources.map((file) => [file.relativePath, stripComments(file.text).split(/\r?\n/).map(normalizeCloneLine)])),
     original: new Map(sources.map((file) => [file.relativePath, file.lines])),
   };
-}
-
-function addCloneWindow(windows: Map<string, CloneWindowBucket>, key: string, instance: CloneWindow, sample: string[]): void {
-  const bucket = windows.get(key) ?? { instances: [], sample };
-  if (bucket.instances.length < MAX_WINDOWS_PER_KEY) bucket.instances.push(instance);
-  windows.set(key, bucket);
 }
 
 function normalizeCloneLine(line: string): string {

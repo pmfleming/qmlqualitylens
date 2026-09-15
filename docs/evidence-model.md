@@ -54,7 +54,11 @@ The default remains static and side-effect free. Trusted projects can enable:
 - `tools.runtime.check`: run a smoke scenario and inspect QML warnings;
 - `tools.qml_profiler.check`: run an adapter that exports normalized profiler evidence.
 
-Commands use executable/argument arrays rather than a shell. Adapters support controlled working directories, environments, redaction, and timeouts. They terminate timed-out process groups, retain bounded output tails, and record exit status. Because they can execute project code or build hooks, enable them only for trusted repositories in controlled environments.
+Native commands use executable/argument arrays rather than a shell. The deprecated top-level `qmllint_command` is the sole shell-command compatibility mode; it uses the execution controls from `tools.qmllint`. Formatting commands no longer interpret shell syntax: move flags from `command` to `arguments`.
+
+Adapters support controlled working directories, environments, redaction, and timeouts. qmllint defaults to 120 seconds; qmlformat defaults to 30 seconds per file. Version probes use the shared process runner with a maximum 10-second timeout (or the configured timeout if smaller). On POSIX systems, timed-out process groups receive SIGTERM followed by SIGKILL after a 500-ms grace period, even if the immediate child has already exited. Descendants that deliberately create a new session are outside this process-group guarantee. Windows uses `taskkill /T /F`.
+
+Output is bounded to 20 MiB by the shared runner, with at most 200 lines retained in public output tails. Exceeding the output bound is incomplete, not a verified success. Commands, errors, and tails apply configured redaction. Because tools can execute project code or build hooks, enable them only for trusted repositories in controlled environments.
 
 ## Imported reports
 
@@ -102,6 +106,16 @@ Reports include frame percentiles, frames over budget, and event totals/maxima. 
 ### Benchmarks
 
 `reports.qmlbench` accepts qmlbench JSON. With `reports.qmlbench_baseline`, Lens compares matching benchmark names only when Qt, OS/QPA, OpenGL, and window environments match. Noise and sample-count limits come from `benchmark_policy`.
+
+## Changed-code audit
+
+Base comparisons preserve the project subdirectory inside the Git worktree and normalize diff paths to project-relative paths. Static findings are introduced when their identity is absent from the base, even if the finding points to an unchanged declaration or a consumer of a deleted dependency. Hunk membership remains attribution metadata. Git-detected renames remap base identities; arbitrary cross-file refactors are not yet attributed.
+
+Base analysis includes static evidence-task findings but never runs tools or imports current execution reports. Consequently, tool findings still use changed-location attribution when gating changed code; fileless blocking tool failures always participate. Input-validity findings also always participate, independently of changed-code policy. Unavailable base comparisons follow `policy.incomplete`.
+
+## Clone analysis coverage
+
+`qml_quality_report.json`, `clones.json`, and confidence metadata expose `clone_detection`. Its `partial` status records omitted candidate windows or groups caused by internal limits. `clones.json` also reports omitted structural groups. These are heuristic coverage limits rather than missing required tool evidence: they emit a review finding (`duplication.analysis_limit` for normalized clones), and do not automatically invoke `policy.incomplete`. Configure that rule's enforcement if exhaustive duplication review is required. Duplication metrics from a partial scan are not exhaustive.
 
 ## CI examples
 

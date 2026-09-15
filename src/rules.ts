@@ -42,6 +42,7 @@ export const RULES: RuleDefinition[] = [
   lens("complexity.function", "Complex function or handler", "architecture"),
   lens("complexity.binding", "Complex binding", "architecture", "heuristic", "medium", "review"),
   lens("duplication.normalized_clone", "Repeated QML structure", "architecture", "heuristic", "medium", "review"),
+  lens("duplication.analysis_limit", "Clone analysis limits reached", "architecture", "heuristic", "high", "review"),
   lens("cleanup.unused_component", "Unused component candidate", "architecture", "heuristic", "medium", "review"),
   lens("cleanup.unused_id", "Unused id candidate", "architecture", "heuristic", "medium", "review"),
   lens("cleanup.unused_public_property", "Unused public property candidate", "architecture", "heuristic", "medium", "review"),
@@ -134,7 +135,7 @@ function diagnosticOverlap(kind: string, message: string): boolean {
   return false;
 }
 
-function fingerprintFor(finding: Finding): string {
+export function fingerprintFor(finding: Finding): string {
   const stableMessage = finding.message.replace(/\b\d+(?:\.\d+)?\b/g, "#");
   const identity = finding.semantic_anchor ?? stableMessage;
   return createHash("sha256").update([finding.kind, finding.file ?? "", identity, stableMessage].join("\u0000")).digest("hex").slice(0, 24);
