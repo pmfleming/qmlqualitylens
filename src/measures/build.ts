@@ -13,16 +13,9 @@ type CmakeDiagnostic = {
   message: string;
 };
 
-type CmakeStep = {
+type CmakeStep = Omit<ReturnType<typeof support.publicToolExecution>, "status"> & {
   phase: "configure" | "build";
   status: "pass" | "warn" | "failed" | "incomplete";
-  command: string;
-  exit_code: number | null;
-  signal: string | null;
-  duration_ms: number;
-  error: string | null;
-  stdout_tail: string[];
-  stderr_tail: string[];
   diagnostics: CmakeDiagnostic[];
 };
 
@@ -101,18 +94,7 @@ function runCmakeStep(config: Config, phase: CmakeStep["phase"], args: string[])
     : result.exit_code !== 0 || diagnostics.some((item) => item.severity === "error") ? "failed"
       : diagnostics.some((item) => item.severity === "warning") ? "warn"
         : "pass";
-  return {
-    phase,
-    status,
-    command: result.command,
-    exit_code: result.exit_code,
-    signal: result.signal,
-    duration_ms: result.duration_ms,
-    error,
-    stdout_tail: result.stdout_tail,
-    stderr_tail: result.stderr_tail,
-    diagnostics,
-  };
+  return { ...support.publicToolExecution(result), phase, status, diagnostics };
 }
 
 function parseCmakeDiagnostics(output: string, phase: CmakeStep["phase"], config: Config): CmakeDiagnostic[] {

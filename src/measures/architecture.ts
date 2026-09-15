@@ -10,7 +10,7 @@ export function measureArchitectureMap(config: Config, command: string, context:
   const nodes = context.files.map((file) => architectureNode(file, context, observed));
   const idEdges = context.qmlDocuments.flatMap(({ file, document }) => document.idReferences.filter((item) => item.external).map((reference) => ({ from: file, to: `${file}#${reference.name}`, kind: "id_reference", line: reference.line })));
   const edges = [
-    ...context.resolution.reachabilityEdges.map((edge) => ({ from: edge.from, to: edge.to, kind: edge.kind, line: edge.line })),
+    ...context.resolution.reachabilityEdges,
     ...context.resolution.imports.map((item) => ({ from: item.from, to: item.target ?? item.module, kind: importEdgeKind(item.kind), line: item.line })),
     ...idEdges,
   ];

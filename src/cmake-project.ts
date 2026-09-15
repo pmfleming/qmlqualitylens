@@ -69,19 +69,24 @@ function cmakeTokens(text: string): string[] {
     } else if (comment) {
       const end = text.indexOf("\n", index);
       index = end < 0 ? text.length : end + 1;
-    } else if (text[index] === "(") { tokens.push("("); index += 1; }
-    else if (text[index] === ")") { tokens.push(")"); index += 1; }
+    } else if ("()".includes(text[index])) { tokens.push(text[index++]); }
     else {
-      let token = "";
-      const quoted = text[index] === '"';
-      if (quoted) index += 1;
-      while (index < text.length && (quoted ? text[index] !== '"' : !/[\s()#]/.test(text[index]))) {
-        if (text[index] === "\\" && index + 1 < text.length) index += 1;
-        token += text[index++];
-      }
-      if (quoted && text[index] === '"') index += 1;
-      tokens.push(token);
+      const argument = cmakeArgument(text, index);
+      tokens.push(argument.value);
+      index = argument.end;
     }
   }
   return tokens;
+}
+
+function cmakeArgument(text: string, index: number): { value: string; end: number } {
+  const quoted = text[index] === '"';
+  if (quoted) index += 1;
+  let value = "";
+  while (index < text.length && (quoted ? text[index] !== '"' : !/[\s()#]/.test(text[index]))) {
+    if (text[index] === "\\" && index + 1 < text.length) index += 1;
+    value += text[index++];
+  }
+  if (quoted && text[index] === '"') index += 1;
+  return { value, end: index };
 }

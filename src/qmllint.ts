@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { executeShellTool, executeTool, projectRelativePath, toolVersion } from "./tool-execution.js";
 import type { Config, Finding, JsonValue, QmllintFinding, QmllintSource } from "./types.js";
-import { errorMessage, hasCaptures, isJsonRecord, isRecord, numberValue, parseJson, stringValue } from "./value-utils.js";
+import { errorMessage, isJsonRecord, isRecord, numberValue, parseJson, stringValue } from "./value-utils.js";
 
 export type QmllintResult = {
   source: QmllintSource;
@@ -155,35 +155,23 @@ function parseJsonQmllint(text: string, config: Config): QmllintFinding[] {
 
 function parseJsonDocuments(text: string): JsonValue[] | null {
   const documents: JsonValue[] = [];
-  let offset = 0;
-  while (offset < text.length) {
-    while (/\s/.test(text[offset] ?? "")) offset += 1;
-    if (offset >= text.length) break;
-    if (text[offset] !== "{" && text[offset] !== "[") return null;
-    const start = offset;
-    let depth = 0;
-    let quote = false;
-    let escaped = false;
-    for (; offset < text.length; offset += 1) {
-      const character = text[offset] ?? "";
-      if (quote) {
-        if (escaped) escaped = false;
-        else if (character === "\\") escaped = true;
-        else if (character === '"') quote = false;
-        continue;
-      }
-      if (character === '"') quote = true;
-      else if (character === "{" || character === "[") depth += 1;
-      else if (character === "}" || character === "]") depth -= 1;
-      if (depth === 0) {
-        documents.push(parseJson(text.slice(start, offset + 1)));
-        offset += 1;
-        break;
-      }
-    }
-    if (depth !== 0 || quote) return null;
+  let start = 0;
+  let depth = 0;
+  // Consume strings atomically; sticky scanning stops at malformed strings
+  // instead of retrying their escaped quotes. JSON.parse validates candidates.
+  for (const token of text.matchAll(/"(?:\\.|[^"\\])*"|([{}\[\]])|[^"{}\[\]]+/gy)) {
+    const value = token[1];
+    if (!value) continue;
+    const opening = value === "{" || value === "[";
+    if (depth === 0 && (!opening || text.slice(start, token.index).trim())) return null;
+    if (opening) depth += 1;
+    else if (value === "}" || value === "]") depth -= 1;
+    if (depth !== 0) continue;
+    const end = token.index + value.length;
+    documents.push(parseJson(text.slice(start, end)));
+    start = end;
   }
-  return documents.length ? documents : null;
+  return depth === 0 && !text.slice(start).trim() && documents.length ? documents : null;
 }
 
 function walkJsonDiagnostics(value: JsonValue, config: Config, inheritedFile: string | null): QmllintFinding[] {
@@ -215,26 +203,18 @@ function parseTextQmllint(text: string, config: Config): QmllintFinding[] {
 }
 
 function parseTextLine(line: string, config: Config): QmllintFinding[] {
-  const prefixed = line.match(/^(warning|error|info|note):\s*(.*?):(\d+)(?::(\d+))?:\s*(.*)$/i);
-  if (hasCaptures(prefixed, 2, 3, 5)) {
-    return [{
-      file: projectRelativePath(prefixed[2] ?? "", config.projectRoot),
-      line: Number(prefixed[3]),
-      column: prefixed[4] ? Number(prefixed[4]) : null,
-      severity: severityFor(prefixed[1], ruleFromMessage(prefixed[5])),
-      message: prefixed[5].trim(),
-      rule: ruleFromMessage(prefixed[5]),
-    }];
-  }
-  const match = line.match(/^(.*?):(\d+)(?::(\d+))?:\s*(?:(warning|error|info|note):\s*)?(.*)$/i);
-  if (!hasCaptures(match, 1, 2, 5)) return [];
+  const prefixed = line.match(/^(?<severity>warning|error|info|note):\s*(?<file>.*?):(?<line>\d+)(?::(?<column>\d+))?:\s*(?<message>.*)$/i)?.groups;
+  const fields = prefixed?.file && prefixed.message ? prefixed
+    : line.match(/^(?<file>.*?):(?<line>\d+)(?::(?<column>\d+))?:\s*(?:(?<severity>warning|error|info|note):\s*)?(?<message>.*)$/i)?.groups;
+  if (!fields?.file || !fields.line || !fields.message) return [];
+  const rule = ruleFromMessage(fields.message);
   return [{
-    file: projectRelativePath(match[1] ?? "", config.projectRoot),
-    line: Number(match[2]),
-    column: match[3] ? Number(match[3]) : null,
-    severity: severityFor(match[4], ruleFromMessage(match[5])),
-    message: match[5].trim(),
-    rule: ruleFromMessage(match[5]),
+    file: projectRelativePath(fields.file, config.projectRoot),
+    line: Number(fields.line),
+    column: fields.column ? Number(fields.column) : null,
+    severity: severityFor(fields.severity, rule),
+    message: fields.message.trim(),
+    rule,
   }];
 }
 

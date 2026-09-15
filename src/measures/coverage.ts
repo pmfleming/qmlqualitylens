@@ -59,12 +59,17 @@ function coverageRecord(coverage: CoverageFile, context: AnalysisContext) {
     observation_only: Boolean(coverage.observations),
     tracked_lines: coverage.lines.size,
     covered_lines: [...coverage.lines.values()].filter((hits) => hits > 0).length,
-    declarative_objects: { total: objects.length, observed: objects.filter((object) => coverage.observations ? coverage.observations.objects.includes(object.line) : covered(object.line)).length },
-    bindings: { total: bindings.length, observed: bindings.filter((binding) => coverage.observations ? coverage.observations.bindings.includes(binding.line) : covered(binding.line)).length },
+    declarative_objects: observedLocations(objects, coverage.observations?.objects, covered),
+    bindings: observedLocations(bindings, coverage.observations?.bindings, covered),
     executable_blocks: { total: executables.length, observed: executables.filter((node) => coverage.observations
       ? coverage.observations.executables.some((line) => line >= node.line && line <= lineAtOffset(context, coverage.file, node.endOffset))
       : [...coverage.lines].some(([line, hits]) => hits > 0 && line >= node.line && line <= lineAtOffset(context, coverage.file, node.endOffset))).length },
   };
+}
+
+function observedLocations(nodes: { line: number }[], observations: number[] | undefined, covered: (line: number) => boolean) {
+  const observed = observations ? new Set(observations) : null;
+  return { total: nodes.length, observed: nodes.filter((node) => observed ? observed.has(node.line) : covered(node.line)).length };
 }
 
 function lineAtOffset(context: AnalysisContext, file: string, offset: number): number {

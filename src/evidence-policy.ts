@@ -2,7 +2,7 @@ import type { AnalysisContext } from "./analyzer.js";
 import type { Config, Finding } from "./types.js";
 import { isRecord } from "./value-utils.js";
 
-export type CheckStatus = "pass" | "warn" | "fail" | "skipped" | "incomplete";
+type CheckStatus = "pass" | "warn" | "fail" | "skipped" | "incomplete";
 export type CheckRecord = { id: string; name: string; status: CheckStatus; findings: number; required?: boolean; reason?: string };
 export type EvidenceDefinition = { id: string; name: string; task: string; file: string; required: boolean; statusKey?: string };
 

@@ -245,7 +245,7 @@ function importedComponents(item: ImportResolution, componentByFile: Map<string,
   if (item.target === null) return new Map();
   if (item.kind === "local_file") {
     const component = componentByFile.get(item.target);
-    return component ? new Map([[component.name, component.file]]) : new Map();
+    return new Map<string, string>(component ? [[component.name, component.file]] : []);
   }
   const module = modules.find((entry) => entry.file === item.target);
   if (module) return new Map(module.components.map((component) => [component.name, component.file]));

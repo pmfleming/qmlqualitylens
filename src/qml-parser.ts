@@ -448,25 +448,23 @@ class Parser {
   private resolveReferences(): void {
     // A Component factory has its own id namespace. Its contents may capture
     // the enclosing context, but must never resolve ids from sibling factories.
-    const scopes = new Map<number, { parent: number | null; ids: Map<string, QmlObjectNode> }>();
-    const objectScopes = new Map<number, number>();
+    type Scope = { parent?: Scope; ids: Map<string, QmlObjectNode> };
+    const scopes = new Map<number, Scope>();
     const objects = new Map(this.objects.map((object) => [object.objectId, object]));
     for (const object of this.objects) {
       const parent = object.parentObjectId === null ? undefined : objects.get(object.parentObjectId);
-      const parentScope = parent ? objectScopes.get(parent.objectId) ?? null : null;
-      const newScope = !parent || parent.typeName === "Component" || parent.typeName === "QtQml.Component";
-      const scope = newScope ? object.objectId : parentScope!;
-      if (newScope) scopes.set(scope, { parent: parentScope, ids: new Map() });
-      objectScopes.set(object.objectId, scope);
-      if (object.idName) scopes.get(scope)!.ids.set(object.idName, object);
+      const outer = parent ? scopes.get(parent.objectId) : undefined;
+      const scope: Scope = outer && !["Component", "QtQml.Component"].includes(parent?.typeName ?? "")
+        ? outer : { parent: outer, ids: new Map() };
+      scopes.set(object.objectId, scope);
+      if (object.idName) scope.ids.set(object.idName, object);
     }
     for (const reference of this.idReferences) {
-      let scope = objectScopes.get(reference.ownerObjectId) ?? null;
-      let target: QmlObjectNode | null = null;
-      while (scope !== null && !target) {
-        const context = scopes.get(scope)!;
-        target = context.ids.get(reference.name) ?? null;
-        scope = context.parent;
+      let scope = scopes.get(reference.ownerObjectId);
+      let target: QmlObjectNode | undefined;
+      while (scope && !target) {
+        target = scope.ids.get(reference.name);
+        scope = scope.parent;
       }
       reference.targetObjectId = target?.objectId ?? null;
       reference.external = Boolean(target && target.objectId !== reference.ownerObjectId);

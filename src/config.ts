@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Config, Enforcement, JsonValue, PolicyConfig, ProcessBoundaryConfig, ProjectProfile, RawConfig, Thresholds } from "./types.js";
 import { isJsonRecord, parseJson } from "./value-utils.js";
+import { stripComments } from "./metrics.js";
 
 const DEFAULT_PROCESS_BOUNDARY: ProcessBoundaryConfig = {
   objectTypes: ["Process", "ShellCommand"],
@@ -65,75 +66,93 @@ export function loadConfig(configPath: string | null): Config {
   };
 }
 
-function readRawConfig(configPath: string): RawConfig { return validateRawConfig(fs.existsSync(configPath) ? parseJson(stripJsonComments(fs.readFileSync(configPath, "utf8"))) : {}, configPath); }
+function readRawConfig(configPath: string): RawConfig { return validateRawConfig(fs.existsSync(configPath) ? parseJson(stripComments(fs.readFileSync(configPath, "utf8"))) : {}, configPath); }
 function resolvePolicy(raw: RawConfig): PolicyConfig { return { requireQmllint: raw.policy?.require_qmllint ?? DEFAULT_POLICY.requireQmllint, newCodeOnly: raw.policy?.new_code_only ?? DEFAULT_POLICY.newCodeOnly, failOn: raw.policy?.fail_on ?? DEFAULT_POLICY.failOn, incomplete: raw.policy?.incomplete ?? DEFAULT_POLICY.incomplete }; }
 
 function resolveTools(raw: RawConfig, root: string): Config["tools"] {
-  const tools = raw.tools;
+  const tools = raw.tools ?? {};
+  const oracle = { check: false, qmldom_command: "qmldom", tree_sitter: false, timeout_ms: 30_000, ...tools.parser_oracle };
+  const cmake = { ...tools.cmake, ...executionDefaults(tools.cmake, root, "cmake", 600_000) };
+  const lint = { ...tools.qmllint, ...executionDefaults(tools.qmllint, root, "qmllint", 120_000) };
+  const format = executionDefaults(tools.qmlformat, root, null, 30_000);
+  const tests = executionDefaults(tools.qmltestrunner, root, "qmltestrunner", 120_000);
+  const ctest = executionDefaults(tools.ctest, root, "ctest", 120_000);
+  const runtime = executionDefaults(tools.runtime, root, null, 60_000);
+  const profiler = executionDefaults(tools.qml_profiler, root, null, 300_000);
   return {
-    parserOracleCheck: tools?.parser_oracle?.check ?? false,
-    parserOracleQmldomCommand: tools?.parser_oracle?.qmldom_command ?? "qmldom",
-    parserOracleTreeSitter: tools?.parser_oracle?.tree_sitter ?? false,
-    parserOracleTimeoutMs: tools?.parser_oracle?.timeout_ms ?? 30_000,
-    cmakeCommand: tools?.cmake?.command ?? "cmake",
-    cmakeCheck: tools?.cmake?.check ?? false,
-    cmakeBuildDir: resolveFrom(root, tools?.cmake?.build_dir ?? "build"),
-    cmakeSourceDir: resolveFrom(root, tools?.cmake?.source_dir ?? "."),
-    cmakeConfigurePreset: tools?.cmake?.configure_preset ?? null,
-    cmakeBuildConfig: tools?.cmake?.build_config ?? null,
-    cmakeConfigure: tools?.cmake?.configure ?? false,
-    cmakeConfigureArguments: tools?.cmake?.configure_arguments ?? [],
-    cmakeBuildTargets: tools?.cmake?.build_targets ?? [],
-    cmakeBuildArguments: tools?.cmake?.build_arguments ?? [],
-    cmakeTimeoutMs: tools?.cmake?.timeout_ms ?? 600_000,
-    cmakeWorkingDirectory: resolveFrom(root, tools?.cmake?.working_directory ?? "."),
-    cmakeEnvironment: tools?.cmake?.environment ?? {},
-    cmakeRedactPatterns: tools?.cmake?.redact_patterns ?? [],
-    qmllintCommand: tools?.qmllint?.command ?? "qmllint",
-    qmllintCheck: tools?.qmllint?.check ?? false,
-    qmllintArguments: tools?.qmllint?.arguments ?? [],
-    qmllintImportPaths: (tools?.qmllint?.import_paths ?? []).map((item) => resolveFrom(root, item)),
-    qmllintQmltypes: (tools?.qmllint?.qmltypes ?? []).map((item) => resolveFrom(root, item)),
-    qmllintUseEnvironmentImports: tools?.qmllint?.use_environment_imports ?? false,
-    qmllintTimeoutMs: tools?.qmllint?.timeout_ms ?? 120_000,
-    qmllintWorkingDirectory: resolveFrom(root, tools?.qmllint?.working_directory ?? "."),
-    qmllintEnvironment: tools?.qmllint?.environment ?? {},
-    qmllintRedactPatterns: tools?.qmllint?.redact_patterns ?? [],
-    qmlformatCommand: tools?.qmlformat?.command ?? null,
-    qmlformatCheck: tools?.qmlformat?.check ?? false,
-    qmlformatArguments: tools?.qmlformat?.arguments ?? [],
-    qmlformatTimeoutMs: tools?.qmlformat?.timeout_ms ?? 30_000,
-    qmlformatWorkingDirectory: resolveFrom(root, tools?.qmlformat?.working_directory ?? "."),
-    qmlformatEnvironment: tools?.qmlformat?.environment ?? {},
-    qmlformatRedactPatterns: tools?.qmlformat?.redact_patterns ?? [],
-    qmltestrunnerCommand: tools?.qmltestrunner?.command ?? "qmltestrunner",
-    qmltestrunnerCheck: tools?.qmltestrunner?.check ?? false,
-    qmltestrunnerArguments: tools?.qmltestrunner?.arguments ?? [],
-    qmltestrunnerTimeoutMs: tools?.qmltestrunner?.timeout_ms ?? 120_000,
-    qmltestrunnerWorkingDirectory: resolveFrom(root, tools?.qmltestrunner?.working_directory ?? "."),
-    qmltestrunnerEnvironment: tools?.qmltestrunner?.environment ?? {},
-    qmltestrunnerRedactPatterns: tools?.qmltestrunner?.redact_patterns ?? [],
-    ctestCommand: tools?.ctest?.command ?? "ctest",
-    ctestCheck: tools?.ctest?.check ?? false,
-    ctestArguments: tools?.ctest?.arguments ?? [],
-    ctestTimeoutMs: tools?.ctest?.timeout_ms ?? 120_000,
-    ctestWorkingDirectory: resolveFrom(root, tools?.ctest?.working_directory ?? "."),
-    ctestEnvironment: tools?.ctest?.environment ?? {},
-    ctestRedactPatterns: tools?.ctest?.redact_patterns ?? [],
-    runtimeCommand: tools?.runtime?.command ?? null,
-    runtimeCheck: tools?.runtime?.check ?? false,
-    runtimeArguments: tools?.runtime?.arguments ?? [],
-    runtimeTimeoutMs: tools?.runtime?.timeout_ms ?? 60_000,
-    runtimeWorkingDirectory: resolveFrom(root, tools?.runtime?.working_directory ?? "."),
-    runtimeEnvironment: tools?.runtime?.environment ?? {},
-    runtimeRedactPatterns: tools?.runtime?.redact_patterns ?? [],
-    qmlProfilerCommand: tools?.qml_profiler?.command ?? null,
-    qmlProfilerCheck: tools?.qml_profiler?.check ?? false,
-    qmlProfilerArguments: tools?.qml_profiler?.arguments ?? [],
-    qmlProfilerTimeoutMs: tools?.qml_profiler?.timeout_ms ?? 300_000,
-    qmlProfilerWorkingDirectory: resolveFrom(root, tools?.qml_profiler?.working_directory ?? "."),
-    qmlProfilerEnvironment: tools?.qml_profiler?.environment ?? {},
-    qmlProfilerRedactPatterns: tools?.qml_profiler?.redact_patterns ?? [],
+    parserOracleCheck: oracle.check,
+    parserOracleQmldomCommand: oracle.qmldom_command,
+    parserOracleTreeSitter: oracle.tree_sitter,
+    parserOracleTimeoutMs: oracle.timeout_ms,
+    cmakeCommand: cmake.command,
+    cmakeCheck: cmake.check,
+    cmakeBuildDir: resolveFrom(root, cmake.build_dir ?? "build"),
+    cmakeSourceDir: resolveFrom(root, cmake.source_dir ?? "."),
+    cmakeConfigurePreset: cmake.configure_preset ?? null,
+    cmakeBuildConfig: cmake.build_config ?? null,
+    cmakeConfigure: cmake.configure ?? false,
+    cmakeConfigureArguments: cmake.configure_arguments ?? [],
+    cmakeBuildTargets: cmake.build_targets ?? [],
+    cmakeBuildArguments: cmake.build_arguments ?? [],
+    cmakeTimeoutMs: cmake.timeout_ms,
+    cmakeWorkingDirectory: cmake.working_directory,
+    cmakeEnvironment: cmake.environment,
+    cmakeRedactPatterns: cmake.redact_patterns,
+    qmllintCommand: lint.command,
+    qmllintCheck: lint.check,
+    qmllintArguments: lint.arguments,
+    qmllintImportPaths: (lint.import_paths ?? []).map((item) => resolveFrom(root, item)),
+    qmllintQmltypes: (lint.qmltypes ?? []).map((item) => resolveFrom(root, item)),
+    qmllintUseEnvironmentImports: lint.use_environment_imports ?? false,
+    qmllintTimeoutMs: lint.timeout_ms,
+    qmllintWorkingDirectory: lint.working_directory,
+    qmllintEnvironment: lint.environment,
+    qmllintRedactPatterns: lint.redact_patterns,
+    qmlformatCommand: format.command,
+    qmlformatCheck: format.check,
+    qmlformatArguments: format.arguments,
+    qmlformatTimeoutMs: format.timeout_ms,
+    qmlformatWorkingDirectory: format.working_directory,
+    qmlformatEnvironment: format.environment,
+    qmlformatRedactPatterns: format.redact_patterns,
+    qmltestrunnerCommand: tests.command,
+    qmltestrunnerCheck: tests.check,
+    qmltestrunnerArguments: tests.arguments,
+    qmltestrunnerTimeoutMs: tests.timeout_ms,
+    qmltestrunnerWorkingDirectory: tests.working_directory,
+    qmltestrunnerEnvironment: tests.environment,
+    qmltestrunnerRedactPatterns: tests.redact_patterns,
+    ctestCommand: ctest.command,
+    ctestCheck: ctest.check,
+    ctestArguments: ctest.arguments,
+    ctestTimeoutMs: ctest.timeout_ms,
+    ctestWorkingDirectory: ctest.working_directory,
+    ctestEnvironment: ctest.environment,
+    ctestRedactPatterns: ctest.redact_patterns,
+    runtimeCommand: runtime.command,
+    runtimeCheck: runtime.check,
+    runtimeArguments: runtime.arguments,
+    runtimeTimeoutMs: runtime.timeout_ms,
+    runtimeWorkingDirectory: runtime.working_directory,
+    runtimeEnvironment: runtime.environment,
+    runtimeRedactPatterns: runtime.redact_patterns,
+    qmlProfilerCommand: profiler.command,
+    qmlProfilerCheck: profiler.check,
+    qmlProfilerArguments: profiler.arguments,
+    qmlProfilerTimeoutMs: profiler.timeout_ms,
+    qmlProfilerWorkingDirectory: profiler.working_directory,
+    qmlProfilerEnvironment: profiler.environment,
+    qmlProfilerRedactPatterns: profiler.redact_patterns,
+  };
+}
+
+type RawExecutionTool = NonNullable<NonNullable<RawConfig["tools"]>["runtime"]>;
+
+function executionDefaults<Command extends string | null>(tool: RawExecutionTool = {}, root: string, command: Command, timeout_ms: number) {
+  return {
+    command, timeout_ms, check: false, arguments: [], environment: {}, redact_patterns: [],
+    ...tool,
+    working_directory: resolveFrom(root, tool.working_directory ?? "."),
   };
 }
 
@@ -480,48 +499,3 @@ function isOneOf<T>(value: JsonValue | undefined, allowed: readonly T[]): boolea
 
 function normalizeProjectPath(value: string): string { return value.replace(/\\/g, "/").replace(/^\.\//, ""); }
 function resolveFrom(base: string, value: string): string { return path.isAbsolute(value) ? path.normalize(value) : path.resolve(base, value); }
-
-function stripJsonComments(text: string): string {
-  const state: JsonStringState = { inString: false, escaped: false };
-  let result = "";
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index] ?? "";
-    if (appendStringChar(state, char)) { result += char; continue; }
-    const commentEnd = skipJsonComment(text, index, (value) => { result += value; });
-    if (commentEnd === null) result += char;
-    else index = commentEnd;
-  }
-  return result;
-}
-
-type JsonStringState = { inString: boolean; escaped: boolean };
-
-function appendStringChar(state: JsonStringState, char: string): boolean {
-  if (!state.inString && char !== '"') return false;
-  if (!state.inString) state.inString = true;
-  else if (state.escaped) state.escaped = false;
-  else if (char === "\\") state.escaped = true;
-  else if (char === '"') state.inString = false;
-  return true;
-}
-
-function skipJsonComment(text: string, index: number, keep: (value: string) => void): number | null {
-  if (text[index] !== "/") return null;
-  if (text[index + 1] === "/") return skipLineComment(text, index + 2, keep);
-  return text[index + 1] === "*" ? skipBlockComment(text, index + 2, keep) : null;
-}
-
-function skipLineComment(text: string, index: number, keep: (value: string) => void): number {
-  while (index < text.length && text[index] !== "\n") index += 1;
-  if (text[index] === "\n") keep("\n");
-  return index;
-}
-
-function skipBlockComment(text: string, index: number, keep: (value: string) => void): number {
-  while (index < text.length) {
-    if (text[index] === "\n") keep("\n");
-    if (text[index] === "*" && text[index + 1] === "/") return index + 1;
-    index += 1;
-  }
-  return index;
-}

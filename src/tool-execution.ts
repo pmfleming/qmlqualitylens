@@ -73,7 +73,7 @@ function outputTail(output: string): string[] {
   return lines.slice(-200);
 }
 
-export function commandDisplay(executable: string, args: string[]): string {
+function commandDisplay(executable: string, args: string[]): string {
   const sensitive = /(?:password|passwd|token|secret|credential|api[-_]?key)/i;
   const displayArgs = args.map((value, index) => {
     if (index > 0 && sensitive.test(args[index - 1] ?? "")) return "<redacted>";

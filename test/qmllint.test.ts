@@ -50,6 +50,16 @@ test("parses revision 4 nested qmllint JSON and accepts clean file reports", () 
   assert.equal(concatenated.findings.length, 1);
 });
 
+test("JSON streams preserve escaped delimiters and reject corrupt or truncated documents", () => {
+  using temp = fs.mkdtempDisposableSync(path.join(os.tmpdir(), "lens-json-stream-"));
+  const config = configWithRoot(temp.path);
+  const message = 'escaped quote " and slash \\ with braces } ] {';
+  const report = JSON.stringify({ diagnostics: [{ file: "Main.qml", message }] });
+  assert.deepEqual(parseQmllintOutput(` [] \n${report}\t{}`, config).map((finding) => finding.message), [message]);
+  for (const suffix of ['{"files":[', '{"message":"unterminated', '{"message":"' + '\\"'.repeat(20000), "garbage", "[}", "null"])
+    assert.throws(() => parseQmllintOutput(report + suffix, config), SyntaxError);
+});
+
 test("does not treat an unscoped empty qmllint report as a verified clean run", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-qmllint-unscoped-"));
   fs.writeFileSync(path.join(root, "Main.qml"), "import QtQuick\nItem {}\n");

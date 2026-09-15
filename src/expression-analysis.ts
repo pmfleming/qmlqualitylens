@@ -1,22 +1,15 @@
-import { createRequire } from "node:module";
 import type Parser from "tree-sitter";
-import type qmljs from "tree-sitter-qmljs";
+import { loadQmlParser } from "./tree-sitter.js";
 import { lexQml } from "./qml-lexer.js";
 
-export type AssignmentTarget = { owner: string | null; property: string; line: number };
+type AssignmentTarget = { owner: string | null; property: string; line: number };
 export type AssignmentAnalysis = { assignments: AssignmentTarget[]; references?: Array<Omit<AssignmentTarget, "line">>; reason?: string };
 type Node = Parser.SyntaxNode;
 type Scope = { names: Set<string>; parent?: Scope };
-const require = createRequire(import.meta.url);
 let parser: Parser | null | undefined;
 
 function expressionParser(): Parser | null {
-  if (parser !== undefined) return parser;
-  try {
-    const Constructor = require("tree-sitter") as typeof Parser;
-    parser = new Constructor();
-    parser.setLanguage(require("tree-sitter-qmljs") as typeof qmljs);
-  } catch { parser = null; }
+  if (parser === undefined) parser = loadQmlParser()?.parser ?? null;
   return parser;
 }
 
@@ -137,8 +130,11 @@ function referenceTarget(node: Node): Omit<AssignmentTarget, "line"> | null {
   // A read of controller.state.value still depends on controller.state.
   // Keep assignment targets strict; only reads may collapse a member chain.
   let base = node;
-  while (base.type === "member_expression" && base.childForFieldName("object")?.type === "member_expression")
-    base = base.childForFieldName("object")!;
+  while (base.type === "member_expression") {
+    const owner = base.childForFieldName("object");
+    if (owner?.type !== "member_expression") break;
+    base = owner;
+  }
   return assignmentTarget(base);
 }
 

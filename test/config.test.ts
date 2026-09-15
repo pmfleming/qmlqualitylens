@@ -34,6 +34,27 @@ test("config comments are stripped without touching string values", () => {
 
   assert.equal(config.projectName, "demo // and /* not a comment */");
   assert.equal(config.outputDir, path.join(root, "target"));
+  fs.writeFileSync(configPath, '{"thresholds":{"cloneWindow": 1/* not concatenation */2}}');
+  assert.throws(() => loadConfig(configPath), SyntaxError);
+});
+
+test("tool defaults preserve disabled execution and isolated path/environment overrides", () => {
+  using temp = fs.mkdtempDisposableSync(path.join(os.tmpdir(), "lens-tool-defaults-"));
+  const file = path.join(temp.path, "config.json");
+  fs.writeFileSync(file, JSON.stringify({ tools: { runtime: { command: "runner", check: false, timeout_ms: 17, working_directory: "scripts", environment: { MODE: "test" }, arguments: ["--dry-run"] } } }));
+  const { tools } = loadConfig(file);
+  assert.equal(tools.runtimeCommand, "runner");
+  assert.equal(tools.runtimeCheck, false);
+  assert.equal(tools.runtimeTimeoutMs, 17);
+  assert.equal(tools.runtimeWorkingDirectory, path.join(temp.path, "scripts"));
+  assert.deepEqual(tools.runtimeArguments, ["--dry-run"]);
+  assert.deepEqual(tools.runtimeEnvironment, { MODE: "test" });
+  assert.equal(tools.qmlformatCommand, null);
+  assert.equal(tools.qmllintCommand, "qmllint");
+  assert.equal(tools.ctestTimeoutMs, 120000);
+  tools.runtimeEnvironment.MODE = "changed";
+  assert.deepEqual(tools.ctestEnvironment, {});
+  assert.deepEqual(loadConfig(file).tools.runtimeEnvironment, { MODE: "test" });
 });
 
 test("config validation rejects invalid thresholds, regexes, and unknown properties", () => {

@@ -481,8 +481,8 @@ function internalApiUses(entry: AnalysisContext["qmlDocuments"][number]): Set<st
         if (handled.endsWith("Changed")) names.add(handled.slice(0, -"Changed".length));
       }
     }
-    const expressions = [
-      ...object.bindings.filter((binding) => !isHandlerPath(binding.propertyPath)).map((binding) => ({ body: binding.expression, parameters: [] as string[] })),
+    const expressions: Array<{ body: string; parameters: string[] }> = [
+      ...object.bindings.filter((binding) => !isHandlerPath(binding.propertyPath)).map((binding) => ({ body: binding.expression, parameters: [] })),
       ...[...object.functions, ...object.handlers].map((fn) => ({ body: fn.body, parameters: fn.parameters.map((parameter) => parameter.name) })),
     ];
     for (const expression of expressions) {

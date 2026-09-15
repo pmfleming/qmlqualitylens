@@ -7,7 +7,7 @@ export type FindingLabels = { positives: FindingLabel[]; negatives: FindingLabel
 // real-world accuracy. Unlabeled findings are neither successes nor failures.
 export function scoreLabeledFindings(expected: FindingLabels, findings: Finding[]) {
   const key = (label: FindingLabel) => `${label.kind}\u0000${label.file}`;
-  const actual = new Set(findings.filter((finding) => finding.file && !finding.suppressed).map((finding) => key({ kind: finding.kind, file: finding.file! })));
+  const actual = new Set(findings.flatMap((finding) => finding.file && !finding.suppressed ? [key({ kind: finding.kind, file: finding.file })] : []));
   const labeled = new Set([...expected.positives, ...expected.negatives].map(key));
   const kinds = [...new Set([...expected.positives, ...expected.negatives].map((label) => label.kind))].sort();
   const scores = kinds.map((kind) => {

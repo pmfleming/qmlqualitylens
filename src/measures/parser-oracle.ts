@@ -1,11 +1,8 @@
-import { createRequire } from "node:module";
 import type Parser from "tree-sitter";
-import type qmljs from "tree-sitter-qmljs";
+import { loadQmlParser } from "../tree-sitter.js";
 import type { QmlDocument } from "../qml-parser-types.js";
 import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding } from "./foundation.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
-
-const require = createRequire(import.meta.url);
 
 type OracleCounts = { imports: number; objects: number; properties: number; bindings: number };
 type OracleRecord = {
@@ -16,7 +13,6 @@ type OracleRecord = {
 };
 
 type TreeSitterOracle = { parser: Parser; query: Parser.Query };
-type LoadableModule = object | null | undefined;
 const COUNT_KEYS: Array<keyof OracleCounts> = ["imports", "objects", "properties", "bindings"];
 const COUNT_KEY_NAMES = new Set<string>(COUNT_KEYS);
 const TREE_SITTER_STRUCTURE_QUERY = "(ui_import) @imports (ui_object_definition) @objects (ui_object_definition_binding) @objects (ui_property) @properties (ui_binding) @bindings (ui_property value: (_) @bindings)";
@@ -128,28 +124,11 @@ function matches(value: string, regex: RegExp): number { return value.match(rege
 
 function loadTreeSitter(): TreeSitterOracle | null {
   try {
-    const ParserConstructor = parserConstructor(require("tree-sitter"));
-    const grammar = treeSitterLanguage(require("tree-sitter-qmljs"));
-    if (!ParserConstructor || !grammar) return null;
-    const parser = new ParserConstructor();
-    parser.setLanguage(grammar);
-    return { parser, query: new ParserConstructor.Query(grammar, TREE_SITTER_STRUCTURE_QUERY) };
+    const loaded = loadQmlParser();
+    return loaded ? { parser: loaded.parser, query: loaded.createQuery(TREE_SITTER_STRUCTURE_QUERY) } : null;
   } catch {
     return null;
   }
-}
-
-function parserConstructor(value: LoadableModule): typeof Parser | null { const candidate = defaultExport(value); return isParserConstructor(candidate) ? candidate : null; }
-
-function isParserConstructor(value: object | null): value is typeof Parser { return typeof value === "function" && "Query" in value; }
-
-function treeSitterLanguage(value: LoadableModule): typeof qmljs | null { const candidate = defaultExport(value); return isTreeSitterLanguage(candidate) ? candidate : null; }
-
-function isTreeSitterLanguage(value: object | null): value is typeof qmljs { return support.isRecord(value) && "language" in value && Array.isArray(value.nodeTypeInfo); }
-function defaultExport(value: LoadableModule): object | null {
-  if (!support.isRecord(value) || !("default" in value)) return value ?? null;
-  const candidate = value.default;
-  return (typeof candidate === "object" && candidate !== null) || typeof candidate === "function" ? candidate : null;
 }
 
 function parseTreeSitter(oracle: TreeSitterOracle, source: string, timeoutMs: number): Parser.Tree | null {

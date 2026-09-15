@@ -78,7 +78,7 @@ export function createAnalysisContext(config: Config): AnalysisContext {
   const evaluation = evaluateQmlRules(baseContext);
   const candidates = attachSemanticAnchors([
     ...inputFindings(config, sources),
-    ...(cloneDetection.status === "partial" ? [{ id: "duplication.analysis_limit", kind: "duplication.analysis_limit", severity: "low" as const, message: `Clone analysis reached its limits: ${cloneDetection.omitted_windows} windows and ${cloneDetection.omitted_groups} groups omitted; duplication metrics are partial`, actions: ["Inspect clone_detection in the quality report; analyze smaller source scopes for complete duplication coverage."] }] : []),
+    ...(cloneDetection.status === "partial" ? [{ id: "duplication.analysis_limit", kind: "duplication.analysis_limit", severity: "low", message: `Clone analysis reached its limits: ${cloneDetection.omitted_windows} windows and ${cloneDetection.omitted_groups} groups omitted; duplication metrics are partial`, actions: ["Inspect clone_detection in the quality report; analyze smaller source scopes for complete duplication coverage."] } satisfies Finding] : []),
     ...deriveFindings(config, files, components, functions, bindings, clones, resolution),
     ...evaluation.findings,
     ...cleanupFindings(baseContext),
