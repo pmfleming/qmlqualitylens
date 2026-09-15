@@ -1,6 +1,7 @@
 import path from "node:path";
 import fs from "node:fs";
 import type { QmlDocument } from "./qml-parser-types.js";
+import { lexQml } from "./qml-lexer.js";
 import { baseTypeName, isShellEntrypoint } from "./qml-model.js";
 import type { ComponentRecord, Config, ImportRecord, SourceFile } from "./types.js";
 
@@ -12,6 +13,7 @@ type QmldirComponent = {
   qmldir: string;
   line: number;
   public: boolean;
+  singleton: boolean;
 };
 
 type QmldirModule = {
@@ -81,7 +83,7 @@ export function buildProjectResolution(sources: SourceFile[], documents: QmlDocu
   const componentsByName = componentNames.unique;
   const componentByFile = new Map(components.map((component) => [component.file, component]));
   const imports = documents.flatMap(({ file, document }) => document.imports.map((record) => resolveImport(file, record, qmldirModules, sourcePaths, config, canonicalFile)));
-  const componentUses = resolveComponentUses(documents, imports, components, componentByFile, qmldirModules, config);
+  const componentUses = resolveComponentUses(documents, imports, components, componentByFile, qmldirModules, config, sources);
   const referencedFiles = new Set(componentUses.flatMap((use) => use.target ? [use.target] : []));
   const publicFiles = publicComponentFiles(qmldirModules, sourcePaths);
   for (const component of components) if (isShellEntrypoint(component.file)) publicFiles.add(component.file);
@@ -139,7 +141,7 @@ function qmldirComponent(parts: string[], qmldir: string, line: number, sourcePa
   if (!name || !filePart) return null;
   const file = resolveQmldirFile(qmldir, filePart);
   if (!sourcePaths.has(file)) return null;
-  return { name, file, qmldir, line, public: directive !== "internal" };
+  return { name, file, qmldir, line, public: directive !== "internal", singleton: directive === "singleton" };
 }
 
 function buildComponentMaps(components: ComponentRecord[], modules: QmldirModule[]): { unique: Map<string, string>; ambiguous: Map<string, string[]> } {
@@ -169,17 +171,35 @@ function resolveComponentUses(
   componentByFile: Map<string, ComponentRecord>,
   modules: QmldirModule[],
   config: Config,
+  sources: SourceFile[],
 ): ComponentUseResolution[] {
+  const sourceByFile = new Map(sources.map((source) => [source.relativePath, source.text]));
+  const singletons = new Set(modules.flatMap((module) => module.components.filter((entry) => entry.singleton).map((entry) => entry.file)));
   return documents.flatMap(({ file, document }) => {
     const scope = componentScope(file, imports.filter((item) => item.from === file), components, componentByFile, modules);
-    return document.objects.flatMap((object) => {
+    const objectUses = document.objects.flatMap((object) => {
       const target = resolveTypeInScope(object.typeName, scope);
       const qualifier = object.typeName.includes(".") ? object.typeName.split(".")[0] ?? "" : "";
       const externallyQualified = Boolean(qualifier && scope.externalAliases.has(qualifier));
       const unresolved = target === null && !externallyQualified && isProjectTypeCandidate(baseTypeName(object.typeName), config);
       return target || unresolved ? [{ from: file, typeName: object.typeName, line: object.line, target, unresolved }] : [];
     });
+    return [...objectUses, ...singletonUses(file, sourceByFile.get(file) ?? "", document, scope, singletons)];
   });
+}
+
+function singletonUses(file: string, source: string, document: QmlDocument, scope: ComponentScope, singletons: Set<string>): ComponentUseResolution[] {
+  const tokens = lexQml(source);
+  const references = new Set(document.idReferences.filter((reference) => reference.targetObjectId === null).map((reference) => `${reference.line}:${reference.name}`));
+  const uses = new Map<string, ComponentUseResolution>();
+  tokens.forEach((token, index) => {
+    if (token.kind !== "identifier" || tokens[index - 1]?.value === "." || tokens[index + 1]?.value !== "." || !references.has(`${token.line}:${token.value}`)) return;
+    const typeName = scope.aliases.has(token.value) ? `${token.value}.${tokens[index + 2]?.value}` : token.value;
+    const target = resolveTypeInScope(typeName, scope);
+    // One dependency per consumer, not one reuse point for every Theme lookup.
+    if (target && singletons.has(target) && target !== file && !uses.has(target)) uses.set(target, { from: file, typeName, line: token.line, target, unresolved: false });
+  });
+  return [...uses.values()];
 }
 
 type ComponentScope = {
