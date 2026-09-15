@@ -451,6 +451,12 @@ function likelyExpensiveImage(object: AnalysisContext["qmlDocuments"][number]["d
 
 function usedPublicApi(context: AnalysisContext): Map<string, Set<string>> {
   const used = new Map<string, Set<string>>();
+  for (const use of context.resolution.componentUses) {
+    if (!use.target || !use.memberNames) continue;
+    const names = used.get(use.target) ?? new Set<string>();
+    for (const name of use.memberNames) names.add(name);
+    used.set(use.target, names);
+  }
   for (const { file, document } of context.qmlDocuments) {
     for (const object of document.objects) {
       const target = resolvedTargetForObject(context, file, object.typeName, object.line);

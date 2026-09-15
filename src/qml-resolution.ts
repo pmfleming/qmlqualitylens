@@ -37,6 +37,7 @@ type ComponentUseResolution = {
   line: number;
   target: string | null;
   unresolved: boolean;
+  memberNames?: string[];
 };
 
 type ReachabilityEdge = { from: string; to: string; kind: "component_use" | "loader_source" | "source_component" | "configured_dynamic"; line?: number };
@@ -197,7 +198,11 @@ function singletonUses(file: string, source: string, document: QmlDocument, scop
     const typeName = scope.aliases.has(token.value) ? `${token.value}.${tokens[index + 2]?.value}` : token.value;
     const target = resolveTypeInScope(typeName, scope);
     // One dependency per consumer, not one reuse point for every Theme lookup.
-    if (target && singletons.has(target) && target !== file && !uses.has(target)) uses.set(target, { from: file, typeName, line: token.line, target, unresolved: false });
+    if (!target || !singletons.has(target) || target === file) return;
+    const use = uses.get(target) ?? { from: file, typeName, line: token.line, target, unresolved: false, memberNames: [] };
+    const member = tokens[index + (scope.aliases.has(token.value) ? 4 : 2)];
+    if (member?.kind === "identifier" && !use.memberNames?.includes(member.value)) use.memberNames?.push(member.value);
+    uses.set(target, use);
   });
   return [...uses.values()];
 }

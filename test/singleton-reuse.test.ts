@@ -12,13 +12,13 @@ test("singleton dependencies contribute once per consumer to reuse and reachabil
   fs.mkdirSync(path.join(root, "ui"));
   const files = {
     "ui/qmldir": "module Demo.Ui\nsingleton Drawing 1.0 Drawing.qml\nWidget 1.0 Widget.qml\n",
-    "ui/Drawing.qml": "pragma Singleton\nimport QtQuick\nQtObject { function line() {} }",
+    "ui/Drawing.qml": "pragma Singleton\nimport QtQuick\nQtObject { property int spacing: 4; property int unused: 1; function line() {} }",
     "ui/Widget.qml": "import QtQuick\nItem {}",
     "Main.qml": `import Demo.Ui as Ui
 Item {
   property var optional: (item as Item)?.implicitWidth ?? 0
   property var item: null
-  function paint() { Ui.Drawing.line(); Ui.Drawing.line(); }
+  function paint() { Ui.Drawing.line(); Ui.Drawing.line(); return Ui.Drawing.spacing; }
   Other {}
 }`,
     "Other.qml": "import Demo.Ui\nItem { Component.onCompleted: Drawing.line() }",
@@ -39,5 +39,8 @@ Item {
   assert.equal(context.components.find((component) => component.file === "ui/Drawing.qml")?.useCount, 2);
   assert.equal(context.components.find((component) => component.file === "Main.qml")?.fanOut, 2);
   assert.ok(context.resolution.reachableFiles.has("ui/Drawing.qml"));
+  const unused = context.findings.filter((finding) => finding.file === "ui/Drawing.qml" && finding.kind === "cleanup.unused_public_property");
+  assert.equal(unused.length, 1);
+  assert.match(unused[0].message, /'unused'/);
   assert.equal(context.bindings.find((binding) => binding.property === "optional")?.complexity, 2);
 });
