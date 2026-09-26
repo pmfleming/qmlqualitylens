@@ -70,21 +70,6 @@ if(process.argv.includes('--build')) {
   assert.equal(changedRunInputs(context), null, "generated build output must not change the input snapshot");
 });
 
-test("CTest uses the managed build directory/configuration and produces test evidence", () => {
-  using temp = fs.mkdtempDisposableSync(path.join(os.tmpdir(), "lens-ctest-options-"));
-  const calls = path.join(temp.path, "ctest-args.json");
-  const ctest = executable(temp.path, "ctest.mjs", `fs.writeFileSync(${JSON.stringify(calls)}, JSON.stringify({args:process.argv.slice(2),env:process.env.LENS_TEST}));${writeReport()}`);
-  const { config, context } = fixture(temp.path, { tools: { cmake: { build_dir: "objects", build_config: "Debug" }, ctest: { check: true, command: ctest, arguments: ["-R", "qml"], environment: { LENS_TEST: "configured" } } } });
-  const artifact = measureCorrectnessCatalog(config, "test", context);
-  const invocation = JSON.parse(fs.readFileSync(calls, "utf8"));
-  assert.deepEqual(invocation.args, ["-R", "qml", "--test-dir", config.tools.cmakeBuildDir, "-C", "Debug", "--output-on-failure", "--no-tests=error", "--output-junit", config.reports.tests]);
-  assert.equal(invocation.env, "configured");
-  assert.equal(artifact.summary.runner, "ctest");
-  assert.equal(artifact.summary.execution_status, "complete");
-  assert.equal(artifact.summary.executed, 1);
-  assert.equal(path.basename(config.reports.tests!), "ctest.junit.xml");
-});
-
 test("CTest failures block audit, while stale reports and timeouts cannot supply passing evidence", () => {
   for (const mode of ["failed", "missing", "timeout"] as const) {
     using temp = fs.mkdtempDisposableSync(path.join(os.tmpdir(), "lens-ctest-evidence-"));

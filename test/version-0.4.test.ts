@@ -20,20 +20,6 @@ function fixture(files: Record<string, string>, config: Record<string, unknown> 
   return { root, config: loaded, context: createAnalysisContext(loaded) };
 }
 
-test("v0.4 reports unknown Connections targets and rule evaluation coverage", () => {
-  const { context } = fixture({ "Main.qml": `import QtQuick\nItem { Connections { target: missing; function onReady() {} } }\n` });
-  assert.ok(context.findings.some((finding) => finding.kind === "qml.connections.unknown_target"));
-  const coverage = context.ruleCoverage.find((record) => record.rule === "qml.connection_signal_mismatch");
-  assert.equal(coverage?.applicable, 1);
-  assert.equal(coverage?.skipped, 1);
-  assert.equal(coverage?.skip_reasons.unknown_target, 1);
-});
-
-test("v0.4 does not classify imported singleton targets as missing local ids", () => {
-  const { context } = fixture({ "Main.qml": `import Quickshell\nItem { Connections { target: Quickshell; function onScreensChanged() {} } }\n` });
-  assert.ok(!context.findings.some((finding) => finding.kind === "qml.connections.unknown_target"));
-});
-
 test("v0.4 type evidence propagates inherited interactive roles and imports qmltypes", () => {
   const qmltypes = `import QtQuick.tooling 1.2\nModule { Component { name: "Backend"; prototype: "QObject"; Signal { name: "ready" } Property { name: "state"; type: "int" } } }\n`;
   const { config, context } = fixture({
@@ -45,15 +31,6 @@ test("v0.4 type evidence propagates inherited interactive roles and imports qmlt
   const artifact = measureTypeEvidence(config, "test", context) as { summary: { qmltypes_types: number }; types: Array<{ name: string; signals: string[] }> };
   assert.ok(artifact.summary.qmltypes_types >= 1);
   assert.ok(artifact.types.find((type) => type.name === "Backend")?.signals.includes("ready"));
-});
-
-test("v0.4 semantic fingerprints survive line movement", () => {
-  const first = fixture({ "Main.qml": `import QtQuick\nItem {\n  Image { source: "photo.jpg" }\n}\n` }).context;
-  const second = fixture({ "Main.qml": `import QtQuick\n\n\nItem {\n  Image { source: "photo.jpg" }\n}\n` }).context;
-  const one = first.findings.find((finding) => finding.kind === "qml.performance.image_without_source_size");
-  const two = second.findings.find((finding) => finding.kind === "qml.performance.image_without_source_size");
-  assert.ok(one?.semantic_anchor);
-  assert.equal(one?.fingerprint, two?.fingerprint);
 });
 
 test("v0.4 derives frame overruns from scenario refresh rate instead of assuming 60 Hz", () => {

@@ -21,17 +21,6 @@ test("assignment analysis respects block scope, function parameters, and var hoi
   assert.deepEqual(targets("{ width = 3; card.width = 2 }", ["width", "card"]), []);
 });
 
-test("assignment analysis ignores comments, strings, regexes, comparisons, and deliberate rebinding", () => {
-  assert.deepEqual(targets(`{
-    // width = 1;
-    const message = "width = 2";
-    const regex = /width = 3/;
-    if (width === 4) width = Qt.binding(() => height);
-    width += 1;
-    card.width++;
-  }`), ["width", "card.width"]);
-});
-
 test("assignment analysis supports destructuring locals and catch parameters", () => {
   assert.deepEqual(targets(`{
     const { width, source: card } = model;

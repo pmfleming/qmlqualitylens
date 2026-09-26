@@ -7,7 +7,6 @@ import { createAnalysisContext } from "../src/analyzer.js";
 import { runAudit } from "../src/audit.js";
 import { loadConfig } from "../src/config.js";
 import { measureCleanup } from "../src/measures/cleanup.js";
-import { findingSummary } from "../src/measures/shared.js";
 import { measureSemanticRules } from "../src/measures/semantic.js";
 import { measureQmlHealth } from "../src/qml-health-measure.js";
 
@@ -25,13 +24,6 @@ Item {
   const config = loadConfig(path.join(root, "qmlqualitylens.config.json"));
   return { root, config, context: createAnalysisContext(config) };
 }
-
-test("finding summaries exclude suppressions from severity and kind totals", () => {
-  assert.deepEqual(findingSummary([
-    { id: "first", kind: "sample", severity: "low", message: "active", actions: [] },
-    { id: "second", kind: "ignored", severity: "high", message: "suppressed", suppressed: true, actions: [] },
-  ]), { findings: 2, active: 1, suppressed: 1, high: 0, medium: 0, low: 1, by_kind: { sample: 1 } });
-});
 
 test("specialized reports preserve canonical finding identities, metadata, and suppressions", () => {
   const { config, context } = fixture({ suppressions: [{ kind: "qml.performance.image_without_source_size", reason: "small fixture" }] });

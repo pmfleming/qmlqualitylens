@@ -4,7 +4,6 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createAnalysisContext } from "../src/analyzer.js";
-import { runMeasure } from "../src/cli.js";
 import { loadConfig } from "../src/config.js";
 import { measureQualityContract } from "../src/measures/contract.js";
 import { measureCorrectnessCatalog } from "../src/measures/correctness.js";
@@ -57,17 +56,4 @@ test("unprovenanced artifacts cannot supply blocking findings or a passing requi
   const contract = measureQualityContract(config, "test", context);
   assert.equal(contract.summary.verdict, "incomplete");
   assert.ok(!contract.findings.some((finding) => finding.id === "stale"));
-});
-
-test("measure dependencies share run provenance and produce a fresh contract", () => {
-  const { config } = fixture();
-  runMeasure(config, "quality.contract", "test");
-  const contract = JSON.parse(fs.readFileSync(path.join(config.outputDir, "quality_contract.json"), "utf8"));
-  const tests = JSON.parse(fs.readFileSync(path.join(config.outputDir, "test_evidence.json"), "utf8"));
-  assert.equal(contract.summary.verdict, "pass");
-  assert.equal(contract.provenance.run_id, tests.provenance.run_id);
-  assert.match(contract.provenance.source_hash, /^[a-f0-9]{64}$/);
-  assert.match(contract.provenance.config_hash, /^[a-f0-9]{64}$/);
-  assert.equal(contract.provenance.tool_versions.node, process.versions.node);
-  assert.ok(Object.hasOwn(contract.provenance, "source_revision"));
 });

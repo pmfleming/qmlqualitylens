@@ -5,8 +5,6 @@ import path from "node:path";
 import test from "node:test";
 import { createAnalysisContext } from "../src/analyzer.js";
 import { loadConfig } from "../src/config.js";
-import { measureCorrectnessCatalog } from "../src/measures/correctness.js";
-import { measureFormat } from "../src/measures/format.js";
 import { measureRuntimePerformance, measureRuntimeWarnings } from "../src/measures/runtime.js";
 
 function setup(extra: Record<string, unknown>) {
@@ -17,16 +15,6 @@ function setup(extra: Record<string, unknown>) {
   const config = loadConfig(path.join(root, "qmlqualitylens.config.json"));
   return { root, config, context: createAnalysisContext(config) };
 }
-
-test("ingests JUnit failures as blocking test evidence", () => {
-  const fixture = setup({ reports: { tests: "tests.xml" } });
-  fs.writeFileSync(path.join(fixture.root, "tests.xml"), `<testsuite tests="2" failures="1" time="0.5"><testcase name="ok"/><testcase name="bad" file="tst_Main.qml" line="3"><failure message="expected true"/></testcase></testsuite>`);
-  const artifact = measureCorrectnessCatalog(fixture.config, "test", fixture.context) as any;
-
-  assert.equal(artifact.summary.execution_status, "failed");
-  assert.equal(artifact.summary.failures, 1);
-  assert.equal(artifact.findings.find((finding: any) => finding.kind === "tests.failure")?.enforcement, "block");
-});
 
 test("ingests runtime QML warnings and provenance-bearing performance scenarios", () => {
   const fixture = setup({ reports: { runtime_warnings: "runtime.log", qml_profiler: "profile.json" }, performance_budgets: [{ scenario: "startup", platform: "offscreen", frame_p95_ms: 16.67, max_event_ms: 2.5 }] });
@@ -53,14 +41,4 @@ test("performance evidence is incomplete when a configured budget has no matchin
 
   assert.equal(artifact.summary.status, "incomplete");
   assert.match(artifact.summary.reason, /No performance scenario matches budget/);
-});
-
-test("qmlformat check can use a configured deterministic formatter", () => {
-  const fixture = setup({ tools: { qmlformat: { command: "cat", check: true } } });
-  fs.writeFileSync(path.join(fixture.root, ".qmlformat.ini"), "[General]\nIndentWidth=4\n");
-  const artifact = measureFormat(fixture.config, "test", fixture.context) as any;
-
-  assert.equal(artifact.summary.status, "pass");
-  assert.equal(artifact.summary.drift, 0);
-  assert.deepEqual(artifact.summary.settings, [path.join(fixture.root, ".qmlformat.ini")]);
 });

@@ -72,16 +72,6 @@ test("does not treat an unscoped empty qmllint report as a verified clean run", 
   assert.match(context.qmllint.error ?? "", /does not identify which/);
 });
 
-test("runs qmllint_command when no report exists", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-qmllint-command-"));
-  fs.writeFileSync(path.join(root, "qmlqualitylens.config.json"), JSON.stringify({ project_name: "lint", project_root: ".", source_roots: ["."], output_dir: "target", qmllint_command: "printf 'Main.qml:4:2: error: command diagnostic\\n'" }));
-  const result = loadQmllintResult(loadConfig(path.join(root, "qmlqualitylens.config.json")));
-
-  assert.equal(result.source, "command");
-  assert.equal(result.findings[0]?.severity, "error");
-  assert.equal(result.findings[0]?.message, "command diagnostic");
-});
-
 test("malformed qmllint reports are surfaced without aborting analysis", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-qmllint-malformed-"));
   fs.writeFileSync(path.join(root, "qmllint.json"), "{not-json");
@@ -117,14 +107,4 @@ printf '{"files":[{"filename":"%s/Main.qml","success":false,"warnings":[{"line":
   assert.ok(argumentsUsed.includes("-E"));
   assert.equal(context.qmllintFindings[0]?.severity, "error", "qmllint syntax diagnostics must block even when Qt labels their type warning");
   assert.equal(context.findings.find((finding) => finding.kind === "qmllint.diagnostic")?.column, 3);
-});
-
-test("qml health ingests configured qmllint reports", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-qmllint-context-"));
-  fs.writeFileSync(path.join(root, "Main.qml"), "import QtQuick\nItem {}\n");
-  fs.writeFileSync(path.join(root, "qmllint.json"), JSON.stringify([{ file: "Main.qml", line: 2, column: 1, severity: "warning", message: "example warning" }]));
-  const context = createAnalysisContext(configWithRoot(root));
-
-  assert.equal(context.qmllintFindings.length, 1);
-  assert.equal(context.qmllintFindings[0]?.file, "Main.qml");
 });

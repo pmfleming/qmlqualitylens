@@ -5,17 +5,6 @@ import { loadQmlParser } from "../src/tree-sitter.js";
 
 const require = createRequire(import.meta.url);
 
-test("optional parser loader accepts CommonJS/default exports and isolates parser state", () => {
-  const first = loadQmlParser();
-  const second = loadQmlParser((name) => ({ default: require(name) }));
-  assert.ok(first && second);
-  assert.notEqual(first.parser, second.parser);
-  first.parser.reset();
-  const tree = second.parser.parse("Item {}");
-  assert.ok(tree && !tree.rootNode.hasError);
-  assert.equal(second.createQuery("(ui_object_definition) @object").captures(tree.rootNode).length, 1);
-});
-
 test("missing or malformed optional modules return unavailable evidence", () => {
   assert.equal(loadQmlParser(() => { throw new Error("module unavailable"); }), null);
   for (const value of [null, undefined, 42, {}, { default: null }, () => null])

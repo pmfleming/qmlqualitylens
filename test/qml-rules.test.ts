@@ -5,7 +5,6 @@ import path from "node:path";
 import test from "node:test";
 import { createAnalysisContext } from "../src/analyzer.js";
 import { loadConfig } from "../src/config.js";
-import { qmlSemanticFindings } from "../src/qml-rules.js";
 
 function fixtureContext(files: Record<string, string>) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "qmlqualitylens-rules-"));
@@ -14,28 +13,8 @@ function fixtureContext(files: Record<string, string>) {
   return createAnalysisContext(loadConfig(path.join(root, "qmlqualitylens.config.json")));
 }
 
-test("semantic rules catch binding, layout, public API, connection, and performance footguns", () => {
-  const context = fixtureContext({
-    "qmldir": `module Demo\nWidget 1.0 Widget.qml\nTarget 1.0 Target.qml\n`,
-    "Widget.qml": `import QtQuick\nItem {\n  property int usedProp: 0\n  property int unusedProp: 0\n  signal usedSignal()\n  signal unusedSignal()\n}\n`,
-    "Target.qml": `import QtQuick\nItem {\n  signal expected()\n}\n`,
-    "Main.qml": `import "."\nimport QtQuick.Layouts\n\nItem {\n  id: root\n  Rectangle { id: a; width: b.width }\n  Rectangle { id: b; width: a.width }\n  Rectangle {\n    id: card\n    width: root.width\n    anchors.fill: parent\n    Layout.fillWidth: true\n  }\n  MouseArea {\n    onClicked: {\n      card.width = 10\n    }\n  }\n  Widget {\n    usedProp: 1\n    onUsedSignal: {}\n  }\n  Target { id: target }\n  Connections {\n    target: target\n    function onMissing() {}\n  }\n  Item {\n    width: parent.width\n    Component.onCompleted: width = Qt.binding(function() { return parent.width })\n  }\n  Loader { source: "Panel.qml"; asynchronous: true }\n  Image { source: "photo.jpg" }\n}\n`,
-  });
-
-  const findings = qmlSemanticFindings(context);
-  const kinds = new Set(findings.map((finding) => finding.kind));
-
-  assert.equal(findings.filter((finding) => finding.kind === "qml.binding_loss").length, 1);
-  assert.ok(kinds.has("qml.binding_cycle"));
-  assert.ok(kinds.has("qml.layout_conflict.anchors_with_layout"));
-  assert.ok(kinds.has("qml.layout_conflict.anchors_with_geometry"));
-  assert.ok(kinds.has("cleanup.unused_public_property"));
-  assert.ok(kinds.has("cleanup.unused_public_signal"));
-  assert.ok(kinds.has("qml.connection_signal_mismatch"));
-  assert.ok(kinds.has("qml.performance.loader_without_active"));
-  assert.ok(kinds.has("qml.performance.image_without_source_size"));
-});
-
+// Calibration owns basic positive/negative binding and layout cases. These
+// scenarios protect cleanup and reactive-state distinctions not in that corpus.
 test("public API cleanup recognizes root bindings, methods, signals and nested member reads", () => {
   const context = fixtureContext({
     "qmldir": "module Demo\nWidget 1.0 Widget.qml\n",
@@ -74,49 +53,6 @@ test("public API cleanup recognizes unqualified outer-scope reads without requir
     "Main.qml": `import QtQuick\nimport "."\nWidget {}\n`,
   });
   assert.ok(!context.findings.some((finding) => finding.kind === "cleanup.unused_public_property"));
-});
-
-test("binding-cycle rule detects same-object and multi-binding cycles", () => {
-  const context = fixtureContext({
-    "Main.qml": `import QtQuick\nItem {\n  property int first: second\n  property int second: third\n  property int third: first\n}\n`,
-  });
-
-  const findings = qmlSemanticFindings(context).filter((finding) => finding.kind === "qml.binding_cycle");
-
-  assert.equal(findings.length, 1);
-  assert.match(findings[0]?.message ?? "", /first/);
-  assert.match(findings[0]?.message ?? "", /third/);
-});
-
-test("binding cycles include self-reference but exclude shadowed locals", () => {
-  const context = fixtureContext({ "Main.qml": `import QtQuick
-Item {
-  id: root
-  property int first: first + 1
-  property int second: root.second + 1
-  property int third: { let third = 1; return third }
-}
-` });
-  const cycles = context.findings.filter((finding) => finding.kind === "qml.binding_cycle");
-  assert.equal(cycles.length, 2);
-  assert.ok(cycles.some((finding) => finding.message.includes("'first'")));
-  assert.ok(cycles.some((finding) => finding.message.includes("'second'")));
-});
-
-test("binding loss checks scoped handlers and methods and reports unsupported targets", () => {
-  const context = fixtureContext({ "Main.qml": `import QtQuick
-Item {
-  width: parent.width
-  onWidthChanged: { let width = 1; width = 2 }
-  function resize(width) { width = 3 }
-  function reset() { width = 4 }
-}
-` });
-  const losses = context.findings.filter((finding) => finding.kind === "qml.binding_loss");
-  assert.equal(losses.length, 1);
-  assert.equal(losses[0]?.line, 6);
-  const dynamic = fixtureContext({ "Main.qml": `import QtQuick\nItem { width: parent.width; Component.onCompleted: root[key] = 1 }\n` });
-  assert.equal(dynamic.ruleCoverage.find((rule) => rule.rule === "qml.binding_loss")?.skip_reasons.dynamic_assignment_target, 1);
 });
 
 test("Connections accepts inline, inherited, and property-change signals", () => {
@@ -172,14 +108,4 @@ Item {
 }
 ` });
   assert.equal(context.findings.filter((finding) => finding.kind === "qml.binding_loss").length, 1);
-});
-
-test("binding-cycle rule does not treat parent alias plus child read as a cycle", () => {
-  const context = fixtureContext({
-    "Main.qml": `import QtQuick\nItem {\n  id: root\n  property alias text: label.text\n  visible: true\n  Text {\n    id: label\n    text: root.visible ? \"yes\" : \"no\"\n  }\n}\n`,
-  });
-
-  const findings = qmlSemanticFindings(context).filter((finding) => finding.kind === "qml.binding_cycle");
-
-  assert.equal(findings.length, 0);
 });
