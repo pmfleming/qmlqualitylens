@@ -68,6 +68,7 @@ class Parser {
   private readonly tokens: QmlToken[];
   private index = 0;
   private nextObjectId = 1;
+  private boundComponents = false;
   private readonly objects: QmlObjectNode[] = [];
   private readonly bindings: QmlBindingNode[] = [];
   private readonly idReferences: QmlIdReference[] = [];
@@ -104,6 +105,9 @@ class Parser {
       const token = this.tokens[this.index];
       if (!token) break;
       if (token.value === "pragma") {
+        if (this.tokens[this.index + 1]?.value === "ComponentBehavior" && this.tokens[this.index + 2]?.value === ":") {
+          this.boundComponents = this.tokens[this.index + 3]?.value === "Bound";
+        }
         this.skipImportLine(token.line);
         continue;
       }
@@ -471,8 +475,8 @@ class Parser {
     for (const object of this.objects) {
       const parent = object.parentObjectId === null ? undefined : objects.get(object.parentObjectId);
       const outer = parent ? scopes.get(parent.objectId) : undefined;
-      // Inline components are separate types and cannot see the enclosing document's ids.
-      const scope: Scope = inlineRoots.has(object.objectId) ? { ids: new Map() }
+      // Inline components keep separate ids; bound components also capture the enclosing scope.
+      const scope: Scope = inlineRoots.has(object.objectId) ? { parent: this.boundComponents ? outer : undefined, ids: new Map() }
         : outer && !["Component", "QtQml.Component"].includes(parent?.typeName ?? "") ? outer : { parent: outer, ids: new Map() };
       scopes.set(object.objectId, scope);
       if (object.idName) scope.ids.set(object.idName, object);

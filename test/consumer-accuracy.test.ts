@@ -126,6 +126,74 @@ Item {
   assert.ok(context.resolution.componentUses.some((use) => use.from === "Main.qml" && use.typeName === "Cards.Card" && use.target === "Cards.qml"));
 });
 
+test("bound inline components capture outer ids without leaking their own ids", (t) => {
+  const source = `pragma ComponentBehavior: Bound
+import QtQuick
+Item {
+  id: outer
+  component First: Item {
+    id: local
+    width: outer.width
+  }
+  component Second: Item {
+    width: local.width
+  }
+  component Shadow: Item {
+    id: outer
+    property real captured: outer.width
+  }
+  First {}
+  Second {}
+  Shadow {}
+  height: local.height
+}`;
+  const context = analyzeProject(t, { "Main.qml": source });
+  const document = context.qmlDocuments[0]!.document;
+  const first = document.objects.find((object) => object.idName === "local")!;
+  const shadow = document.objects.find((object) => object.idName === "outer" && object !== document.root)!;
+  assert.equal(first.references.find((reference) => reference.name === "outer")?.targetObjectId, document.root?.objectId);
+  assert.equal(shadow.references.find((reference) => reference.name === "outer")?.targetObjectId, shadow.objectId);
+  const localReferences = document.idReferences.filter((reference) => reference.name === "local");
+  assert.equal(localReferences.length, 2);
+  assert.ok(localReferences.every((reference) => reference.targetObjectId === null));
+  assert.deepEqual(kinds(context.findings, "cleanup.unused_id").map((finding) => finding.message.match(/'([^']+)'/)?.[1]), ["local"]);
+});
+
+test("same-named typed properties and ids retain all candidate member uses", (t) => {
+  for (const throughProperty of [true, false]) {
+    const consumers = ["First", "Second"].map((type) => {
+      const name = type.toLowerCase();
+      return throughProperty ? `Item {
+        property ${type} controller: ${type} {}
+        width: controller.${name}Value
+        Connections { target: controller; function on${type}Requested() {} }
+      }` : `Component {
+        ${type} {
+          id: controller
+          width: controller.${name}Value
+          Connections { target: controller; function on${type}Requested() {} }
+        }
+      }`;
+    });
+    for (const ordered of [consumers, [...consumers].reverse()]) {
+      const context = analyzeProject(t, {
+        "qmldir": "module Demo\nFirst 1.0 First.qml\nSecond 1.0 Second.qml\n",
+        "First.qml": "import QtQuick\nItem {\n  property int firstValue: 1\n  signal firstRequested\n  property int unused: 1\n}",
+        "Second.qml": "import QtQuick\nItem {\n  property int secondValue: 1\n  signal secondRequested\n  property int unused: 1\n}",
+        "Main.qml": `import QtQuick\nItem {\n${ordered.join("\n")}\n}`,
+      });
+      const unused = [...kinds(context.findings, "cleanup.unused_public_property"), ...kinds(context.findings, "cleanup.unused_public_signal")]
+        .map((finding) => `${finding.file}:${finding.message.match(/'([^']+)'/)?.[1]}`);
+      assert.deepEqual(unused.sort(), ["First.qml:unused", "Second.qml:unused"]);
+      for (const type of ["First", "Second"]) {
+        const members = context.resolution.typedMemberUses.find((use) => use.target === `${type}.qml`)?.memberNames ?? [];
+        assert.ok(members.includes(`${type.toLowerCase()}Value`));
+        assert.ok(members.includes(`${type.toLowerCase()}Requested`));
+      }
+    }
+  }
+});
+
 test("test doubles are exempt from process-boundary and Qt Test callback typing findings", (t) => {
   const context = analyzeProject(t, {
     "tests/tst_wifi.qml": `import QtQuick

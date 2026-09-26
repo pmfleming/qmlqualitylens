@@ -204,13 +204,16 @@ function resolveTypedMemberUses(documents: QmlDocumentEntry[], imports: ImportRe
   const sourceByFile = new Map(sources.map((source) => [source.relativePath, source.text]));
   return documents.flatMap(({ file, document }) => {
     const scope = componentScope(file, imports.filter((item) => item.from === file), components, componentByFile, modules);
-    const typed = new Map<string, string>();
+    // Names may recur in different object/component scopes. Keep every candidate rather
+    // than letting a later declaration hide evidence for an earlier type.
+    const typed = new Map<string, Set<string>>();
+    const addType = (name: string, target: string) => typed.set(name, (typed.get(name) ?? new Set()).add(target));
     for (const object of document.objects) {
       const instanceType = object.idName ? resolveTypeInScope(object.typeName, scope) : null;
-      if (object.idName && instanceType && instanceType !== file) typed.set(object.idName, instanceType);
+      if (object.idName && instanceType && instanceType !== file) addType(object.idName, instanceType);
       for (const property of object.properties) {
         const target = property.typeName && !property.alias ? resolveTypeInScope(property.typeName, scope) : null;
-        if (target && target !== file) typed.set(leafSegment(property.name), target);
+        if (target && target !== file) addType(leafSegment(property.name), target);
       }
     }
     if (!typed.size) return [];
@@ -218,19 +221,21 @@ function resolveTypedMemberUses(documents: QmlDocumentEntry[], imports: ImportRe
     const add = (target: string, name: string) => members.set(target, (members.get(target) ?? new Set()).add(name));
     const tokens = lexQml(sourceByFile.get(file) ?? "");
     tokens.forEach((token, index) => {
-      const target = token.kind === "identifier" ? typed.get(token.value) : undefined;
+      const targets = token.kind === "identifier" ? typed.get(token.value) : undefined;
       // Accept `foo.bar`, `owner.foo.bar`, and `foo?.bar`; name-based, so it errs toward "used".
       const dot = tokens[index + 1]?.value === "?" ? index + 2 : index + 1;
       const member = tokens[dot + 1];
-      if (target && tokens[dot]?.value === "." && member?.kind === "identifier") add(target, member.value);
+      if (targets && tokens[dot]?.value === "." && member?.kind === "identifier") {
+        for (const target of targets) add(target, member.value);
+      }
     });
     for (const connection of document.objects.filter((object) => baseTypeName(object.typeName) === "Connections")) {
       const targetExpression = connection.bindings.find((binding) => binding.propertyPath === "target")?.expression.trim() ?? "";
-      const target = typed.get(targetExpression.match(/(?:^|\.)([A-Za-z_]\w*)$/)?.[1] ?? "");
-      if (!target) continue;
+      const targets = typed.get(targetExpression.match(/(?:^|\.)([A-Za-z_]\w*)$/)?.[1] ?? "");
+      if (!targets) continue;
       for (const handler of [...connection.functions, ...connection.handlers]) {
         const signal = handler.name.match(/^on([A-Z]\w*)$/)?.[1];
-        if (signal) add(target, `${signal[0]?.toLowerCase()}${signal.slice(1)}`);
+        if (signal) for (const target of targets) add(target, `${signal[0]?.toLowerCase()}${signal.slice(1)}`);
       }
     }
     return [...members].map(([target, names]) => ({ from: file, target, memberNames: [...names] }));
