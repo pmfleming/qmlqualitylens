@@ -5,13 +5,14 @@ import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 import { buildPrerequisiteFailure } from "./build.js";
 import { unavailableToolExecution } from "../tool-execution.js";
 import { isTestFile } from "../qml-model.js";
+import { parseRuntimeWarnings } from "../runtime-warnings.js";
 
 export function measureCorrectnessCatalog(config: Config, command: string, context: AnalysisContext) {
   const tests = discoverTests(context);
   const runner = config.tools.ctestCheck ? "ctest" : "qmltestrunner";
   const toolExecution = runTests(config, context, runner);
   const execution = loadTestEvidence(config.reports.tests);
-  const rawFindings = catalogFindings(tests.length, toolExecution, execution, runner);
+  const rawFindings = [...catalogFindings(tests.length, toolExecution, execution, runner), ...testRuntimeWarnings(config, toolExecution)];
   const findings = support.applySuppressions(support.enrichFindings(rawFindings, config), config);
   const version = toolExecution && toolExecution.status !== "incomplete" ? support.toolVersion(config.tools[`${runner}Command`], config.tools[`${runner}WorkingDirectory`], config.tools[`${runner}TimeoutMs`], { ...process.env, ...config.tools[`${runner}Environment`] }, config.tools[`${runner}RedactPatterns`]) : null;
   const artifact = {
@@ -35,8 +36,23 @@ export function measureCorrectnessCatalog(config: Config, command: string, conte
   };
   writeArtifact(config, "correctness_review.json", artifact);
   writeArtifact(config, "test_catalog.json", { ...baseArtifact(context, "correctness.test_catalog", command), tests });
-  writeArtifact(config, "test_evidence.json", { ...baseArtifact(context, "correctness.test_evidence", command, { [runner]: version }), summary: artifact.summary, execution: artifact.execution, findings: findings.filter((finding) => finding.kind === "tests.failure" || finding.kind === "tests.execution_failed") });
+  writeArtifact(config, "test_evidence.json", { ...baseArtifact(context, "correctness.test_evidence", command, { [runner]: version }), summary: artifact.summary, execution: artifact.execution, findings: findings.filter((finding) => finding.kind === "tests.failure" || finding.kind === "tests.execution_failed" || finding.kind === "runtime.qml_warning") });
   return artifact;
+}
+
+function testRuntimeWarnings(config: Config, execution: ToolExecution | null): Finding[] {
+  const output = execution ? [`${execution.stdout}\n${execution.stderr}`] : [];
+  const report = config.reports.tests;
+  if (report && fs.existsSync(report)) {
+    // QtTest writes engine warnings to JUnit system-err even when every assertion
+    // passes. CTest may instead put the QtTest transcript in system-out.
+    const text = fs.readFileSync(report, "utf8");
+    for (const match of text.matchAll(/<system-(out|err)\b[^>]*>([\s\S]*?)<\/system-\1>/g)) {
+      const body = (match[2] ?? "").replace(/<!\[CDATA\[([\s\S]*?)\]\]>|<[^>]*>/g, (_match, cdata: string | undefined) => cdata ?? "");
+      output.push(body.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&"));
+    }
+  }
+  return parseRuntimeWarnings(output.join("\n"), config);
 }
 
 function discoverTests(context: AnalysisContext) {

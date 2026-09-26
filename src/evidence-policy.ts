@@ -31,9 +31,10 @@ export function evidenceChecks(config: Config, context: AnalysisContext, artifac
     const value = artifactFor(definition);
     const summary = isRecord(value) && isRecord(value.summary) ? value.summary : {};
     const status = value === undefined ? "skipped" : normalizeStatus(summary[definition.statusKey ?? "status"]);
+    const runtimeWarnings = isRecord(value) && Array.isArray(value.findings) && value.findings.some((finding) => isRecord(finding) && finding.kind === "runtime.qml_warning" && !finding.suppressed);
     checks.push({
       id: definition.id, name: definition.name, required: definition.required,
-      status: definition.id === "tool.cmake" && !definition.required ? "skipped" : status,
+      status: definition.id === "tool.cmake" && !definition.required ? "skipped" : status === "pass" && runtimeWarnings ? "warn" : status,
       findings: isRecord(value) && Array.isArray(value.findings) ? value.findings.length : 0,
       reason: typeof summary.reason === "string" ? summary.reason : typeof summary.execution_reason === "string" ? summary.execution_reason : status === "skipped" || status === "incomplete" ? `${definition.file} did not provide usable execution evidence.` : undefined,
     });

@@ -529,7 +529,12 @@ class Parser {
   private isContinuationLine(index: number, previous: QmlToken | undefined): boolean {
     const current = this.tokens[index];
     if (!current || !previous) return false;
-    return CONTINUATION_TOKENS.has(previous.value) || CONTINUATION_TOKENS.has(current.value);
+    if (CONTINUATION_TOKENS.has(current.value)) return true;
+    // The lexer emits individual symbols. A trailing postfix ++/-- completes
+    // an expression; unlike binary +/-, it must not swallow the next member.
+    const before = this.tokens[index - 2];
+    if (["+", "-"].includes(previous.value) && before?.value === previous.value && before.endOffset === previous.offset) return false;
+    return CONTINUATION_TOKENS.has(previous.value);
   }
 
   private findNextObjectStart(from: number): number | null {

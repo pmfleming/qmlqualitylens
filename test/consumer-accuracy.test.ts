@@ -89,6 +89,40 @@ Item {
   assert.deepEqual(unused.sort(), ["ui/BaseController.qml:unusedBase", "ui/Controller.qml:unused"]);
 });
 
+test("public API cleanup skips unknown reads and propagates uncertainty to bases", (t) => {
+  const context = analyzeProject(t, {
+    "qmldir": "module Demo\nBase 1.0 Base.qml\nDerived 1.0 Derived.qml\n",
+    "Base.qml": "import QtQuick\nItem { property int observed: 1; signal requested }",
+    "Derived.qml": `import QtQuick
+Base {
+  function read(name) { return this[name] }
+}`,
+    "Main.qml": "import QtQuick\nItem { Derived {} }",
+  });
+  assert.equal(context.findings.filter((finding) => finding.kind.startsWith("cleanup.unused_public_")).length, 0);
+  for (const rule of ["cleanup.unused_public_property", "cleanup.unused_public_signal"]) {
+    const targets = context.ruleCoverage.find((record) => record.rule === rule)?.targets;
+    for (const file of ["Base.qml", "Derived.qml"]) assert.equal(targets?.find((target) => target.file === file)?.reason, "dynamic_property_access");
+  }
+});
+
+test("QML casts preserve public members read through local variables", (t) => {
+  const context = analyzeProject(t, {
+    "ui/qmldir": "module Demo.Ui\nAction 1.0 Action.qml\n",
+    "ui/Action.qml": 'import QtQuick\nQtObject {\n property string keys: "Ctrl+J"\n property int unused: 1\n}',
+    "Main.qml": `import QtQuick
+import Demo.Ui as Ui
+Item {
+  Ui.Action {}
+  function help() {
+    const shortcut = resources[0] as Ui.Action;
+    return shortcut.keys;
+  }
+}`,
+  });
+  assert.deepEqual(kinds(context.findings, "cleanup.unused_public_property").map((finding) => finding.message.match(/'([^']+)'/)?.[1]), ["unused"]);
+});
+
 test("binding loss ignores dependency-free initializers but keeps reactive bindings", (t) => {
   const context = analyzeProject(t, {
     "Main.qml": `import QtQuick

@@ -4,6 +4,7 @@ import path from "node:path";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 import { buildPrerequisiteFailure } from "./build.js";
 import { unavailableToolExecution } from "../tool-execution.js";
+import { parseRuntimeWarnings } from "../runtime-warnings.js";
 import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding, type MeasureJsonValue as JsonValue, type MeasureToolExecution as ToolExecution } from "./foundation.js";
 
 export function measureRuntimeWarnings(config: Config, command: string, context: AnalysisContext) {
@@ -90,19 +91,6 @@ function runProfilerProducer(config: Config, report: string | null, context: Ana
   const blocked = buildPrerequisiteFailure(config, context);
   if (blocked) return unavailableToolExecution("qml_profiler", blocked);
   return support.executeTool(config.tools.qmlProfilerCommand, config.tools.qmlProfilerArguments, config.tools.qmlProfilerWorkingDirectory, config.tools.qmlProfilerTimeoutMs, { ...process.env, ...config.tools.qmlProfilerEnvironment, QMLQUALITYLENS_REPORT: report }, config.tools.qmlProfilerRedactPatterns);
-}
-
-function parseRuntimeWarnings(text: string, config: Config): Finding[] {
-  const warningPattern = /(?:binding loop|failed to create|is not a type|cannot assign|non-existent property|no such signal|unable to assign|module .* is not installed|qrc:\/.*:\d+)/i;
-  return text.split(/\r?\n/).flatMap((line, index) => {
-    if (!warningPattern.test(line)) return [];
-    const location = line.match(/((?:file:\/\/|qrc:\/|\/|[A-Za-z]:\\)[^:\s]+\.qml):(\d+)(?::\d+)?/i) ?? line.match(/([^\s:]+\.qml):(\d+)(?::\d+)?/i);
-    const rawFile = location?.[1]?.replace(/^file:\/\//, "").replace(/^qrc:\//, "") ?? undefined;
-    const file = rawFile ? path.isAbsolute(rawFile) ? path.relative(config.projectRoot, rawFile).split(path.sep).join("/") : rawFile : undefined;
-    const lineNumber = location?.[2] ? Number(location[2]) : undefined;
-    const severity: Finding["severity"] = /binding loop|failed to create|is not a type|module .* not installed/i.test(line) ? "high" : "medium";
-    return [{ id: `runtime.qml_warning.${index + 1}.${line}`, kind: "runtime.qml_warning", severity, file, line: lineNumber, message: line.trim(), actions: ["Reproduce the runtime path and fix the QML warning; retain the scenario/log as test evidence."] }];
-  });
 }
 
 type RuntimeScenario = {

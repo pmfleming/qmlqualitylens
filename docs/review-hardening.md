@@ -42,6 +42,13 @@ Every native adapter and version probe uses the shared runner. On POSIX systems,
 
 Configured redaction applies to command metadata and errors as well as output. Formatter comparisons inspect original output before redaction, so redaction cannot manufacture formatting drift.
 
+## Consumer evidence accuracy
+
+- Public-API removal checks skip components whose internal JavaScript reads cannot be inspected, and propagate that uncertainty to inherited base types. `rule_coverage` records the reason, including `javascript_parser_unavailable`; absent optional peers no longer turn unknown reads into unused-member suggestions.
+- Typed-member evidence includes simple local QML `as` casts, conservatively retaining all candidate types when names recur.
+- Runtime diagnostics include JavaScript errors, non-bindable dependencies (with member details), and image-decoding failures. QtTest/CTest stdout, stderr, and JUnit `system-out`/`system-err` are inspected even when every assertion passes. These warnings remain in `test_evidence.json`; affected evidence checks report `warn` rather than hiding them behind a successful exit code. Expected application transport-error logs are not treated as QML engine errors.
+- Postfix `++` and `--` no longer consume a following QML member as a multiline expression continuation.
+
 ## Clone analysis
 
 Aligned overlapping windows reuse their previously expanded range instead of repeatedly scanning the same block. Regression tests assert expansion counts rather than fragile wall-clock thresholds. `npm run benchmark:clones` provides local timings.
@@ -51,5 +58,5 @@ Normalized clone analysis reports its limits (50000 keys, 25 occurrences per key
 ## Validation and packaging
 
 - Schema parity tests use Ajv as a **development-only** dependency and check field types, numeric boundaries, arrays, unknown fields, conditional commands, and execution safety constraints against runtime validation. A compile-time exhaustive field tree also connects the schema to `RawConfig`.
-- `npm run package:smoke` builds a tarball, installs it into a clean temporary consumer offline without optional peers or development dependencies, and exercises initialization, the catalog, analysis, all measurements, audit, and the packaged subprocess runner.
+- `npm run package:smoke` builds a tarball, installs it into a clean temporary consumer offline without optional peers or development dependencies, and exercises initialization, the catalog, analysis, all measurements, audit, the packaged subprocess runner, and conservative public-API cleanup through a derived component without optional JavaScript analysis.
 - CI runs the package smoke test on Node 24.4.0 and current Node 24. The runtime remains dependency-free for default static analysis.

@@ -62,4 +62,19 @@ if (process.argv.includes("--cmake")) {
   assert.equal(JSON.parse(fs.readFileSync(path.join(consumer, "target/qmlqualitylens/audit.json"), "utf8")).summary.verdict, "pass");
   checks.push("installed CMake module target");
 }
+// A realistic public API consumer must remain safe without optional JS analysis.
+// A trivial Item cannot expose the dangerous unknown-read => unused-member fallback.
+fs.writeFileSync(path.join(consumer, "qmldir"), "module Consumer\nBase 1.0 Base.qml\nDerived 1.0 Derived.qml\n");
+fs.writeFileSync(path.join(consumer, "Base.qml"), "import QtQuick\nItem {\n property int count: 1\n signal requested\n}\n");
+fs.writeFileSync(path.join(consumer, "Derived.qml"), "import QtQuick\nBase {\n function calculate() { const value = count; requested(); return value; }\n}\n");
+fs.writeFileSync(path.join(consumer, "Main.qml"), "import QtQuick\nItem { Derived {} }\n");
+const fallback = JSON.parse(run(cli, ["analyze", "--format", "json"], consumer));
+assert.equal(fallback.findings.some((finding) => finding.kind.startsWith("cleanup.unused_public_")), false);
+for (const rule of ["cleanup.unused_public_property", "cleanup.unused_public_signal"]) {
+  const coverage = fallback.rule_coverage.find((record) => record.rule === rule);
+  for (const file of ["Base.qml", "Derived.qml"]) {
+    assert.equal(coverage.targets.find((target) => target.file === file)?.reason, "javascript_parser_unavailable");
+  }
+}
+checks.push("conservative public API cleanup without optional parser");
 console.log(JSON.stringify({ status: "pass", package: archive, optional_peers: "absent", checks }, null, 2));

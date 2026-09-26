@@ -69,6 +69,28 @@ test("inline signal declarations do not consume the enclosing object brace", () 
   assert.equal(document.root?.children[0]?.signals[0]?.name, "ready");
 });
 
+test("postfix increment and decrement end handlers without breaking binary continuations", () => {
+  for (const operation of ["++", "--"]) {
+    const document = parseQmlDocument(`Item {
+      onWidthChanged: count${operation} // finished expression
+      onHeightChanged: function() { count = 0 }
+      width: base +
+        extra
+      height: base -
+        extra
+      x: count${operation}
+        + extra
+      y: 0
+    }`, "Postfix.qml");
+    assert.deepEqual(document.diagnostics, []);
+    assert.deepEqual(document.root?.handlers.map((handler) => handler.name), ["onWidthChanged", "onHeightChanged"]);
+    assert.equal(document.bindings.length, 6);
+    assert.match(document.bindings.find((binding) => binding.propertyPath === "width")!.expression, /base \+\s+extra/);
+    assert.match(document.bindings.find((binding) => binding.propertyPath === "height")!.expression, /base -\s+extra/);
+    assert.match(document.bindings.find((binding) => binding.propertyPath === "x")!.expression, /\+ extra$/);
+  }
+});
+
 test("parser surfaces diagnostics", () => {
   const document = parseQmlDocument(`Item {\n  width: (1 + 2\n`, "Broken.qml");
   assert.ok(document.diagnostics.length >= 1);

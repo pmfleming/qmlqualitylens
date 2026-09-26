@@ -216,10 +216,27 @@ function resolveTypedMemberUses(documents: QmlDocumentEntry[], imports: ImportRe
         if (target && target !== file) addType(leafSegment(property.name), target);
       }
     }
+    const tokens = lexQml(sourceByFile.get(file) ?? "");
+    // QML casts also provide type evidence: `const shortcut = resources[i] as Ui.Shortcut`.
+    // Like typed properties, local names are conservative candidates, not a JS scope model.
+    tokens.forEach((token, index) => {
+      if (token.value !== "as" || tokens[index + 1]?.kind !== "identifier") return;
+      let typeName = tokens[index + 1]!.value;
+      for (let end = index + 2; tokens[end]?.value === "." && tokens[end + 1]?.kind === "identifier"; end += 2) typeName += `.${tokens[end + 1]!.value}`;
+      const target = resolveTypeInScope(typeName, scope);
+      if (!target || target === file) return;
+      for (let start = index - 1; start >= 0; start--) {
+        const value = tokens[start]?.value;
+        if ([";", "{", "}"].includes(value ?? "")) break;
+        if (!["const", "let", "var"].includes(value ?? "")) continue;
+        const name = tokens[start + 1];
+        if (name?.kind === "identifier" && tokens[start + 2]?.value === "=") addType(name.value, target);
+        break;
+      }
+    });
     if (!typed.size) return [];
     const members = new Map<string, Set<string>>();
     const add = (target: string, name: string) => members.set(target, (members.get(target) ?? new Set()).add(name));
-    const tokens = lexQml(sourceByFile.get(file) ?? "");
     tokens.forEach((token, index) => {
       const targets = token.kind === "identifier" ? typed.get(token.value) : undefined;
       // Accept `foo.bar`, `owner.foo.bar`, and `foo?.bar`; name-based, so it errs toward "used".

@@ -6,7 +6,8 @@
     { "kind": "qml.binding_cycle", "file": "BindingCycle.qml" },
     { "kind": "qml.binding_cycle", "file": "SelfBinding.qml" },
     { "kind": "qml.connection_signal_mismatch", "file": "BadConnection.qml" },
-    { "kind": "qml.binding_loss", "file": "BindingLoss.qml" }
+    { "kind": "qml.binding_loss", "file": "BindingLoss.qml" },
+    { "kind": "qml.binding_loss", "file": "PostfixHandlers.qml" }
   ],
   "negatives": [
     { "kind": "resolution.unknown_type", "file": "Good.qml" },

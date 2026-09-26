@@ -13,7 +13,6 @@ type RuleGroup = { rules: string[]; run: (context: AnalysisContext) => Finding[]
 const perFile = (run: (entry: DocumentEntry, context: AnalysisContext) => Finding[]) => (context: AnalysisContext) => context.qmlDocuments.flatMap((entry) => run(entry, context));
 const RULE_GROUPS: RuleGroup[] = [
   { rules: ["qml.layout_conflict.anchors_with_layout", "qml.layout_conflict.anchors_with_geometry"], run: perFile(layoutConflictFindings) },
-  { rules: ["cleanup.unused_public_property", "cleanup.unused_public_signal"], run: unusedPublicApiFindings, needsWholeProject: true },
   { rules: ["qml.delegate_state"], run: perFile(delegateStateFindings) },
   { rules: ["qml.prefer_typed_property"], run: perFile(typedPropertyFindings) },
   { rules: ["qml.missing_required"], run: missingRequiredFindings, needsWholeProject: true },
@@ -40,6 +39,7 @@ export function evaluateQmlRules(context: AnalysisContext): { findings: Finding[
       coverage.push(coverageRecord(rule, "file", targets, ["File-level evaluation by the internal QML parser; JavaScript and dynamic behavior are not fully resolved."]));
     }
   }
+  evaluatePublicApi(context, findings, coverage);
   evaluateFileRule(context, "qml.binding_loss", bindingLossEvaluation, findings, coverage);
   evaluateFileRule(context, "qml.binding_cycle", bindingCycleEvaluation, findings, coverage);
   evaluateConnections(context, findings, coverage);
@@ -234,10 +234,55 @@ function hasContradictoryGeometry(names: Set<string>): boolean {
   return [hasAll("anchors.fill") && hasAll("x"), hasAll("anchors.fill") && hasAll("y"), hasAll("anchors.fill") && hasAll("width"), hasAll("anchors.fill") && hasAll("height"), hasAll("anchors.left", "anchors.right", "width"), hasAll("anchors.top", "anchors.bottom", "height"), hasAll("anchors.centerIn", "x"), hasAll("anchors.centerIn", "y")].some(Boolean);
 }
 
-function unusedPublicApiFindings(context: AnalysisContext): Finding[] {
+// Absence of a read is only evidence when every relevant expression could be inspected.
+// In particular, the optional-parser fallback must not turn unknown reads into dead API.
+function evaluatePublicApi(context: AnalysisContext, findings: Finding[], coverage: RuleCoverageRecord[]): void {
+  const reasons = new Map<string, string>();
+  const projectReason = context.qmlDocuments.some((entry) => entry.document.diagnostics.length) ? "project_parser_diagnostic" : undefined;
+  for (const entry of context.qmlDocuments) {
+    const reason = publicApiAnalysisReason(entry);
+    if (!reason) continue;
+    reasons.set(entry.file, reason);
+    // Unresolved reads in a derived type may use any of its inherited members.
+    const visited = new Set([entry.file]);
+    let root = entry.document.root;
+    let file = entry.file;
+    while (root) {
+      const base = resolvedTargetForObject(context, file, root.typeName, root.line);
+      if (!base || visited.has(base)) break;
+      visited.add(base);
+      reasons.set(base, reason);
+      file = base;
+      root = context.qmlDocuments.find((candidate) => candidate.file === base)?.document.root ?? null;
+    }
+  }
+  const rules = ["cleanup.unused_public_property", "cleanup.unused_public_signal"];
+  if (!projectReason) findings.push(...unusedPublicApiFindings(context, reasons).filter((finding) => context.config.rules[finding.kind]?.enabled !== false));
+  for (const rule of rules) {
+    const targets = context.qmlDocuments.map((entry) => evaluationTarget(entry.file, undefined,
+      context.config.rules[rule]?.enabled === false ? "rule_disabled" : projectReason ?? reasons.get(entry.file)));
+    coverage.push(coverageRecord(rule, "file", targets, ["Removal suggestions are skipped when internal or inherited member reads cannot be fully inspected."]));
+  }
+}
+
+function publicApiAnalysisReason(entry: DocumentEntry): string | undefined {
+  for (const object of entry.document.objects) {
+    const expressions = [
+      ...object.bindings.filter((binding) => !isHandlerPath(binding.propertyPath) && !isObjectValuedExpression(binding.expression)).map((binding) => ({ body: binding.expression, parameters: [] as string[] })),
+      ...[...object.functions, ...object.handlers].map((fn) => ({ body: fn.body, parameters: fn.parameters.map((parameter) => parameter.name) })),
+    ];
+    for (const expression of expressions) {
+      const reason = analyzeAssignments(expression.body, expression.parameters).reason;
+      if (reason) return reason;
+    }
+  }
+  return undefined;
+}
+
+function unusedPublicApiFindings(context: AnalysisContext, reasons: Map<string, string>): Finding[] {
   const used = usedPublicApi(context);
   return context.components
-    .filter((component) => context.resolution.publicFiles.has(component.file) && hasExternalUser(context, component.file))
+    .filter((component) => !reasons.has(component.file) && context.resolution.publicFiles.has(component.file) && hasExternalUser(context, component.file))
     .flatMap((component) => {
       const entry = context.qmlDocuments.find((item) => item.file === component.file);
       const root = entry?.document.root;
