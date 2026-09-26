@@ -1,5 +1,5 @@
 import { isStringQuote, lexQml } from "./qml-lexer.js";
-import type { QmlBindingNode, QmlDocument, QmlExecutableNode, QmlIdReference, QmlObjectNode, QmlParserDiagnostic, QmlToken } from "./qml-parser-types.js";
+import type { QmlBindingNode, QmlDocument, QmlExecutableNode, QmlIdReference, QmlInlineComponent, QmlObjectNode, QmlParserDiagnostic, QmlToken } from "./qml-parser-types.js";
 import type { ImportRecord } from "./types.js";
 type PathRead = {
   path: string;
@@ -71,6 +71,7 @@ class Parser {
   private readonly objects: QmlObjectNode[] = [];
   private readonly bindings: QmlBindingNode[] = [];
   private readonly idReferences: QmlIdReference[] = [];
+  private readonly inlineComponents: QmlInlineComponent[] = [];
   private readonly imports: ImportRecord[] = [];
   private readonly diagnostics: QmlParserDiagnostic[] = [];
 
@@ -93,6 +94,7 @@ class Parser {
       objects: this.objects,
       bindings: this.bindings,
       idReferences: this.idReferences,
+      inlineComponents: this.inlineComponents,
       diagnostics: this.diagnostics,
     };
   }
@@ -203,6 +205,12 @@ class Parser {
       object.members.push({ kind: "group", name: joinPath(prefix, group.path), line: token.line });
       this.parseGroupScope(object, joinPath(prefix, group.path), group.braceIndex);
     });
+    const inlineComponent = this.inlineComponentAt(this.index);
+    if (inlineComponent) return this.parseAndContinue(() => {
+      object.members.push({ kind: "object", name: inlineComponent.name, line: token.line });
+      this.inlineComponents.push({ name: inlineComponent.name, line: token.line, objectId: this.nextObjectId });
+      this.parseObject(inlineComponent.objectStart, object, childDepth);
+    });
     if (this.isHandlerBinding(this.index)) return this.parseAndContinue(() => this.parseBinding(object, true, prefix));
     if (this.isBindingStart(this.index)) return this.parseAndContinue(() => this.parseBinding(object, false, prefix));
     const objectStart = this.findObjectStartAt(this.index);
@@ -211,6 +219,14 @@ class Parser {
       this.parseObject(objectStart, object, childDepth);
     });
     return false;
+  }
+
+  // `component Name: Type { ... }` declares a document-local type, not a property binding.
+  private inlineComponentAt(index: number): { name: string; objectStart: number } | null {
+    const name = this.tokens[index + 1];
+    if (this.tokens[index]?.value !== "component" || name?.kind !== "identifier" || this.tokens[index + 2]?.value !== ":") return null;
+    const objectStart = this.findObjectStartAt(index + 3);
+    return objectStart === null ? null : { name: name.value, objectStart };
   }
 
   private parseAndContinue(action: () => void): true {
@@ -451,11 +467,13 @@ class Parser {
     type Scope = { parent?: Scope; ids: Map<string, QmlObjectNode> };
     const scopes = new Map<number, Scope>();
     const objects = new Map(this.objects.map((object) => [object.objectId, object]));
+    const inlineRoots = new Set(this.inlineComponents.map((component) => component.objectId));
     for (const object of this.objects) {
       const parent = object.parentObjectId === null ? undefined : objects.get(object.parentObjectId);
       const outer = parent ? scopes.get(parent.objectId) : undefined;
-      const scope: Scope = outer && !["Component", "QtQml.Component"].includes(parent?.typeName ?? "")
-        ? outer : { parent: outer, ids: new Map() };
+      // Inline components are separate types and cannot see the enclosing document's ids.
+      const scope: Scope = inlineRoots.has(object.objectId) ? { ids: new Map() }
+        : outer && !["Component", "QtQml.Component"].includes(parent?.typeName ?? "") ? outer : { parent: outer, ids: new Map() };
       scopes.set(object.objectId, scope);
       if (object.idName) scope.ids.set(object.idName, object);
     }
@@ -501,7 +519,7 @@ class Parser {
   }
 
   private isLikelyMemberStart(index: number): boolean {
-    return this.isPropertyDeclaration(index) || this.isSignalDeclaration(index) || this.isFunctionDeclaration(index) || this.isHandlerBinding(index) || this.isBindingStart(index) || this.groupScopeAt(index) !== null || this.findObjectStartAt(index) !== null;
+    return this.inlineComponentAt(index) !== null || this.isPropertyDeclaration(index) || this.isSignalDeclaration(index) || this.isFunctionDeclaration(index) || this.isHandlerBinding(index) || this.isBindingStart(index) || this.groupScopeAt(index) !== null || this.findObjectStartAt(index) !== null;
   }
 
   private isContinuationLine(index: number, previous: QmlToken | undefined): boolean {

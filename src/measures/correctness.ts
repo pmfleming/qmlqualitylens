@@ -4,6 +4,7 @@ import { support, type MeasureConfig as Config, type MeasureContext as AnalysisC
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 import { buildPrerequisiteFailure } from "./build.js";
 import { unavailableToolExecution } from "../tool-execution.js";
+import { isTestFile } from "../qml-model.js";
 
 export function measureCorrectnessCatalog(config: Config, command: string, context: AnalysisContext) {
   const tests = discoverTests(context);
@@ -41,14 +42,23 @@ export function measureCorrectnessCatalog(config: Config, command: string, conte
 function discoverTests(context: AnalysisContext) {
   return context.sources
     .filter((file) => file.kind !== "qmldir" && isTestFile(file.relativePath, file.text))
-    .map((file) => ({
-      file: file.relativePath,
-      kind: file.kind,
-      framework: /\bTestCase\s*\{/.test(file.text) ? "qt_quick_test" : "unknown",
-      signal_spies: (file.text.match(/\bSignalSpy\s*\{/g) ?? []).length,
-      test_cases: [...file.text.matchAll(/\bfunction\s+((?:test|benchmark)_[A-Za-z0-9_]+)/g)].map((match) => ({ name: match[1], line: lineOf(file.text, match.index ?? 0), kind: match[1]?.startsWith("benchmark_") ? "benchmark" : "test" })),
-      components: context.resolution.componentUses.filter((use) => use.from === file.relativePath && use.target).map((use) => use.target),
-    }));
+    .map((file) => {
+      const testCases = [...file.text.matchAll(/\bfunction\s+((?:test|benchmark)_[A-Za-z0-9_]+)/g)].map((match) => ({ name: match[1], line: lineOf(file.text, match.index ?? 0), kind: match[1]?.startsWith("benchmark_") ? "benchmark" : "test" }));
+      return {
+        file: file.relativePath,
+        kind: file.kind,
+        framework: testFramework(file.relativePath, file.text, testCases.length, context),
+        signal_spies: (file.text.match(/\bSignalSpy\s*\{/g) ?? []).length,
+        test_cases: testCases,
+        components: context.resolution.componentUses.filter((use) => use.from === file.relativePath && use.target).map((use) => use.target),
+      };
+    });
+}
+
+// "support" marks helpers and mock modules that live in test trees but declare no test functions.
+function testFramework(file: string, text: string, testCases: number, context: AnalysisContext): "qt_quick_test" | "support" | "unknown" {
+  if (/\bTestCase\s*\{/.test(text) || context.resolution.testCaseFiles.has(file)) return "qt_quick_test";
+  return testCases === 0 ? "support" : "unknown";
 }
 
 function catalogFindings(testFiles: number, execution: ToolExecution | null, evidence: TestEvidence, runner: string): Finding[] {
@@ -167,12 +177,6 @@ function validNumberAttribute(text: string, name: string): number {
 
 function stripXml(value: string): string {
   return value.replace(/<[^>]+>/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
-}
-
-function isTestFile(file: string, text: string): boolean {
-  return /(^|\/)tst_[^/]*\.qml$/i.test(file)
-    || /(^|\/)(?:test|tests|testing|spec|specs)(?:\/|$)/i.test(file)
-    || /\bTestCase\s*\{/.test(text);
 }
 
 function lineOf(text: string, offset: number): number {

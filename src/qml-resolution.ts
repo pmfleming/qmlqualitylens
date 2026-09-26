@@ -2,7 +2,7 @@ import path from "node:path";
 import fs from "node:fs";
 import type { QmlDocument } from "./qml-parser-types.js";
 import { lexQml } from "./qml-lexer.js";
-import { baseTypeName, isShellEntrypoint } from "./qml-model.js";
+import { baseTypeName, isQtQuickTestFileName, isShellEntrypoint } from "./qml-model.js";
 import type { ComponentRecord, Config, ImportRecord, SourceFile } from "./types.js";
 
 type QmlDocumentEntry = { file: string; document: QmlDocument };
@@ -40,6 +40,9 @@ type ComponentUseResolution = {
   memberNames?: string[];
 };
 
+/** Members read through an id or property typed as a project component, e.g. `required property Foo foo` then `foo.bar`. */
+type TypedMemberUse = { from: string; target: string; memberNames: string[] };
+
 type ReachabilityEdge = { from: string; to: string; kind: "component_use" | "loader_source" | "source_component" | "configured_dynamic"; line?: number };
 
 export type ProjectResolution = {
@@ -48,6 +51,7 @@ export type ProjectResolution = {
   publicFiles: Set<string>;
   referencedFiles: Set<string>;
   entrypoints: Set<string>;
+  testCaseFiles: Set<string>;
   reachableFiles: Set<string>;
   unreachableFiles: Set<string>;
   usagePaths: Map<string, string[]>;
@@ -56,6 +60,7 @@ export type ProjectResolution = {
   qmldirModules: QmldirModule[];
   imports: ImportResolution[];
   componentUses: ComponentUseResolution[];
+  typedMemberUses: TypedMemberUse[];
   unresolvedImports: ImportResolution[];
   unresolvedTypes: ComponentUseResolution[];
 };
@@ -85,10 +90,12 @@ export function buildProjectResolution(sources: SourceFile[], documents: QmlDocu
   const componentByFile = new Map(components.map((component) => [component.file, component]));
   const imports = documents.flatMap(({ file, document }) => document.imports.map((record) => resolveImport(file, record, qmldirModules, sourcePaths, config, canonicalFile)));
   const componentUses = resolveComponentUses(documents, imports, components, componentByFile, qmldirModules, config, sources);
+  const typedMemberUses = resolveTypedMemberUses(documents, imports, components, componentByFile, qmldirModules, sources);
   const referencedFiles = new Set(componentUses.flatMap((use) => use.target ? [use.target] : []));
   const publicFiles = publicComponentFiles(qmldirModules, sourcePaths);
   for (const component of components) if (isShellEntrypoint(component.file)) publicFiles.add(component.file);
-  const entrypoints = discoverEntrypoints(components, config, sourcePaths);
+  const testCaseFiles = discoverTestCaseFiles(components, componentUses);
+  const entrypoints = discoverEntrypoints(components, config, sourcePaths, testCaseFiles);
   const dynamicEdges = discoverDynamicEdges(documents, componentNames.unique, sourcePaths, config);
   const reachabilityEdges: ReachabilityEdge[] = [
     ...componentUses.flatMap((use): ReachabilityEdge[] => use.target && use.target !== use.from ? [{ from: use.from, to: use.target, kind: "component_use", line: use.line }] : []),
@@ -101,6 +108,7 @@ export function buildProjectResolution(sources: SourceFile[], documents: QmlDocu
     publicFiles,
     referencedFiles,
     entrypoints,
+    testCaseFiles,
     reachableFiles: reachability.reachable,
     unreachableFiles: reachability.unreachable,
     usagePaths: reachability.paths,
@@ -109,6 +117,7 @@ export function buildProjectResolution(sources: SourceFile[], documents: QmlDocu
     qmldirModules,
     imports,
     componentUses,
+    typedMemberUses,
     unresolvedImports: imports.filter((item) => item.kind === "unresolved"),
     unresolvedTypes: componentUses.filter((item) => item.unresolved),
   };
@@ -176,10 +185,12 @@ function resolveComponentUses(
 ): ComponentUseResolution[] {
   const sourceByFile = new Map(sources.map((source) => [source.relativePath, source.text]));
   const singletons = new Set(modules.flatMap((module) => module.components.filter((entry) => entry.singleton).map((entry) => entry.file)));
+  const inlineNames = new Map(documents.map(({ file, document }) => [file, new Set(document.inlineComponents.map((component) => component.name))]));
   return documents.flatMap(({ file, document }) => {
     const scope = componentScope(file, imports.filter((item) => item.from === file), components, componentByFile, modules);
     const objectUses = document.objects.flatMap((object) => {
-      const target = resolveTypeInScope(object.typeName, scope);
+      if (inlineNames.get(file)?.has(object.typeName)) return [];
+      const target = resolveTypeInScope(object.typeName, scope) ?? resolveInlineComponentType(object.typeName, scope, inlineNames);
       const qualifier = object.typeName.includes(".") ? object.typeName.split(".")[0] ?? "" : "";
       const externallyQualified = Boolean(qualifier && scope.externalAliases.has(qualifier));
       const unresolved = target === null && !externallyQualified && isProjectTypeCandidate(baseTypeName(object.typeName), config);
@@ -187,6 +198,55 @@ function resolveComponentUses(
     });
     return [...objectUses, ...singletonUses(file, sourceByFile.get(file) ?? "", document, scope, singletons)];
   });
+}
+
+function resolveTypedMemberUses(documents: QmlDocumentEntry[], imports: ImportResolution[], components: ComponentRecord[], componentByFile: Map<string, ComponentRecord>, modules: QmldirModule[], sources: SourceFile[]): TypedMemberUse[] {
+  const sourceByFile = new Map(sources.map((source) => [source.relativePath, source.text]));
+  return documents.flatMap(({ file, document }) => {
+    const scope = componentScope(file, imports.filter((item) => item.from === file), components, componentByFile, modules);
+    const typed = new Map<string, string>();
+    for (const object of document.objects) {
+      const instanceType = object.idName ? resolveTypeInScope(object.typeName, scope) : null;
+      if (object.idName && instanceType && instanceType !== file) typed.set(object.idName, instanceType);
+      for (const property of object.properties) {
+        const target = property.typeName && !property.alias ? resolveTypeInScope(property.typeName, scope) : null;
+        if (target && target !== file) typed.set(leafSegment(property.name), target);
+      }
+    }
+    if (!typed.size) return [];
+    const members = new Map<string, Set<string>>();
+    const add = (target: string, name: string) => members.set(target, (members.get(target) ?? new Set()).add(name));
+    const tokens = lexQml(sourceByFile.get(file) ?? "");
+    tokens.forEach((token, index) => {
+      const target = token.kind === "identifier" ? typed.get(token.value) : undefined;
+      // Accept `foo.bar`, `owner.foo.bar`, and `foo?.bar`; name-based, so it errs toward "used".
+      const dot = tokens[index + 1]?.value === "?" ? index + 2 : index + 1;
+      const member = tokens[dot + 1];
+      if (target && tokens[dot]?.value === "." && member?.kind === "identifier") add(target, member.value);
+    });
+    for (const connection of document.objects.filter((object) => baseTypeName(object.typeName) === "Connections")) {
+      const targetExpression = connection.bindings.find((binding) => binding.propertyPath === "target")?.expression.trim() ?? "";
+      const target = typed.get(targetExpression.match(/(?:^|\.)([A-Za-z_]\w*)$/)?.[1] ?? "");
+      if (!target) continue;
+      for (const handler of [...connection.functions, ...connection.handlers]) {
+        const signal = handler.name.match(/^on([A-Z]\w*)$/)?.[1];
+        if (signal) add(target, `${signal[0]?.toLowerCase()}${signal.slice(1)}`);
+      }
+    }
+    return [...members].map(([target, names]) => ({ from: file, target, memberNames: [...names] }));
+  });
+}
+
+function leafSegment(name: string): string {
+  return name.split(".").at(-1) ?? name;
+}
+
+// `Owner.Inline` names an inline component declared in the Owner.qml document.
+function resolveInlineComponentType(typeName: string, scope: ComponentScope, inlineNames: Map<string, Set<string>>): string | null {
+  const separator = typeName.lastIndexOf(".");
+  if (separator < 0) return null;
+  const owner = resolveTypeInScope(typeName.slice(0, separator), scope);
+  return owner && inlineNames.get(owner)?.has(typeName.slice(separator + 1)) ? owner : null;
 }
 
 function singletonUses(file: string, source: string, document: QmlDocument, scope: ComponentScope, singletons: Set<string>): ComponentUseResolution[] {
@@ -325,14 +385,40 @@ function isProjectTypeCandidate(typeName: string, config: Config): boolean {
   return /^[A-Z]/.test(typeName) && !BUILTIN_TYPES.has(typeName) && !config.externalTypes.includes(typeName);
 }
 
-function discoverEntrypoints(components: ComponentRecord[], config: Config, sourcePaths: Set<string>): Set<string> {
+function discoverEntrypoints(components: ComponentRecord[], config: Config, sourcePaths: Set<string>, testCaseFiles: Set<string>): Set<string> {
   const configured = config.entrypoints.filter((file) => sourcePaths.has(file));
   const automatic = components.filter((component) => {
     const name = path.posix.basename(component.file).toLowerCase();
-    return name === "main.qml" || isShellEntrypoint(component.file) || component.rootType === "TestCase"
-      || /(?:^|\.)(?:Application)?Window$/.test(component.rootType ?? "");
+    // ShellRoot is only valid as a Quickshell configuration root, so it is loaded directly.
+    return name === "main.qml" || isShellEntrypoint(component.file) || testCaseFiles.has(component.file)
+      || /(?:^|\.)(?:(?:Application)?Window|ShellRoot)$/.test(component.rootType ?? "");
   }).map((component) => component.file);
   return new Set([...configured, ...automatic]);
+}
+
+// A test deriving from a project TestCase wrapper (e.g. DaemonTestCase) is still a qmltestrunner entrypoint.
+function discoverTestCaseFiles(components: ComponentRecord[], componentUses: ComponentUseResolution[]): Set<string> {
+  const byFile = new Map(components.map((component) => [component.file, component]));
+  return new Set(components
+    .filter((component) => isQtQuickTestFileName(component.file) || inheritedRootTypes(component, byFile, componentUses).includes("TestCase"))
+    .map((component) => component.file));
+}
+
+/** Base names of the root type chain, following project components until an external/built-in type. */
+function inheritedRootTypes(component: ComponentRecord, byFile: Map<string, ComponentRecord>, componentUses: ComponentUseResolution[]): string[] {
+  const chain: string[] = [];
+  const visited = new Set<string>();
+  let current: ComponentRecord | undefined = component;
+  while (current?.rootType && !visited.has(current.file)) {
+    visited.add(current.file);
+    chain.push(baseTypeName(current.rootType));
+    const from: string = current.file;
+    const line: number = current.line;
+    const rootType: string = current.rootType;
+    const target = componentUses.find((use) => use.from === from && use.line === line && use.typeName === rootType)?.target;
+    current = target ? byFile.get(target) : undefined;
+  }
+  return chain;
 }
 
 function discoverDynamicEdges(documents: QmlDocumentEntry[], componentsByName: Map<string, string>, sourcePaths: Set<string>, config: Config): ReachabilityEdge[] {

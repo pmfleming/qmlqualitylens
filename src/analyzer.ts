@@ -6,7 +6,7 @@ import { discoverSourceFiles } from "./file-walk.js";
 import { attachSemanticAnchors, attachSourceExcerpts } from "./finding-identity.js";
 import { boundedScore, complexityForCode, countMatches, lineNumberAt, locFor, stripComments, stripCommentsAndStrings } from "./metrics.js";
 import { isProcessBoundaryFile } from "./config.js";
-import { matchesAnyConfiguredTypeName } from "./qml-model.js";
+import { isObjectValuedExpression, isSignalHandlerPath, isTestFile, matchesAnyConfiguredTypeName } from "./qml-model.js";
 import { parseQmlDocument } from "./qml-parser.js";
 import type { QmlDocument, QmlExecutableNode } from "./qml-parser-types.js";
 import { buildProjectResolution, type ProjectResolution } from "./qml-resolution.js";
@@ -143,13 +143,18 @@ function analyzeFile(file: SourceFile, qmlDocument: QmlDocument | null, config: 
   };
 }
 
+// Theme/palette singletons are where color literals belong, so they are not styling debt.
+function isDesignTokenFile(file: SourceFile): boolean {
+  return /^\s*pragma\s+Singleton\b/m.test(file.text) || /(?:^|\/)(?:Theme|Palette|Colou?rs?|Style|Tokens?)\.qml$/i.test(file.relativePath);
+}
+
 function bindingsFromDocument(file: SourceFile, document: QmlDocument): BindingRecord[] {
   return document.bindings.map((binding) => ({
     file: file.relativePath,
     property: binding.propertyPath,
     line: binding.line,
     expression: binding.expression,
-    complexity: bindingComplexity(binding.expression),
+    complexity: isObjectValuedExpression(binding.expression) ? 1 : bindingComplexity(binding.expression),
     dependencyCount: new Set(binding.references.map((reference) => reference.name)).size,
   }));
 }
@@ -164,7 +169,8 @@ function parseComponent(file: SourceFile, functions: FunctionRecord[], bindings:
   const sourceWithoutComments = stripComments(file.text);
   const processObjectCount = document.objects.filter((object) => matchesAnyConfiguredTypeName(object.typeName, config.processBoundary.objectTypes)).length;
   const processBoundaryCalls = processObjectCount + configuredPatternMatches(sourceWithoutComments, config.processBoundary.textPatterns);
-  const processBoundaryViolations = isProcessBoundaryFile(file.relativePath, config) ? 0 : processBoundaryCalls;
+  // Tests legitimately fake protocol traffic; the boundary rule targets production presentation code.
+  const processBoundaryViolations = isProcessBoundaryFile(file.relativePath, config) || isTestFile(file.relativePath, file.text) ? 0 : processBoundaryCalls;
   const component: ComponentRecord = {
     file: file.relativePath,
     name: path.basename(file.relativePath, ".qml"),
@@ -182,7 +188,7 @@ function parseComponent(file: SourceFile, functions: FunctionRecord[], bindings:
     idsDeclared: document.objects.filter((object) => object.idName).length,
     idReferenceCount: externalIdReferences.length,
     distinctIdReferences: new Set(externalIdReferences.map((reference) => reference.name)).size,
-    hardcodedColors: countMatches(sourceWithoutComments, /#[0-9a-fA-F]{3,8}\b|\bQt\.rgba\s*\(/g),
+    hardcodedColors: isDesignTokenFile(file) ? 0 : countMatches(sourceWithoutComments, /(["'])#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\1|\bQt\.(?:rgba|hsla|hsva)\s*\(/g),
     numericStyleLiterals: countMatches(sourceWithoutComments, /\b(?:width|height|implicitWidth|implicitHeight|radius|spacing|margins?|padding|font\.pixelSize)\s*:\s*[0-9]+(?:\.[0-9]+)?\b/g),
     processBoundaryCalls,
     processBoundaryViolations,
@@ -372,7 +378,8 @@ function functionFindings(fn: FunctionRecord, config: Config): Finding[] {
 }
 
 function bindingFindings(binding: BindingRecord, config: Config): Finding[] {
-  return binding.complexity > config.thresholds.bindingComplexityHigh
+  // Handler bodies are executable code and already receive function complexity findings.
+  return binding.complexity > config.thresholds.bindingComplexityHigh && !isSignalHandlerPath(binding.property)
     ? [finding(`binding.${binding.file}.${binding.line}.${binding.property}`, "complexity.binding", "low", binding.file, `${binding.property} binding has complexity ${binding.complexity}`, binding.line, binding.complexity, config.thresholds.bindingComplexityHigh, "Move multi-branch binding logic to a named readonly property or helper function.")]
     : [];
 }

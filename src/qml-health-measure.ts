@@ -2,7 +2,7 @@ import type { AnalysisContext } from "./analyzer.js";
 import { isProcessBoundaryFile } from "./config.js";
 import { stripCommentsAndStrings } from "./metrics.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./measures/shared.js";
-import { matchesAnyConfiguredTypeName } from "./qml-model.js";
+import { isObjectValuedExpression, isSignalHandlerPath, matchesAnyConfiguredTypeName } from "./qml-model.js";
 import type { Config, Finding } from "./types.js";
 
 export function measureQmlHealth(config: Config, command: string, context: AnalysisContext) {
@@ -19,7 +19,7 @@ export function measureQmlHealth(config: Config, command: string, context: Analy
 export function qmlHealthFindings(context: AnalysisContext): Finding[] {
   return [
     ...context.components.flatMap(componentHealthFindings),
-    ...context.bindings.filter((binding) => !/^on[A-Z]/.test(binding.property.split(".").at(-1) ?? "")).flatMap(sideEffectBindingFinding),
+    ...context.bindings.filter((binding) => !isSignalHandlerPath(binding.property) && !isObjectValuedExpression(binding.expression)).flatMap(sideEffectBindingFinding),
     ...context.qmlDocuments.flatMap((entry) => processPlacementFinding(entry, context.config)),
   ];
 }

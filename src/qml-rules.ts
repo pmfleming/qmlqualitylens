@@ -1,7 +1,7 @@
 import type { AnalysisContext } from "./analyzer.js";
 import { lineNumberAt, stripCommentsAndStrings } from "./metrics.js";
 import { analyzeAssignments } from "./expression-analysis.js";
-import { baseTypeName } from "./qml-model.js";
+import { baseTypeName, isObjectValuedExpression, isTestFile } from "./qml-model.js";
 import { qmlHealthFindings } from "./qml-health-measure.js";
 import { inheritedSignals, typeIsA } from "./type-evidence.js";
 import type { Finding, RuleCoverageRecord } from "./types.js";
@@ -118,7 +118,7 @@ function bindingLossEvaluation({ file, document }: DocumentEntry): { findings: F
 
 function bindingCycleEvaluation({ file, document }: DocumentEntry): { findings: Finding[]; reason?: string } {
   const objectById = new Map(document.objects.map((object) => [object.objectId, object]));
-  const bindings = document.bindings.filter((binding) => !isHandlerPath(binding.propertyPath) && binding.propertyPath !== "id" && !/^\s*[A-Za-z_]\w*(?:\.\w+)*\s*\{/.test(binding.expression));
+  const bindings = document.bindings.filter((binding) => !isHandlerPath(binding.propertyPath) && binding.propertyPath !== "id" && !isObjectValuedExpression(binding.expression));
   const lineByNode = new Map(bindings.map((binding) => [bindingNodeKey(binding.ownerObjectId, binding.propertyPath), binding.line]));
   const edges = new Map<string, Set<string>>();
   for (const binding of bindings) {
@@ -148,9 +148,13 @@ function bindingCycleFinding(file: string, nodes: string[], lineByNode: Map<stri
   return finding(`qml.binding_cycle.${file}.${lines.join(".")}`, "qml.binding_cycle", "high", file, lines[0] ?? 1, `Binding cycle connects ${labels.map((label) => `'${label}'`).join(", ")}`, "Break the cycle with a source-of-truth property, one-way data flow, or an explicit signal update.");
 }
 
+// JavaScript built-ins have no notifiable properties, so `Date.now()` only initializes a value.
+const NON_REACTIVE_GLOBALS = new Set(["Date", "Math", "JSON", "Number", "String", "Boolean", "Object", "Array", "parseInt", "parseFloat", "isNaN", "isFinite", "undefined", "NaN", "Infinity"]);
+
 function isDynamicBinding(expression: string): boolean {
   const analysis = analyzeAssignments(expression);
-  if (!analysis.reason && analysis.references?.length === 0 && analysis.assignments.length === 0) return false;
+  const reactiveReferences = analysis.references?.filter((reference) => !NON_REACTIVE_GLOBALS.has(reference.owner ?? reference.property));
+  if (!analysis.reason && reactiveReferences?.length === 0 && analysis.assignments.length === 0) return false;
   const value = expression.trim().replace(/;$/, "");
   if (/^(?:true|false|null|undefined|[+-]?(?:\d+(?:\.\d*)?|\.\d+)|["'](?:[^"'\\]|\\.)*["']|[A-Z]\w*(?:\.[A-Za-z_]\w*)+)$/.test(value)) return false;
   return true;
@@ -421,10 +425,14 @@ function matchesConfiguredProcessType(typeName: string, context: AnalysisContext
   return context.config.processBoundary.objectTypes.some((configured) => baseTypeName(configured) === base);
 }
 
+// Qt Quick Test invokes these by name, passing untyped data rows.
+const QT_TEST_CALLBACK = /^(?:(?:test|benchmark)_\w+|init|cleanup|initTestCase|cleanupTestCase)$/;
+
 function functionConventionFindings({ file, document }: AnalysisContext["qmlDocuments"][number]): Finding[] {
+  const testDocument = isTestFile(file, "") || /TestCase$/.test(document.root?.typeName ?? "");
   return document.objects.flatMap((object) => object.functions.flatMap((fn) => {
     const untyped = fn.parameters.some((parameter) => !parameter.typeName) || (fn.parameters.length > 0 && !fn.returnType);
-    if (!untyped || fn.body.split(/\r?\n/).length <= 3) return [];
+    if (!untyped || fn.body.split(/\r?\n/).length <= 3 || (testDocument && QT_TEST_CALLBACK.test(fn.name))) return [];
     return [finding(`qml.function_missing_types.${file}.${fn.line}.${fn.name}`, "qml.function_missing_types", "low", file, fn.line, `Non-trivial function '${fn.name}' has incomplete parameter/return type annotations`, "Add parameter and return type annotations where supported to improve tooling and refactoring safety.")];
   }));
 }
@@ -457,6 +465,11 @@ function usedPublicApi(context: AnalysisContext): Map<string, Set<string>> {
     for (const name of use.memberNames) names.add(name);
     used.set(use.target, names);
   }
+  for (const use of context.resolution.typedMemberUses) {
+    const names = used.get(use.target) ?? new Set<string>();
+    for (const name of use.memberNames) names.add(name);
+    used.set(use.target, names);
+  }
   for (const { file, document } of context.qmlDocuments) {
     for (const object of document.objects) {
       const target = resolvedTargetForObject(context, file, object.typeName, object.line);
@@ -466,7 +479,45 @@ function usedPublicApi(context: AnalysisContext): Map<string, Set<string>> {
       used.set(target, names);
     }
   }
+  return inheritUsedApi(context, used);
+}
+
+// A member used on a derived component may be declared by any component in its root-type chain.
+function inheritUsedApi(context: AnalysisContext, used: Map<string, Set<string>>): Map<string, Set<string>> {
+  const baseOf = new Map<string, string>();
+  for (const { file, document } of context.qmlDocuments) {
+    const root = document.root;
+    const base = root ? resolvedTargetForObject(context, file, root.typeName, root.line) : null;
+    if (base && base !== file) baseOf.set(file, base);
+  }
+  // Unqualified reads in a derived document may resolve to inherited base members.
+  for (const entry of context.qmlDocuments) if (baseOf.has(entry.file)) used.set(entry.file, union(used.get(entry.file), unqualifiedReads(entry)));
+  for (const [file, names] of [...used]) {
+    const visited = new Set([file]);
+    for (let base = baseOf.get(file); base && !visited.has(base); base = baseOf.get(base)) {
+      visited.add(base);
+      used.set(base, union(used.get(base), names));
+    }
+  }
   return used;
+}
+
+function unqualifiedReads(entry: AnalysisContext["qmlDocuments"][number]): Set<string> {
+  const names = new Set<string>();
+  const rootId = entry.document.root?.idName;
+  for (const object of entry.document.objects) {
+    const bodies = [...object.bindings.filter((binding) => !isHandlerPath(binding.propertyPath)).map((binding) => ({ body: binding.expression, parameters: [] as string[] })),
+      ...[...object.functions, ...object.handlers].map((fn) => ({ body: fn.body, parameters: fn.parameters.map((parameter) => parameter.name) }))];
+    for (const { body, parameters } of bodies) {
+      const analysis = analyzeAssignments(body, parameters);
+      for (const reference of [...(analysis.references ?? []), ...analysis.assignments]) {
+        if (reference.owner === null || reference.owner === "this") names.add(reference.property);
+        else if (reference.owner === rootId) names.add(reference.property);
+        else names.add(reference.owner);
+      }
+    }
+  }
+  return names;
 }
 
 function internalApiUses(entry: AnalysisContext["qmlDocuments"][number]): Set<string> {

@@ -13,7 +13,24 @@ function expressionParser(): Parser | null {
   return parser;
 }
 
+// Several rules analyze the same handler and binding bodies; results are pure for a given input.
+const MAX_CACHED_ANALYSES = 50_000;
+const analysisCache = new Map<string, AssignmentAnalysis>();
+
 export function analyzeAssignments(expression: string, parameters: string[] = [], useTreeSitter = true): AssignmentAnalysis {
+  const key = `${useTreeSitter ? 1 : 0}\0${parameters.join(",")}\0${expression}`;
+  const cached = analysisCache.get(key);
+  if (cached) return cached;
+  const analysis = analyzeAssignmentsUncached(expression, parameters, useTreeSitter);
+  // Timeouts depend on machine load, so they are retried rather than remembered.
+  if (analysis.reason !== "javascript_parse_timeout") {
+    if (analysisCache.size >= MAX_CACHED_ANALYSES) analysisCache.clear();
+    analysisCache.set(key, analysis);
+  }
+  return analysis;
+}
+
+function analyzeAssignmentsUncached(expression: string, parameters: string[], useTreeSitter: boolean): AssignmentAnalysis {
   const parser = useTreeSitter ? expressionParser() : null;
   if (!parser) return simpleAssignments(expression, parameters);
   try {

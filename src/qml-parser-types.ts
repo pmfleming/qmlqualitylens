@@ -48,4 +48,6 @@ export type QmlObjectNode = {
   references: QmlIdReference[];
 };
 
-export type QmlDocument = { file: string; root: QmlObjectNode | null; imports: ImportRecord[]; objects: QmlObjectNode[]; bindings: QmlBindingNode[]; idReferences: QmlIdReference[]; diagnostics: QmlParserDiagnostic[] };
+export type QmlInlineComponent = { name: string; line: number; objectId: number };
+
+export type QmlDocument = { file: string; root: QmlObjectNode | null; imports: ImportRecord[]; objects: QmlObjectNode[]; bindings: QmlBindingNode[]; idReferences: QmlIdReference[]; inlineComponents: QmlInlineComponent[]; diagnostics: QmlParserDiagnostic[] };
