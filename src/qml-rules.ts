@@ -1,5 +1,6 @@
 import type { AnalysisContext } from "./analyzer.js";
 import { lineNumberAt, stripCommentsAndStrings } from "./metrics.js";
+import { createIdResolver, type IdResolver } from "./qml-scope.js";
 import { analyzeAssignments } from "./expression-analysis.js";
 import { baseTypeName, isObjectValuedExpression, isTestFile } from "./qml-model.js";
 import { qmlHealthFindings } from "./qml-health-measure.js";
@@ -66,7 +67,7 @@ function evaluateConnections(context: AnalysisContext, findings: Finding[], cove
   for (const rule of ["qml.connections.unknown_target", "qml.connection_signal_mismatch"]) {
     const targets: EvaluationTarget[] = [];
     for (const entry of context.qmlDocuments) {
-      const ids = new Map(entry.document.objects.flatMap((object) => object.idName ? [[object.idName, object]] : []));
+      const ids = createIdResolver(entry.document);
       for (const connection of entry.document.objects.filter((object) => baseTypeName(object.typeName) === "Connections")) {
         const reason = context.config.rules[rule]?.enabled === false ? "rule_disabled" : entry.document.diagnostics.length ? "parser_diagnostic" : connectionSkipReason(connection, ids, rule, entry.file, context);
         targets.push(evaluationTarget(entry.file, connection.line, reason));
@@ -77,10 +78,10 @@ function evaluateConnections(context: AnalysisContext, findings: Finding[], cove
   }
 }
 
-function connectionSkipReason(connection: CycleObject, ids: Map<string, CycleObject>, rule: string, file: string, context: AnalysisContext): string | undefined {
+function connectionSkipReason(connection: CycleObject, ids: IdResolver, rule: string, file: string, context: AnalysisContext): string | undefined {
   const target = targetExpression(connection)?.match(/^([A-Za-z_]\w*)$/)?.[1];
   if (!target) return "dynamic_target";
-  const object = ids.get(target);
+  const object = ids(connection.objectId, target);
   if (!object) return isLikelyLocalId(target) ? rule === "qml.connections.unknown_target" ? undefined : "unknown_target" : "external_or_singleton_target";
   if (rule === "qml.connection_signal_mismatch" && !connectionTargetSignals(context, file, object).size) return "missing_signal_evidence";
   return undefined;
@@ -98,7 +99,7 @@ function evaluateFileRule(context: AnalysisContext, rule: string, evaluate: (ent
 }
 
 function bindingLossEvaluation({ file, document }: DocumentEntry): { findings: Finding[]; reason?: string } {
-  const ids = new Map(document.objects.flatMap((object) => object.idName ? [[object.idName, object]] : []));
+  const ids = createIdResolver(document);
   const findings: Finding[] = [];
   for (const object of document.objects) {
     for (const executable of [...object.handlers, ...object.functions]) {
@@ -106,7 +107,7 @@ function bindingLossEvaluation({ file, document }: DocumentEntry): { findings: F
       if (analysis.reason) return { findings: [], reason: analysis.reason };
       for (const assignment of analysis.assignments) {
         if (EXTERNAL_API_PREFIXES.has(assignment.owner ?? assignment.property)) continue;
-        const target = assignment.owner ? ids.get(assignment.owner) : object;
+        const target = assignment.owner ? ids(object.objectId, assignment.owner) : object;
         if (!target?.bindings.some((binding) => !isHandlerPath(binding.propertyPath) && binding.propertyPath === assignment.property && isDynamicBinding(binding.expression))) continue;
         const line = executable.line + assignment.line - 1;
         findings.push(finding(`qml.binding_loss.${file}.${line}.${assignment.owner ?? "self"}.${assignment.property}`, "qml.binding_loss", "high", file, line, `Imperative assignment to '${assignment.owner ? `${assignment.owner}.` : ""}${assignment.property}' can break its declarative binding`, "Move the mutable value into a separate state property or replace the binding intentionally with Qt.binding()."));
@@ -118,13 +119,14 @@ function bindingLossEvaluation({ file, document }: DocumentEntry): { findings: F
 
 function bindingCycleEvaluation({ file, document }: DocumentEntry): { findings: Finding[]; reason?: string } {
   const objectById = new Map(document.objects.map((object) => [object.objectId, object]));
+  const resolveId = createIdResolver(document);
   const bindings = document.bindings.filter((binding) => !isHandlerPath(binding.propertyPath) && binding.propertyPath !== "id" && !isObjectValuedExpression(binding.expression));
   const lineByNode = new Map(bindings.map((binding) => [bindingNodeKey(binding.ownerObjectId, binding.propertyPath), binding.line]));
   const edges = new Map<string, Set<string>>();
   for (const binding of bindings) {
     const analysis = analyzeAssignments(binding.expression);
     if (analysis.reason) return { findings: [], reason: analysis.reason };
-    edges.set(bindingNodeKey(binding.ownerObjectId, binding.propertyPath), bindingTargets(binding, objectById, analysis.references ?? []));
+    edges.set(bindingNodeKey(binding.ownerObjectId, binding.propertyPath), bindingTargets(binding, objectById, resolveId, analysis.references ?? []));
   }
   return { findings: stronglyConnectedComponents(edges).filter((nodes) => nodes.length > 1 || Boolean(nodes[0] && edges.get(nodes[0])?.has(nodes[0]))).map((nodes) => bindingCycleFinding(file, nodes, lineByNode)) };
 }
@@ -132,12 +134,12 @@ function bindingCycleEvaluation({ file, document }: DocumentEntry): { findings: 
 type CycleBinding = AnalysisContext["qmlDocuments"][number]["document"]["bindings"][number];
 type CycleObject = AnalysisContext["qmlDocuments"][number]["document"]["objects"][number];
 
-function bindingTargets(binding: CycleBinding, objectById: Map<number, CycleObject>, references: Array<{ owner: string | null; property: string }>): Set<string> {
+function bindingTargets(binding: CycleBinding, objectById: Map<number, CycleObject>, resolveId: IdResolver, references: Array<{ owner: string | null; property: string }>): Set<string> {
   return new Set(references.flatMap((reference) => {
     // QML ids are object references, including when an injected property's name
     // matches an outer id (for example, controller: controller).
-    if (!reference.owner && [...objectById.values()].some((object) => object.idName === reference.property)) return [];
-    const target = !reference.owner || reference.owner === "this" ? objectById.get(binding.ownerObjectId) : [...objectById.values()].find((object) => object.idName === reference.owner);
+    if (!reference.owner && resolveId(binding.ownerObjectId, reference.property)) return [];
+    const target = !reference.owner || reference.owner === "this" ? objectById.get(binding.ownerObjectId) : resolveId(binding.ownerObjectId, reference.owner);
     return target?.bindings.some((candidate) => candidate.propertyPath === reference.property && !isHandlerPath(candidate.propertyPath)) ? [bindingNodeKey(target.objectId, reference.property)] : [];
   }));
 }
@@ -306,10 +308,10 @@ function publicApiFinding(file: string, item: { name: string; line: number }, ap
   return finding(`cleanup.unused_public_${apiKind}.${file}.${item.name}`, `cleanup.unused_public_${apiKind}`, "low", file, item.line, `Public ${apiKind} '${item.name}' is neither used internally nor ${usage}`, action);
 }
 
-function connectionFindings(connection: CycleObject, file: string, idToObject: Map<string, CycleObject>, context: AnalysisContext): Finding[] {
+function connectionFindings(connection: CycleObject, file: string, idToObject: IdResolver, context: AnalysisContext): Finding[] {
   const targetId = targetExpression(connection)?.match(/^([A-Za-z_]\w*)$/)?.[1];
-  if (targetId && !idToObject.has(targetId) && isLikelyLocalId(targetId)) return [finding(`qml.connections.unknown_target.${file}.${connection.line}.${targetId}`, "qml.connections.unknown_target", "high", file, connection.line, `Connections target '${targetId}' is not declared in this component`, "Correct the target id or expose the intended target explicitly; use a suppression only for a documented injected context object.")];
-  const targetObject = targetId ? idToObject.get(targetId) : null;
+  if (targetId && !idToObject(connection.objectId, targetId) && isLikelyLocalId(targetId)) return [finding(`qml.connections.unknown_target.${file}.${connection.line}.${targetId}`, "qml.connections.unknown_target", "high", file, connection.line, `Connections target '${targetId}' is not declared in this component`, "Correct the target id or expose the intended target explicitly; use a suppression only for a documented injected context object.")];
+  const targetObject = targetId ? idToObject(connection.objectId, targetId) : null;
   if (!targetObject) return [];
   const targetSignals = connectionTargetSignals(context, file, targetObject);
   return targetSignals.size ? connectionHandlerEntries(connection).flatMap((handler) => connectionHandlerFinding(handler, targetSignals, targetObject, file)) : [];

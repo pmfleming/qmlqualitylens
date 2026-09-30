@@ -141,6 +141,7 @@ export type FunctionRecord = {
   cyclomatic: number;
   cognitive: number;
   maxNesting: number;
+  complexityEvidence?: { backend: string; complete: boolean };
   effort: number;
 };
 

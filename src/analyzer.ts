@@ -245,6 +245,7 @@ function functionRecord(file: SourceFile, name: string, kind: FunctionRecord["ki
     cyclomatic: complexity.cyclomatic,
     cognitive: complexity.cognitive,
     maxNesting: complexity.maxNesting,
+    complexityEvidence: { backend: complexity.backend, complete: complexity.complete },
     effort: Math.round(lines * 0.7 + complexity.cyclomatic * 1.5 + complexity.cognitive * 2),
   };
 }

@@ -1,3 +1,4 @@
+import { createIdResolver } from "./qml-scope.js";
 import { isStringQuote, lexQml } from "./qml-lexer.js";
 import type { QmlBindingNode, QmlDocument, QmlExecutableNode, QmlIdReference, QmlInlineComponent, QmlObjectNode, QmlParserDiagnostic, QmlToken } from "./qml-parser-types.js";
 import type { ImportRecord } from "./types.js";
@@ -90,6 +91,7 @@ class Parser {
     this.resolveReferences();
     return {
       file: this.file,
+      boundComponents: this.boundComponents,
       root,
       imports: this.imports,
       objects: this.objects,
@@ -466,28 +468,9 @@ class Parser {
   }
 
   private resolveReferences(): void {
-    // A Component factory has its own id namespace. Its contents may capture
-    // the enclosing context, but must never resolve ids from sibling factories.
-    type Scope = { parent?: Scope; ids: Map<string, QmlObjectNode> };
-    const scopes = new Map<number, Scope>();
-    const objects = new Map(this.objects.map((object) => [object.objectId, object]));
-    const inlineRoots = new Set(this.inlineComponents.map((component) => component.objectId));
-    for (const object of this.objects) {
-      const parent = object.parentObjectId === null ? undefined : objects.get(object.parentObjectId);
-      const outer = parent ? scopes.get(parent.objectId) : undefined;
-      // Inline components keep separate ids; bound components also capture the enclosing scope.
-      const scope: Scope = inlineRoots.has(object.objectId) ? { parent: this.boundComponents ? outer : undefined, ids: new Map() }
-        : outer && !["Component", "QtQml.Component"].includes(parent?.typeName ?? "") ? outer : { parent: outer, ids: new Map() };
-      scopes.set(object.objectId, scope);
-      if (object.idName) scope.ids.set(object.idName, object);
-    }
+    const resolveId = createIdResolver({ objects: this.objects, inlineComponents: this.inlineComponents, boundComponents: this.boundComponents });
     for (const reference of this.idReferences) {
-      let scope = scopes.get(reference.ownerObjectId);
-      let target: QmlObjectNode | undefined;
-      while (scope && !target) {
-        target = scope.ids.get(reference.name);
-        scope = scope.parent;
-      }
+      const target = resolveId(reference.ownerObjectId, reference.name);
       reference.targetObjectId = target?.objectId ?? null;
       reference.external = Boolean(target && target.objectId !== reference.ownerObjectId);
     }

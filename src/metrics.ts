@@ -33,7 +33,7 @@ export function countMatches(text: string, regex: RegExp): number {
   return count;
 }
 
-export function complexityForCode(code: string): { cyclomatic: number; cognitive: number; maxNesting: number } {
+export function complexityForCode(code: string): { cyclomatic: number; cognitive: number; maxNesting: number; backend: string; complete: boolean } {
   const withoutComments = stripCommentsAndStrings(code);
   let cyclomatic = 1;
   let cognitive = 0;
@@ -57,7 +57,7 @@ export function complexityForCode(code: string): { cyclomatic: number; cognitive
       cognitive += 1;
     }
   }
-  return { cyclomatic, cognitive, maxNesting };
+  return { cyclomatic, cognitive, maxNesting, backend: "lexical-approximation", complete: false };
 }
 
 type StripState = { mode: "code" | "line_comment" | "block_comment" | "string"; quote: string; escaped: boolean };

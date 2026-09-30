@@ -26,7 +26,7 @@ function compareBenchmarkReports(config: Config, command: string, context: Analy
   const findings = support.applySuppressions(support.enrichFindings(rawFindings, config), config);
   const incompleteReasons = [
     ...(environmentMismatch.length ? [`Benchmark environment differs from baseline: ${environmentMismatch.join(", ")}.`] : []),
-    ...(baseline && comparisons.length !== current.benchmarks.length ? ["Current and baseline reports do not contain the same benchmark set."] : []),
+    ...(baseline && (comparisons.length !== current.benchmarks.length || comparisons.length !== baseline.benchmarks.length) ? ["Current and baseline reports do not contain the same benchmark set."] : []),
   ];
   return writeBenchmark(config, {
     ...baseArtifact(context, "performance.benchmark", command),
@@ -83,7 +83,7 @@ function environment(value: Record<string, JsonValue>): Record<string, JsonValue
 
 function compareEnvironment(current: Record<string, JsonValue>, baseline: Record<string, JsonValue>): string[] {
   const keys = ["qt", "os", "opengl", "window_size"];
-  return keys.filter((key) => JSON.stringify(current[key] ?? null) !== JSON.stringify(baseline[key] ?? null));
+  return keys.filter((key) => current[key] === null || current[key] === undefined || baseline[key] === null || baseline[key] === undefined || JSON.stringify(current[key]) !== JSON.stringify(baseline[key]));
 }
 
 function compareReports(current: QmlBenchReport, baseline: QmlBenchReport) {
