@@ -118,6 +118,8 @@ export function legacyQualityArtifact(context: AnalysisContext): AnalysisArtifac
       parserDiagnostics: parserDiagnostics.length,
       findings: findings.filter((finding) => !finding.suppressed).length,
       score: scores.overall,
+      score_model: "heuristic-maintainability-v2",
+      calibration: "uncalibrated-advisory",
     },
     scores,
     records: { files, components, functions, bindings, parserDiagnostics },
@@ -305,7 +307,7 @@ function applyReuseMetrics(components: ComponentRecord[], resolution: ProjectRes
   for (const component of components) {
     component.useCount = uses.get(component.file) ?? 0;
     component.fanOut = targets.get(component.file)?.size ?? 0;
-    component.leverageScore = boundedScore(50 + component.useCount * 15 - component.effort * 0.15 - component.fanOut * 2);
+    component.leverageScore = boundedScore(component.useCount * 15);
   }
 }
 

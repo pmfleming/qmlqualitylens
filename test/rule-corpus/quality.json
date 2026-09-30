@@ -1,0 +1,7 @@
+[
+  {"id":"binding-overwrite","partition":"development","rule":"qml.binding_loss","expected":true,"source":"import QtQuick\nItem { id: target; width: parent.width; Component.onCompleted: target.width = 10 }\n"},
+  {"id":"literal-state","partition":"development","rule":"qml.binding_loss","expected":false,"source":"import QtQuick\nItem { id: target; width: 20; Component.onCompleted: target.width = 10 }\n"},
+  {"id":"explicit-rebind","partition":"holdout","rule":"qml.binding_loss","expected":false,"source":"import QtQuick\nItem { id: target; width: parent.width; Component.onCompleted: target.width = Qt.binding(function() { return 10; }) }\n"},
+  {"id":"scoped-overwrite","partition":"holdout","rule":"qml.binding_loss","expected":true,"source":"import QtQuick\nItem { Component { Item { id: target; width: parent.width; Component.onCompleted: target.width = 10 } } Component { Item { id: target; width: 20 } } }\n"},
+  {"id":"scoped-literal","partition":"holdout","rule":"qml.binding_loss","expected":false,"source":"import QtQuick\nItem { Component { Item { id: target; width: 20; Component.onCompleted: target.width = 10 } } Component { Item { id: target; width: parent.width } } }\n"}
+]

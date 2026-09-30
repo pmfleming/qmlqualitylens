@@ -20,3 +20,9 @@ The review's phases 0–4 are executed as phases 1–5. Each phase has its own c
 - Structural QML clone candidates include expression AST shape and ordered child structure; unsupported objects are explicitly counted rather than treated as fully analyzed.
 - `npm test`: 106 passed. Optional-parser fallback remains approximate.
 - Full JS module/C++ boundary resolution and source-map-aware execution attribution remain outside this iteration; unresolved boundaries must not be treated as proven-safe.
+
+## Phase 4 — Calibration and anti-gaming
+- Added partitioned QML idiom/scope cases with movement/rename mutations and the shared precision/recall/abstention conformance model.
+- Leverage reports observed reuse independently of effort and public surface. Overall maintainability is explicitly an uncalibrated advisory model.
+- `npm test`: 108 passed.
+- Corpus partitions are regression safeguards, not independent population accuracy or held-out ranking validation; see `contracts/calibration-design.md`.

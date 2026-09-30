@@ -277,6 +277,8 @@ export type AnalysisArtifact = {
     parserDiagnostics: number;
     findings: number;
     score: number;
+    score_model?: string;
+    calibration?: string;
   };
   scores: ScoreBreakdown;
   records: {
