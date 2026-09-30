@@ -1,4 +1,6 @@
 import type { LocMetrics } from "./types.js";
+import type Parser from "tree-sitter";
+import { javascriptSyntax } from "./javascript-syntax.js";
 
 export function locFor(text: string): LocMetrics {
   const lines = physicalLines(text);
@@ -34,6 +36,8 @@ export function countMatches(text: string, regex: RegExp): number {
 }
 
 export function complexityForCode(code: string): { cyclomatic: number; cognitive: number; maxNesting: number; backend: string; complete: boolean } {
+  const syntax = javascriptSyntax(code);
+  if (syntax.node) return syntaxComplexity(syntax.node);
   const withoutComments = stripCommentsAndStrings(code);
   let cyclomatic = 1;
   let cognitive = 0;
@@ -58,6 +62,24 @@ export function complexityForCode(code: string): { cyclomatic: number; cognitive
     }
   }
   return { cyclomatic, cognitive, maxNesting, backend: "lexical-approximation", complete: false };
+}
+
+function syntaxComplexity(root: Parser.SyntaxNode) {
+  let cyclomatic = 1, cognitive = 0, maxNesting = 0;
+  const decisions = new Set(["if_statement", "for_statement", "for_in_statement", "while_statement", "do_statement", "catch_clause", "ternary_expression", "switch_case"]);
+  const functions = new Set(["function_expression", "function_declaration", "arrow_function", "generator_function", "method_definition"]);
+  const visit = (node: Parser.SyntaxNode, depth: number) => {
+    if (node !== root && functions.has(node.type)) return;
+    const operator = node.childForFieldName("operator")?.text ?? node.children.find((child) => !child.isNamed)?.text;
+    const logical = node.type === "binary_expression" && ["&&", "||", "??"].includes(operator ?? "");
+    const decision = decisions.has(node.type);
+    if (decision || logical) { cyclomatic++; cognitive += 1 + (decision ? depth : 0); }
+    const nesting = depth + (decision ? 1 : 0);
+    maxNesting = Math.max(maxNesting, nesting);
+    for (const child of node.namedChildren) visit(child, nesting);
+  };
+  visit(root, 0);
+  return { cyclomatic, cognitive, maxNesting, backend: "tree-sitter-qmljs", complete: true };
 }
 
 type StripState = { mode: "code" | "line_comment" | "block_comment" | "string"; quote: string; escaped: boolean };

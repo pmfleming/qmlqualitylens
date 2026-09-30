@@ -39,9 +39,19 @@ test("semantic rules resolve IDs in their owning component, not sibling factorie
   assert.equal(context.findings.filter((f) => f.kind === "qml.connection_signal_mismatch").length, 0);
 }));
 
-test("lexical complexity does not pretend regexes and templates were fully analyzed", () => {
-  for (const code of ['{ return /if|while|catch/.test(s); }', '{ return `value ${flag ? a : b}`; }']) {
-    assert.equal(complexityForCode(code).complete, false);
+test("syntax complexity ignores regex tokens but counts template decisions", () => {
+  for (const [code, expected] of [
+    ['{ return /if|while|catch/.test(s); }', 1],
+    ['{ return `value ${flag ? a : b}`; }', 2],
+    ['{ const x = { nested: { value: 1 } }; return x?.nested; }', 1],
+    ['{ function nested() { if (x) foo(); } return 1; }', 1],
+    ['{ if (a && b) foo(); }', 3],
+  ] as const) {
+    const metrics = complexityForCode(code);
+    if (metrics.backend === "tree-sitter-qmljs") {
+      assert.equal(metrics.complete, true);
+      assert.equal(metrics.cyclomatic, expected, code);
+    } else assert.equal(metrics.complete, false);
   }
 });
 

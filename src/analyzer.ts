@@ -280,8 +280,7 @@ function advanceStringState(state: StringScanState, char: string): boolean {
 }
 
 function bindingComplexity(expression: string): number {
-  const code = stripCommentsAndStrings(expression);
-  return 1 + countMatches(code, /\?\?|\?(?!\.)|&&|\|\||\b(?:if|for|while|switch)\b/g) + Math.max(0, (code.match(/\./g)?.length ?? 0) - 2);
+  return complexityForCode(expression).cyclomatic;
 }
 
 function configuredPatternMatches(text: string, patterns: string[]): number {

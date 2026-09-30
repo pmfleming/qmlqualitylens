@@ -1,17 +1,11 @@
 import type Parser from "tree-sitter";
-import { loadQmlParser } from "./tree-sitter.js";
+import { javascriptSyntax } from "./javascript-syntax.js";
 import { lexQml } from "./qml-lexer.js";
 
 type AssignmentTarget = { owner: string | null; property: string; line: number };
 export type AssignmentAnalysis = { assignments: AssignmentTarget[]; references?: Array<Omit<AssignmentTarget, "line">>; reason?: string };
 type Node = Parser.SyntaxNode;
 type Scope = { names: Set<string>; parent?: Scope };
-let parser: Parser | null | undefined;
-
-function expressionParser(): Parser | null {
-  if (parser === undefined) parser = loadQmlParser()?.parser ?? null;
-  return parser;
-}
 
 // Several rules analyze the same handler and binding bodies; results are pure for a given input.
 const MAX_CACHED_ANALYSES = 50_000;
@@ -31,16 +25,12 @@ export function analyzeAssignments(expression: string, parameters: string[] = []
 }
 
 function analyzeAssignmentsUncached(expression: string, parameters: string[], useTreeSitter: boolean): AssignmentAnalysis {
-  const parser = useTreeSitter ? expressionParser() : null;
-  if (!parser) return simpleAssignments(expression, parameters);
+  if (!useTreeSitter) return simpleAssignments(expression, parameters);
+  const syntax = javascriptSyntax(expression);
+  if (syntax.reason === "javascript_parser_unavailable") return simpleAssignments(expression, parameters);
+  if (!syntax.node) return { assignments: [], reason: syntax.reason };
   try {
-    const deadline = performance.now() + 100;
-    const tree: Parser.Tree | null = parser.parse(`Item { onTriggered: ${expression}\n}`, null, { progressCallback: () => performance.now() >= deadline });
-    if (!tree) { parser.reset(); return { assignments: [], reason: "javascript_parse_timeout" }; }
-    if (tree.rootNode.hasError) return { assignments: [], reason: "unsupported_javascript" };
-    const binding = tree.rootNode.descendantsOfType("ui_binding")[0];
-    const value = binding?.childForFieldName("value");
-    if (!value) return { assignments: [], reason: "unsupported_javascript" };
+    const value = syntax.node;
     const assignments: AssignmentTarget[] = [];
     const references: Array<Omit<AssignmentTarget, "line">> = [];
     let reason: string | undefined;
