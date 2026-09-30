@@ -1,4 +1,6 @@
 import type { AnalysisContext } from "./analyzer.js";
+import { capabilityEvidence } from "./capability-evidence.js";
+import { ruleFor } from "./rules.js";
 import type { Config, Finding } from "./types.js";
 import { isRecord } from "./value-utils.js";
 
@@ -21,7 +23,11 @@ export function evidenceDefinitions(config: Config): EvidenceDefinition[] {
 
 export function evidenceChecks(config: Config, context: AnalysisContext, artifactFor: (definition: EvidenceDefinition) => unknown): CheckRecord[] {
   const lint = context.qmllint;
-  const checks: CheckRecord[] = [{
+  const checks: CheckRecord[] = [...context.ruleCoverage.filter((rule) => rule.skipped > 0 && context.config.rules[rule.rule]?.enabled !== false &&
+    (context.config.rules[rule.rule]?.enforcement ?? ruleFor(rule.rule).enforcement) === "block").map((rule): CheckRecord => ({
+      id: rule.rule, name: rule.rule, required: true, status: "incomplete", findings: 0,
+      reason: `Required rule skipped ${rule.skipped} targets: ${Object.keys(rule.skip_reasons).join(", ")}`,
+    })), {
     id: "tool.qmllint", name: "qmllint", required: config.policy.requireQmllint,
     status: lint.status === "not_run" ? "skipped" : lint.status === "incomplete" ? "incomplete" : context.qmllintFindings.some((finding) => finding.severity === "error") ? "fail" : context.qmllintFindings.length ? "warn" : "pass",
     findings: context.qmllintFindings.length,
@@ -40,6 +46,15 @@ export function evidenceChecks(config: Config, context: AnalysisContext, artifac
     });
   }
   return checks;
+}
+
+export function ruleCapabilities(context: AnalysisContext) {
+  return context.ruleCoverage.map((rule) => {
+    const disabled = context.config.rules[rule.rule]?.enabled === false;
+    const reasons = disabled ? ["rule_disabled"] : rule.applicable === 0 ? ["no_applicable_targets"] : Object.keys(rule.skip_reasons);
+    return capabilityEvidence(`qmlqualitylens/${rule.rule}`, rule.unit ?? "file", rule.evaluated, rule.skipped, reasons,
+      disabled ? "disabled" : rule.applicable === 0 ? "not_applicable" : undefined);
+  });
 }
 
 function normalizeStatus(status: unknown): CheckStatus {

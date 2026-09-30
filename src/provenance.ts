@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { ruleCapabilities } from "./evidence-policy.js";
 import type { AnalysisContext } from "./analyzer.js";
 import type { Config, JsonValue } from "./types.js";
 import { LENS_VERSION } from "./version.js";
@@ -23,9 +24,12 @@ export function confidence(context: AnalysisContext): Record<string, JsonValue> 
   const qmlFiles = context.sources.filter((source) => source.kind === "qml").length;
   const missingSourceRoots = context.config.sourceRoots.filter((root) => !fs.existsSync(root));
   const incompleteInputs = qmlFiles === 0 || missingSourceRoots.length > 0;
+  const capabilities = ruleCapabilities(context);
+  const incompleteRules = capabilities.some((item) => item.status === "partial");
   return {
-    complete: diagnostics === 0 && unresolved === 0 && !incompleteInputs && context.cloneDetection.status === "complete",
-    partial: diagnostics > 0 || unresolved > 0 || incompleteInputs || context.cloneDetection.status === "partial",
+    complete: diagnostics === 0 && unresolved === 0 && !incompleteInputs && !incompleteRules && context.cloneDetection.status === "complete",
+    partial: diagnostics > 0 || unresolved > 0 || incompleteInputs || incompleteRules || context.cloneDetection.status === "partial",
+    capabilities,
     clone_detection: context.cloneDetection,
     confidence_scope: "static QML parser with project-wide qmldir/type resolution and heuristic JavaScript analysis",
     observed_inputs: ["qml_files", "js_files", "project_resolution", ...(qmldirFiles ? ["qmldir"] : []), ...(context.qmllint.source !== "none" ? ["qmllint"] : [])],
