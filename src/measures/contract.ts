@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { evidenceChecks, evidenceDefinitions, incompleteCheckReasons, qualityVerdict, type CheckRecord } from "../evidence-policy.js";
+import { evidenceChecks, evidenceDefinitions, incompleteCheckReasons, qualityVerdict, requiredVerificationFailures, type CheckRecord } from "../evidence-policy.js";
 import { artifactFreshness, changedRunInputs } from "../run-evidence.js";
 import { attachSourceExcerpts } from "../finding-identity.js";
 import type { Config, Finding } from "../types.js";
@@ -25,7 +25,8 @@ export function measureQualityContract(config: Config, command: string, context:
   const artifact = {
     ...baseArtifact(context, "quality.contract", command),
     summary: {
-      verdict: qualityVerdict(config, active, incompleteCheckReasons(checks).length),
+      verdict: qualityVerdict(config, active, incompleteCheckReasons(checks).length, requiredVerificationFailures(checks)),
+      verification_failures: requiredVerificationFailures(checks),
       verified_failures: active.filter((finding) => finding.evidence === "tool" && finding.enforcement === "block").length,
       semantic_failures: active.filter((finding) => finding.evidence === "semantic" && finding.enforcement === "block").length,
       review_findings: active.filter((finding) => finding.enforcement === "review").length,

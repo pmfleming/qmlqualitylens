@@ -68,7 +68,12 @@ export function incompleteCheckReasons(checks: CheckRecord[]): string[] {
     .map((check) => `${check.name} is ${check.status}${check.reason ? `: ${check.reason}` : ""}`);
 }
 
-export function qualityVerdict(config: Config, findings: Finding[], incomplete: number): "pass" | "warn" | "fail" | "incomplete" {
+export function requiredVerificationFailures(checks: CheckRecord[]): string[] {
+  return checks.filter((check) => check.required && check.status === "fail").map((check) => `${check.name} failed`);
+}
+
+export function qualityVerdict(config: Config, findings: Finding[], incomplete: number, verificationFailures: string[] = []): "pass" | "warn" | "fail" | "incomplete" {
+  if (verificationFailures.length) return "fail";
   if (incomplete && config.policy.incomplete === "fail") return "fail";
   if (findings.some((finding) => config.policy.failOn.includes(finding.enforcement ?? "review"))) return "fail";
   if (incomplete && config.policy.incomplete === "warn") return "incomplete";

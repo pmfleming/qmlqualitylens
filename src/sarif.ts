@@ -3,8 +3,7 @@ import type { Finding } from "./types.js";
 import { LENS_VERSION } from "./version.js";
 
 export function sarifForFindings(findings: Finding[], toolVersion = LENS_VERSION) {
-  const active = findings.filter((finding) => !finding.suppressed);
-  const kinds = [...new Set(active.map((finding) => finding.kind))];
+  const kinds = [...new Set(findings.map((finding) => finding.kind))];
   return {
     $schema: "https://json.schemastore.org/sarif-2.1.0.json",
     version: "2.1.0",
@@ -26,11 +25,12 @@ export function sarifForFindings(findings: Finding[], toolVersion = LENS_VERSION
           }),
         },
       },
-      results: active.map((finding) => ({
+      results: findings.map((finding) => ({
         ruleId: finding.kind,
         level: finding.enforcement === "block" ? "error" : finding.enforcement === "warn" ? "warning" : "note",
         message: { text: finding.message },
         partialFingerprints: { qmlqualitylensFingerprint: finding.fingerprint ?? finding.id },
+        ...(finding.suppressed ? { suppressions: [{ kind: "external", status: "accepted", justification: finding.suppression_reason ?? "Configured suppression" }] } : {}),
         locations: finding.file ? [{ physicalLocation: { artifactLocation: { uri: finding.file }, region: { startLine: finding.line ?? 1, ...(finding.column ? { startColumn: finding.column } : {}) } } }] : [],
         properties: {
           evidence: finding.evidence ?? "heuristic",

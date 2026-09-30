@@ -7,6 +7,7 @@ import { discoverSourceFiles } from "./file-walk.js";
 import { discoverCmakeFiles } from "./cmake-project.js";
 import type { Config, SourceFile } from "./types.js";
 import { isRecord } from "./value-utils.js";
+import { validWireExtension } from "./wire-evidence.js";
 import { LENS_VERSION } from "./version.js";
 
 export type AnalysisRun = {
@@ -49,6 +50,7 @@ export function evidenceHash(config: Config, task: string): string {
 
 export function artifactFreshness(context: AnalysisContext, artifact: unknown): string | null {
   if (!isRecord(artifact) || !isRecord(artifact.provenance) || typeof artifact.task_id !== "string") return "Artifact is missing run provenance.";
+  if (!validWireExtension(artifact.evidence_contract)) return "Invalid cross-lens evidence contract.";
   const recorded = artifact.provenance;
   if (recorded.run_id !== context.run.run_id) return "Artifact belongs to a different analysis run.";
   if (recorded.source_hash !== context.run.source_hash || recorded.config_hash !== context.run.config_hash) return "Artifact source/configuration hashes do not match this analysis.";

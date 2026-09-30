@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createAnalysisContext } from "./analyzer.js";
-import { evidenceChecks, incompleteCheckReasons, qualityVerdict } from "./evidence-policy.js";
+import { evidenceChecks, incompleteCheckReasons, qualityVerdict, requiredVerificationFailures } from "./evidence-policy.js";
 import { attachSourceExcerpts } from "./finding-identity.js";
 import { findingMarkdown, sortedActiveFindings } from "./report.js";
 import { measureBenchmarkPerformance } from "./measures/benchmark.js";
@@ -78,6 +78,7 @@ type AuditArtifact = {
     warnings: number;
     review: number;
     incomplete_checks: string[];
+    verification_failures?: string[];
   };
   findings: AuditFinding[];
 };
@@ -93,13 +94,15 @@ export function runAudit(config: Config, command: string, options: AuditOptions)
   const base = baseSnapshot(config, diff);
   const findings = classifyAuditFindings(allFindings, readBaseline(options.baseline), diff, base);
   const gateFindings = gateCandidates(findings, options.base, config.policy.newCodeOnly);
-  const incompleteChecks = requiredCheckFailures(config, context, evidenceArtifacts);
+  const checks = auditChecks(config, context, evidenceArtifacts);
+  const incompleteChecks = incompleteCheckReasons(checks);
+  const verificationFailures = requiredVerificationFailures(checks);
   const inputChange = changedRunInputs(context);
   if (inputChange) incompleteChecks.push(inputChange);
   if (options.base && (diff.status !== "available" || base.status !== "available")) {
     incompleteChecks.push(`Git base comparison is unavailable: ${diff.reason ?? base.reason ?? "comparison did not complete"}`);
   }
-  const artifact = buildAuditArtifact(config, command, options.base, context, findings, gateFindings, incompleteChecks, diff, base);
+  const artifact = buildAuditArtifact(config, command, options.base, context, findings, gateFindings, incompleteChecks, diff, base, verificationFailures);
   writeJsonArtifact(config.outputDir, "audit.json", artifact);
   if (options.saveBaseline) writeBaseline(options.saveBaseline, allFindings);
   return artifact;
@@ -128,7 +131,7 @@ function gateCandidates(findings: AuditFinding[], base: string | null, newCodeOn
   return base && newCodeOnly ? active.filter((finding) => finding.kind.startsWith("input.") || finding.introduced || (!finding.file && finding.evidence === "tool" && finding.enforcement === "block")) : active;
 }
 
-function buildAuditArtifact(config: Config, command: string, selectedBase: string | null, context: AnalysisContext, findings: AuditFinding[], gateFindings: AuditFinding[], incompleteChecks: string[], diff: DiffContext, base: BaseSnapshot): AuditArtifact {
+function buildAuditArtifact(config: Config, command: string, selectedBase: string | null, context: AnalysisContext, findings: AuditFinding[], gateFindings: AuditFinding[], incompleteChecks: string[], diff: DiffContext, base: BaseSnapshot, verificationFailures: string[]): AuditArtifact {
   const summary = findingSummary(findings);
   return {
     schema_version: ARTIFACT_SCHEMA_VERSION,
@@ -137,7 +140,8 @@ function buildAuditArtifact(config: Config, command: string, selectedBase: strin
     provenance: provenance(config, command, context.run),
     confidence: confidence(context),
     summary: {
-      verdict: qualityVerdict(config, gateFindings, incompleteChecks.length),
+      verdict: qualityVerdict(config, gateFindings, incompleteChecks.length, verificationFailures),
+      verification_failures: verificationFailures,
       base: selectedBase,
       findings: summary.findings,
       active: summary.active,
@@ -165,6 +169,7 @@ export function auditMarkdown(artifact: AuditArtifact): string {
     `# qmlqualitylens audit`,
     "",
     `Verdict: **${artifact.summary.verdict}**`,
+    ...(artifact.summary.verification_failures ?? []).map((reason) => `Verification failed: ${reason}`),
     "",
     `Active findings: ${artifact.summary.active}`,
     artifact.summary.base ? `Introduced active findings: ${artifact.summary.active_introduced}` : null,
@@ -188,9 +193,9 @@ function findingsFromArtifact(value: object): Finding[] {
   return value.findings.filter(isFindingRecord);
 }
 
-function requiredCheckFailures(config: Config, context: AnalysisContext, artifacts: object[]): string[] {
+function auditChecks(config: Config, context: AnalysisContext, artifacts: object[]) {
   const byTask = new Map(artifacts.flatMap((artifact) => isRecord(artifact) && typeof artifact.task_id === "string" ? [[artifact.task_id, artifact]] : []));
-  return incompleteCheckReasons(evidenceChecks(config, context, (definition) => byTask.get(definition.task)));
+  return evidenceChecks(config, context, (definition) => byTask.get(definition.task));
 }
 
 function auditFinding(finding: Finding, baselineIds: Set<string>, diff: DiffContext, base: BaseSnapshot): AuditFinding {
