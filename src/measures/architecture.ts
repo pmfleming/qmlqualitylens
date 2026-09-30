@@ -2,7 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { isShellEntrypoint } from "../qml-model.js";
 import { artifactFreshness, changedRunInputs } from "../run-evidence.js";
-import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureJsonValue as JsonValue } from "./foundation.js";
+import type { Config, JsonValue } from "../types.js";
+import type { AnalysisContext } from "../analyzer.js";
+import { componentRiskScore } from "../metrics.js";
+import { parseJson, isJsonRecord, stringValue, numberValue } from "../value-utils.js";
 import { baseArtifact, writeArtifact } from "./shared.js";
 
 export function measureArchitectureMap(config: Config, command: string, context: AnalysisContext) {
@@ -47,16 +50,16 @@ function observedCoverageFiles(context: AnalysisContext): Set<string> | null {
   const file = path.join(context.config.outputDir, "coverage_evidence.json");
   if (!fs.existsSync(file) || changedRunInputs(context)) return null;
   try {
-    const value = support.parseJson(fs.readFileSync(file, "utf8"));
-    if (artifactFreshness(context, value) || !support.isJsonRecord(value) || !Array.isArray(value.files) || !support.isJsonRecord(value.summary) || value.summary.status !== "complete") return null;
+    const value = parseJson(fs.readFileSync(file, "utf8"));
+    if (artifactFreshness(context, value) || !isJsonRecord(value) || !Array.isArray(value.files) || !isJsonRecord(value.summary) || value.summary.status !== "complete") return null;
     return new Set(value.files.flatMap(observedFile));
   } catch { return null; }
 }
 
 function observedFile(value: JsonValue): string[] {
-  if (!support.isJsonRecord(value)) return [];
-  const file = support.stringValue(value.file);
-  const coveredLines = support.numberValue(value.covered_lines);
+  if (!isJsonRecord(value)) return [];
+  const file = stringValue(value.file);
+  const coveredLines = numberValue(value.covered_lines);
   return file && coveredLines !== null && coveredLines > 0 ? [file] : [];
 }
 
@@ -91,6 +94,6 @@ function roleFor(file: string, rootType: string | null): string {
 
 function riskFor(component: AnalysisContext["components"][number] | undefined): { score: number; level: "low" | "medium" | "high" } {
   if (!component) return { score: 0, level: "low" };
-  const score = support.componentRiskScore(component);
+  const score = componentRiskScore(component);
   return { score, level: score >= 120 ? "high" : score >= 60 ? "medium" : "low" };
 }

@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 
-type ToolExecution = {
+export type ToolExecution = {
   status: "pass" | "failed" | "incomplete";
   command: string;
   exit_code: number | null;

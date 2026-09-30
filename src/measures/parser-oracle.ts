@@ -1,7 +1,12 @@
 import type Parser from "tree-sitter";
 import { loadQmlParser } from "../tree-sitter.js";
 import type { QmlDocument } from "../qml-parser-types.js";
-import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding } from "./foundation.js";
+import type { Config, Finding } from "../types.js";
+import type { AnalysisContext } from "../analyzer.js";
+import { applySuppressions } from "../suppressions.js";
+import { enrichFindings } from "../rules.js";
+import { toolVersion, executeTool } from "../tool-execution.js";
+import { errorMessage } from "../value-utils.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 
 type OracleCounts = { imports: number; objects: number; properties: number; bindings: number };
@@ -22,10 +27,10 @@ export function measureParserOracle(config: Config, command: string, context: An
   const treeSitter = config.tools.parserOracleTreeSitter ? loadTreeSitter() : null;
   const evidence = context.qmlDocuments.flatMap((entry) => inspectOracleEntry(config, context, entry, treeSitter));
   const records = evidence.map((item) => item.record);
-  const findings = support.applySuppressions(support.enrichFindings(evidence.flatMap((item) => item.findings), config), config);
+  const findings = applySuppressions(enrichFindings(evidence.flatMap((item) => item.findings), config), config);
   const unavailableTreeSitter = config.tools.parserOracleTreeSitter && !treeSitter;
   const failed = records.some((record) => record.qmldom?.status !== "pass" || record.tree_sitter?.status === "failed");
-  const version = support.toolVersion(config.tools.parserOracleQmldomCommand, config.projectRoot, config.tools.parserOracleTimeoutMs);
+  const version = toolVersion(config.tools.parserOracleQmldomCommand, config.projectRoot, config.tools.parserOracleTimeoutMs);
   const artifact = {
     ...baseArtifact(context, "quality.parser_oracle", command, { qmldom: version }),
     summary: {
@@ -54,7 +59,7 @@ function inspectOracleEntry(config: Config, context: AnalysisContext, entry: Ana
 }
 
 function inspectQmlDom(config: Config, source: string, record: OracleRecord): Finding[] {
-  const execution = support.executeTool(config.tools.parserOracleQmldomCommand, ["--dump-ast", source], config.projectRoot, config.tools.parserOracleTimeoutMs);
+  const execution = executeTool(config.tools.parserOracleQmldomCommand, ["--dump-ast", source], config.projectRoot, config.tools.parserOracleTimeoutMs);
   if (execution.status === "pass" && /<UiProgram\b/.test(execution.stdout)) {
     const counts = qmlDomCounts(execution.stdout);
     record.qmldom = { status: "pass", counts };
@@ -81,7 +86,7 @@ function inspectTreeSitter(config: Config, source: string, record: OracleRecord,
     if (hasErrors) findings.push(failure(record.file, "tree-sitter-qmljs", `Tree-sitter returned ${stats.error_nodes} error and ${stats.missing_nodes} missing node(s).`));
     return findings;
   } catch (error) {
-    const reason = support.errorMessage(error);
+    const reason = errorMessage(error);
     record.tree_sitter = { status: "failed", reason };
     return [failure(record.file, "tree-sitter-qmljs", reason)];
   }

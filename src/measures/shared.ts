@@ -1,6 +1,9 @@
 import { ARTIFACT_SCHEMA_VERSION } from "../version.js";
 import { evidenceHash } from "../run-evidence.js";
-import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding, type MeasureJsonValue as JsonValue } from "./foundation.js";
+import type { Config, Finding, JsonValue } from "../types.js";
+import type { AnalysisContext } from "../analyzer.js";
+import { provenance, confidence } from "../provenance.js";
+import { writeJsonArtifact } from "../value-utils.js";
 
 type MeasureArtifact = Record<string, JsonValue>;
 
@@ -12,12 +15,12 @@ export function baseArtifact(context: AnalysisContext, taskId: string, command: 
       name: context.config.projectName,
       root: context.config.projectRoot,
     },
-    provenance: { ...support.provenance(context.config, command, context.run), tool_versions: { ...context.run.tool_versions, ...toolVersions }, evidence_hash: evidenceHash(context.config, taskId) },
-    confidence: support.confidence(context),
+    provenance: { ...provenance(context.config, command, context.run), tool_versions: { ...context.run.tool_versions, ...toolVersions }, evidence_hash: evidenceHash(context.config, taskId) },
+    confidence: confidence(context, "requested"),
   };
 }
 
-export function writeArtifact(config: Config, filename: string, artifact: object): void { support.writeJsonArtifact(config.outputDir, filename, artifact); }
+export function writeArtifact(config: Config, filename: string, artifact: object): void { writeJsonArtifact(config.outputDir, filename, artifact); }
 
 export function findingSummary(findings: Finding[]) {
   const active = findings.filter((finding) => !finding.suppressed);

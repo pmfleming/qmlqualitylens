@@ -17,21 +17,24 @@ export function provenance(config: Config, command: string, run?: AnalysisRun): 
   };
 }
 
-export function confidence(context: AnalysisContext): Record<string, JsonValue> {
+export function confidence(context: AnalysisContext, scope: "full" | "requested" = "full"): Record<string, JsonValue> {
+  if (scope === "full") { void context.ruleCoverage; void context.cloneDetection; }
   const diagnostics = context.parserDiagnostics.length;
   const qmldirFiles = context.files.filter((file) => file.kind === "qmldir").length;
   const unresolved = context.resolution.unresolvedImports.length + context.resolution.unresolvedTypes.length;
   const qmlFiles = context.sources.filter((source) => source.kind === "qml").length;
   const missingSourceRoots = context.config.sourceRoots.filter((root) => !fs.existsSync(root));
   const incompleteInputs = qmlFiles === 0 || missingSourceRoots.length > 0;
-  const capabilities = ruleCapabilities(context);
+  const capabilities = context.evaluatedAnalyses.has("rules") ? ruleCapabilities(context) : [];
+  const cloneDetection = context.evaluatedAnalyses.has("clones") ? context.cloneDetection : null;
   const incompleteRules = capabilities.some((item) => item.status === "partial");
   return {
-    complete: diagnostics === 0 && unresolved === 0 && !incompleteInputs && !incompleteRules && context.cloneDetection.status === "complete",
-    partial: diagnostics > 0 || unresolved > 0 || incompleteInputs || incompleteRules || context.cloneDetection.status === "partial",
+    complete: diagnostics === 0 && unresolved === 0 && !incompleteInputs && !incompleteRules && cloneDetection?.status !== "partial",
+    partial: diagnostics > 0 || unresolved > 0 || incompleteInputs || incompleteRules || cloneDetection?.status === "partial",
     capabilities,
-    clone_detection: context.cloneDetection,
-    confidence_scope: "static QML parser with project-wide qmldir/type resolution and heuristic JavaScript analysis",
+    clone_detection: cloneDetection,
+    not_requested: (["clones", "rules"] as const).filter((name) => !context.evaluatedAnalyses.has(name)),
+    confidence_scope: "requested static analyses; unrequested capabilities are not verified",
     observed_inputs: ["qml_files", "js_files", "project_resolution", ...(qmldirFiles ? ["qmldir"] : []), ...(context.qmllint.source !== "none" ? ["qmllint"] : [])],
     profile: context.config.profile,
     qmllint_source: context.qmllint.source,
@@ -52,7 +55,7 @@ export function confidence(context: AnalysisContext): Record<string, JsonValue> 
     qml_files: qmlFiles,
     type_evidence_status: context.typeEvidence.status,
     type_evidence_types: context.typeEvidence.types.size,
-    rule_evaluations_skipped: context.ruleCoverage.reduce((sum, rule) => sum + rule.skipped, 0),
+    rule_evaluations_skipped: context.evaluatedAnalyses.has("rules") ? context.ruleCoverage.reduce((sum, rule) => sum + rule.skipped, 0) : null,
     reachability_status: context.resolution.reachabilityStatus,
     entrypoints: context.resolution.entrypoints.size,
     reachable_components: context.resolution.reachableFiles.size,

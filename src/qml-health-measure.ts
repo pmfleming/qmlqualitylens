@@ -16,7 +16,7 @@ export function measureQmlHealth(config: Config, command: string, context: Analy
   return artifact;
 }
 
-export function qmlHealthFindings(context: AnalysisContext): Finding[] {
+export function qmlHealthFindings(context: Pick<AnalysisContext, "config" | "components" | "bindings" | "qmlDocuments">): Finding[] {
   return [
     ...context.components.flatMap(componentHealthFindings),
     ...context.bindings.filter((binding) => !isSignalHandlerPath(binding.property) && !isObjectValuedExpression(binding.expression)).flatMap(sideEffectBindingFinding),

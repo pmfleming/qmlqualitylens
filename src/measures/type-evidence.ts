@@ -1,5 +1,6 @@
 import { serializedTypeEvidence } from "../type-evidence.js";
-import type { MeasureConfig as Config, MeasureContext as AnalysisContext } from "./foundation.js";
+import type { Config } from "../types.js";
+import type { AnalysisContext } from "../analyzer.js";
 import { baseArtifact, writeArtifact } from "./shared.js";
 
 export function measureTypeEvidence(config: Config, command: string, context: AnalysisContext) {

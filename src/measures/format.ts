@@ -1,15 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
-import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding } from "./foundation.js";
+import type { Config, Finding } from "../types.js";
+import type { AnalysisContext } from "../analyzer.js";
+import { applySuppressions } from "../suppressions.js";
+import { enrichFindings } from "../rules.js";
+import { toolVersion, executeTool, publicToolExecution } from "../tool-execution.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 
 export function measureFormat(config: Config, command: string, context: AnalysisContext) {
   const tool = config.tools.qmlformatCommand ?? "qmlformat";
   if (!config.tools.qmlformatCheck) return writeSkippedFormat(config, command, context);
-  const version = support.toolVersion(tool, config.tools.qmlformatWorkingDirectory, config.tools.qmlformatTimeoutMs, { ...process.env, ...config.tools.qmlformatEnvironment }, config.tools.qmlformatRedactPatterns);
+  const version = toolVersion(tool, config.tools.qmlformatWorkingDirectory, config.tools.qmlformatTimeoutMs, { ...process.env, ...config.tools.qmlformatEnvironment }, config.tools.qmlformatRedactPatterns);
   const records = context.sources.filter((source) => source.kind === "qml" || source.kind === "js").map((source) => formatRecord(source, tool, config));
   const rawFindings: Finding[] = records.flatMap(formatFinding);
-  const findings = support.applySuppressions(support.enrichFindings(rawFindings, config), config);
+  const findings = applySuppressions(enrichFindings(rawFindings, config), config);
   const errors = records.filter((record) => record.status === "error");
   const artifact = {
     ...baseArtifact(context, "quality.format", command, { qmlformat: version }),
@@ -38,9 +42,9 @@ function writeSkippedFormat(config: Config, command: string, context: AnalysisCo
 
 function formatRecord(source: AnalysisContext["sources"][number], tool: string, config: Config) {
   let matchesSource = false;
-  const result = support.executeTool(tool, [...config.tools.qmlformatArguments, "--", path.resolve(config.projectRoot, source.relativePath)], config.tools.qmlformatWorkingDirectory, config.tools.qmlformatTimeoutMs, { ...process.env, ...config.tools.qmlformatEnvironment }, config.tools.qmlformatRedactPatterns, (stdout) => { matchesSource = stdout === source.text || `${stdout}\n` === source.text; });
+  const result = executeTool(tool, [...config.tools.qmlformatArguments, "--", path.resolve(config.projectRoot, source.relativePath)], config.tools.qmlformatWorkingDirectory, config.tools.qmlformatTimeoutMs, { ...process.env, ...config.tools.qmlformatEnvironment }, config.tools.qmlformatRedactPatterns, (stdout) => { matchesSource = stdout === source.text || `${stdout}\n` === source.text; });
   const status = result.status !== "pass" ? "error" : matchesSource ? "clean" : "drift";
-  return { file: source.relativePath, settings: qmlformatSettings(source.path), status, exit_code: result.exit_code, error: result.status === "pass" ? null : result.error || result.stderr.trim(), execution: support.publicToolExecution(result) };
+  return { file: source.relativePath, settings: qmlformatSettings(source.path), status, exit_code: result.exit_code, error: result.status === "pass" ? null : result.error || result.stderr.trim(), execution: publicToolExecution(result) };
 }
 
 function formatFinding(record: ReturnType<typeof formatRecord>): Finding[] {

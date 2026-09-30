@@ -1,6 +1,7 @@
 import { expressionShape } from "../javascript-syntax.js";
 import type { QmlObjectNode } from "../qml-parser-types.js";
-import type { MeasureCloneGroup as CloneGroup, MeasureConfig as Config, MeasureContext as AnalysisContext } from "./foundation.js";
+import type { CloneGroup, Config } from "../types.js";
+import type { AnalysisContext } from "../analyzer.js";
 import { baseArtifact, writeArtifact } from "./shared.js";
 
 export function measureClones(config: Config, command: string, context: AnalysisContext) {

@@ -1,6 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
-import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding, type MeasureJsonValue as JsonValue, type MeasureToolExecution as ToolExecution } from "./foundation.js";
+import type { Config, Finding, JsonValue } from "../types.js";
+import type { AnalysisContext } from "../analyzer.js";
+import { applySuppressions } from "../suppressions.js";
+import { enrichFindings } from "../rules.js";
+import { toolVersion, executeTool, publicToolExecution, type ToolExecution } from "../tool-execution.js";
+import { parseJson, isJsonRecord, errorMessage, numberValue, stringValue } from "../value-utils.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 import { buildPrerequisiteFailure } from "./build.js";
 import { unavailableToolExecution } from "../tool-execution.js";
@@ -13,8 +18,8 @@ export function measureCorrectnessCatalog(config: Config, command: string, conte
   const toolExecution = runTests(config, context, runner);
   const execution = loadTestEvidence(config.reports.tests);
   const rawFindings = [...catalogFindings(tests.length, toolExecution, execution, runner), ...testRuntimeWarnings(config, toolExecution)];
-  const findings = support.applySuppressions(support.enrichFindings(rawFindings, config), config);
-  const version = toolExecution && toolExecution.status !== "incomplete" ? support.toolVersion(config.tools[`${runner}Command`], config.tools[`${runner}WorkingDirectory`], config.tools[`${runner}TimeoutMs`], { ...process.env, ...config.tools[`${runner}Environment`] }, config.tools[`${runner}RedactPatterns`]) : null;
+  const findings = applySuppressions(enrichFindings(rawFindings, config), config);
+  const version = toolExecution && toolExecution.status !== "incomplete" ? toolVersion(config.tools[`${runner}Command`], config.tools[`${runner}WorkingDirectory`], config.tools[`${runner}TimeoutMs`], { ...process.env, ...config.tools[`${runner}Environment`] }, config.tools[`${runner}RedactPatterns`]) : null;
   const artifact = {
     ...baseArtifact(context, "correctness.catalog", command, { [runner]: version }),
     summary: {
@@ -31,7 +36,7 @@ export function measureCorrectnessCatalog(config: Config, command: string, conte
       ...findingSummary(findings),
     },
     tests,
-    execution: { report: execution, tool: toolExecution ? support.publicToolExecution(toolExecution) : null },
+    execution: { report: execution, tool: toolExecution ? publicToolExecution(toolExecution) : null },
     findings,
   };
   writeArtifact(config, "correctness_review.json", artifact);
@@ -97,7 +102,7 @@ function runTests(config: Config, context: AnalysisContext, runner: "ctest" | "q
   const args = runner === "ctest"
     ? [...config.tools.ctestArguments, "--test-dir", config.tools.cmakeBuildDir, ...configuration, "--output-on-failure", "--no-tests=error", "--output-junit", report]
     : [...config.tools.qmltestrunnerArguments, "-o", `${report},junitxml`];
-  return support.executeTool(
+  return executeTool(
     config.tools[`${runner}Command`], args,
     config.tools[`${runner}WorkingDirectory`], config.tools[`${runner}TimeoutMs`],
     { ...process.env, ...config.tools[`${runner}Environment`], QMLQUALITYLENS_REPORT: report },
@@ -131,15 +136,15 @@ function loadTestEvidence(file: string | null): TestEvidence {
     if (text.trim().startsWith("{") || text.trim().startsWith("[")) return parseJsonTestEvidence(text, file);
     return parseJunitEvidence(text, file);
   } catch (error) {
-    return { status: "incomplete", reason: `Unable to parse test report: ${support.errorMessage(error)}`, report: file, format: null, tests: 0, duration: null, failures: [] };
+    return { status: "incomplete", reason: `Unable to parse test report: ${errorMessage(error)}`, report: file, format: null, tests: 0, duration: null, failures: [] };
   }
 }
 
 function parseJsonTestEvidence(text: string, report: string): TestEvidence {
-  const value = support.parseJson(text);
-  const root = support.isJsonRecord(value) ? value : {};
+  const value = parseJson(text);
+  const root = isJsonRecord(value) ? value : {};
   const cases = jsonTestCases(value, root);
-  const duration = support.numberValue(root.duration);
+  const duration = numberValue(root.duration);
   if (!cases) return { status: "incomplete", reason: "JSON test report has no tests or testCases array.", report, format: "json", tests: 0, duration, failures: [] };
   if (!cases.length) return { status: "incomplete", reason: "Configured test report contains zero test cases.", report, format: "json", tests: 0, duration, failures: [] };
   const failures = cases.flatMap(jsonTestFailure);
@@ -153,11 +158,11 @@ const FAILURE_STATUSES = new Set(["failed", "failure", "error"]);
 
 function jsonTestCases(value: JsonValue, root: Record<string, JsonValue>): JsonValue[] | null { if (Array.isArray(value)) return value; if (Array.isArray(root.tests)) return root.tests; return Array.isArray(root.testCases) ? root.testCases : null; }
 
-function knownTestStatus(value: JsonValue): boolean { return support.isJsonRecord(value) && TEST_STATUSES.has(String(value.status ?? "").toLowerCase()); }
+function knownTestStatus(value: JsonValue): boolean { return isJsonRecord(value) && TEST_STATUSES.has(String(value.status ?? "").toLowerCase()); }
 
 function jsonTestFailure(value: JsonValue, index: number): TestEvidence["failures"] {
-  if (!support.isJsonRecord(value) || !FAILURE_STATUSES.has(String(value.status ?? "").toLowerCase())) return [];
-  return [{ name: String(value.name ?? `test-${index + 1}`), file: support.stringValue(value.file), line: support.numberValue(value.line) ?? undefined, message: support.stringValue(value.message) }];
+  if (!isJsonRecord(value) || !FAILURE_STATUSES.has(String(value.status ?? "").toLowerCase())) return [];
+  return [{ name: String(value.name ?? `test-${index + 1}`), file: stringValue(value.file), line: numberValue(value.line) ?? undefined, message: stringValue(value.message) }];
 }
 
 function parseJunitEvidence(text: string, report: string): TestEvidence {

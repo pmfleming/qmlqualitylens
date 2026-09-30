@@ -1,6 +1,6 @@
 # Cross-lens upgrade execution
 
-The review's phases 0–4 are executed as phases 1–5. Each phase has its own commit.
+The review's phases 0–4 are executed as phases 1–5. Each phase has its own commit. These are implementation iterations; full plan acceptance remains open (see `contracts/upgrade-validation.md`).
 
 ## Phase 1 — Trust repairs
 - Shared component-local ID resolution now serves parser references, binding loss/cycles and Connections.
@@ -26,3 +26,10 @@ The review's phases 0–4 are executed as phases 1–5. Each phase has its own c
 - Leverage reports observed reuse independently of effort and public surface. Overall maintainability is explicitly an uncalibrated advisory model.
 - `npm test`: 108 passed.
 - Corpus partitions are regression safeguards, not independent population accuracy or held-out ranking validation; see `contracts/calibration-design.md`.
+
+## Phase 5 — Simplification and delivery validation
+- Removed foundation aliases and support-object forwarding; measures import their real dependencies. Capability evidence uses discriminated states.
+- Clone/rule/findings computation is lazy and memoized; focused reports do not force it through confidence reporting. Unrequested capabilities remain explicit, not implicitly verified. Type resolution and configured qmllint remain eager.
+- Clean builds remove stale deleted modules. Packaged contract/status files and first/repeat clone/memory profiling are included.
+- 109 tests passed; clean package smoke without optional parsers passed. Two 8000-line clone candidates: 61/68 ms, complete coverage with no omitted windows/groups (single observations).
+- Live Qt oracle/CMake integration was attempted but blocked before execution by unavailable offline Nix dependencies. Full acceptance gaps are in `contracts/upgrade-validation.md`.

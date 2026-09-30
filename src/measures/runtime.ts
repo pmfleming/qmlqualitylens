@@ -5,18 +5,23 @@ import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 import { buildPrerequisiteFailure } from "./build.js";
 import { unavailableToolExecution } from "../tool-execution.js";
 import { parseRuntimeWarnings } from "../runtime-warnings.js";
-import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding, type MeasureJsonValue as JsonValue, type MeasureToolExecution as ToolExecution } from "./foundation.js";
+import type { Config, Finding, JsonValue } from "../types.js";
+import type { AnalysisContext } from "../analyzer.js";
+import { applySuppressions } from "../suppressions.js";
+import { enrichFindings } from "../rules.js";
+import { executeTool, publicToolExecution, type ToolExecution } from "../tool-execution.js";
+import { parseJson, isJsonRecord, numberValue, stringValue } from "../value-utils.js";
 
 export function measureRuntimeWarnings(config: Config, command: string, context: AnalysisContext) {
   const report = config.reports.runtimeWarnings;
   const execution = runRuntimeSmoke(config, context);
   const evidence = runtimeWarningEvidence(config, report, execution);
   const unique = [...new Map(evidence.findings.map((finding) => [`${finding.kind}\0${finding.file ?? ""}\0${finding.line ?? 0}\0${finding.message}`, finding])).values()];
-  const findings = support.applySuppressions(support.enrichFindings(unique, config), config);
+  const findings = applySuppressions(enrichFindings(unique, config), config);
   const artifact = {
     ...baseArtifact(context, "correctness.runtime_warnings", command),
     summary: { status: evidence.status, reason: execution?.error ?? null, report, tool_status: execution?.status ?? "not_configured", ...findingSummary(findings) },
-    execution: execution ? support.publicToolExecution(execution) : null,
+    execution: execution ? publicToolExecution(execution) : null,
     findings,
   };
   writeArtifact(config, "runtime_warnings.json", artifact);
@@ -42,11 +47,11 @@ export function measureRuntimePerformance(config: Config, command: string, conte
   const budgetReason = performanceBudgetCoverageReason(normalized.scenarios, config);
   const sourceReason = performanceSourceReason(normalized.scenarios, context);
   const complete = normalized.complete && !budgetReason && !sourceReason;
-  const findings = support.applySuppressions(support.enrichFindings(performanceBudgetFindings(normalized.scenarios, config), config), config);
+  const findings = applySuppressions(enrichFindings(performanceBudgetFindings(normalized.scenarios, config), config), config);
   const artifact = {
     ...baseArtifact(context, "performance.runtime", command),
     summary: { status: performanceReportStatus(complete, execution), report, reason: [producerFailureReason(execution), normalized.reason, budgetReason, sourceReason].filter(Boolean).join("; ") || null, scenarios: normalized.scenarios.length, ...findingSummary(findings) },
-    execution: execution ? support.publicToolExecution(execution) : null,
+    execution: execution ? publicToolExecution(execution) : null,
     scenarios: normalized.scenarios,
     findings,
   };
@@ -61,7 +66,7 @@ function runtimeExecutionStatus(execution: ToolExecution | null): "not_configure
 
 function writeEmptyPerformanceArtifact(config: Config, command: string, context: AnalysisContext, report: string | null, execution: ToolExecution | null) {
   const status = execution?.status === "incomplete" || execution?.status === "failed" ? "incomplete" : report ? "missing" : "not_configured";
-  const artifact = { ...baseArtifact(context, "performance.runtime", command), summary: { status, reason: producerFailureReason(execution), report }, execution: execution ? support.publicToolExecution(execution) : null, scenarios: [], findings: [] };
+  const artifact = { ...baseArtifact(context, "performance.runtime", command), summary: { status, reason: producerFailureReason(execution), report }, execution: execution ? publicToolExecution(execution) : null, scenarios: [], findings: [] };
   writeArtifact(config, "runtime_performance.json", artifact);
   return artifact;
 }
@@ -75,13 +80,13 @@ function producerFailureReason(execution: ToolExecution | null): string | null {
   return execution?.status === "failed" ? `Profiler producer exited with ${execution.exit_code}` : null;
 }
 
-function readJsonReport(file: string) { try { return support.parseJson(fs.readFileSync(file, "utf8")); } catch { return null; } }
+function readJsonReport(file: string) { try { return parseJson(fs.readFileSync(file, "utf8")); } catch { return null; } }
 
 function runRuntimeSmoke(config: Config, context: AnalysisContext): ToolExecution | null {
   if (!config.tools.runtimeCheck || !config.tools.runtimeCommand) return null;
   const blocked = buildPrerequisiteFailure(config, context);
   if (blocked) return unavailableToolExecution("runtime", blocked);
-  return support.executeTool(config.tools.runtimeCommand, config.tools.runtimeArguments, config.tools.runtimeWorkingDirectory, config.tools.runtimeTimeoutMs, { ...process.env, ...config.tools.runtimeEnvironment }, config.tools.runtimeRedactPatterns);
+  return executeTool(config.tools.runtimeCommand, config.tools.runtimeArguments, config.tools.runtimeWorkingDirectory, config.tools.runtimeTimeoutMs, { ...process.env, ...config.tools.runtimeEnvironment }, config.tools.runtimeRedactPatterns);
 }
 
 function runProfilerProducer(config: Config, report: string | null, context: AnalysisContext): ToolExecution | null {
@@ -90,7 +95,7 @@ function runProfilerProducer(config: Config, report: string | null, context: Ana
   fs.rmSync(report, { force: true });
   const blocked = buildPrerequisiteFailure(config, context);
   if (blocked) return unavailableToolExecution("qml_profiler", blocked);
-  return support.executeTool(config.tools.qmlProfilerCommand, config.tools.qmlProfilerArguments, config.tools.qmlProfilerWorkingDirectory, config.tools.qmlProfilerTimeoutMs, { ...process.env, ...config.tools.qmlProfilerEnvironment, QMLQUALITYLENS_REPORT: report }, config.tools.qmlProfilerRedactPatterns);
+  return executeTool(config.tools.qmlProfilerCommand, config.tools.qmlProfilerArguments, config.tools.qmlProfilerWorkingDirectory, config.tools.qmlProfilerTimeoutMs, { ...process.env, ...config.tools.qmlProfilerEnvironment, QMLQUALITYLENS_REPORT: report }, config.tools.qmlProfilerRedactPatterns);
 }
 
 type RuntimeScenario = {
@@ -115,11 +120,11 @@ function normalizePerformanceReport(value: JsonValue | null): { complete: boolea
 function scenarioRoots(value: JsonValue | null): JsonValue[] {
   if (value === null) return [];
   if (Array.isArray(value)) return value;
-  return support.isJsonRecord(value) && Array.isArray(value.scenarios) ? value.scenarios : [value];
+  return isJsonRecord(value) && Array.isArray(value.scenarios) ? value.scenarios : [value];
 }
 
 function normalizeScenario(value: JsonValue): RuntimeScenario[] {
-  if (!support.isJsonRecord(value) || !nonEmptyString(value.scenario)) return [];
+  if (!isJsonRecord(value) || !nonEmptyString(value.scenario)) return [];
   const environment = scenarioEnvironment(value.environment);
   if (!environment) return [];
   const measurements = scenarioMeasurements(value);
@@ -128,7 +133,7 @@ function normalizeScenario(value: JsonValue): RuntimeScenario[] {
 }
 
 function scenarioEnvironment(value: JsonValue | undefined): Record<string, JsonValue> | null {
-  if (!support.isJsonRecord(value) || !nonEmptyString(value.platform)) return null;
+  if (!isJsonRecord(value) || !nonEmptyString(value.platform)) return null;
   const qt = value.qt ?? value.qt_version ?? value.qtVersion;
   return nonEmptyString(qt) ? value : null;
 }
@@ -150,14 +155,14 @@ function runtimeScenario(scenario: string, environment: Record<string, JsonValue
 }
 
 function scenarioFrameBudget(environment: Record<string, JsonValue>): number | null {
-  const explicit = support.numberValue(environment.frame_budget_ms) ?? support.numberValue(environment.frameBudgetMs);
+  const explicit = numberValue(environment.frame_budget_ms) ?? numberValue(environment.frameBudgetMs);
   if (explicit !== null && explicit > 0) return explicit;
-  const refresh = support.numberValue(environment.refresh_hz) ?? support.numberValue(environment.refreshHz);
+  const refresh = numberValue(environment.refresh_hz) ?? numberValue(environment.refreshHz);
   return refresh !== null && refresh > 0 ? round(1000 / refresh) : null;
 }
 
 function frameDurations(frames: JsonValue | undefined, traceEvents: JsonValue[]): number[] {
-  const input = Array.isArray(frames) ? frames : traceEvents.filter((event) => support.isJsonRecord(event) && /frame/i.test(String(event.name ?? event.cat ?? "")));
+  const input = Array.isArray(frames) ? frames : traceEvents.filter((event) => isJsonRecord(event) && /frame/i.test(String(event.name ?? event.cat ?? "")));
   return input.map((frame) => typeof frame === "number" ? frame : durationMs(frame)).filter((duration): duration is number => duration !== null && Number.isFinite(duration) && duration >= 0);
 }
 
@@ -180,10 +185,10 @@ function eventHotspots(input: JsonValue[]): RuntimeScenario["hotspots"] {
   return input.flatMap((event) => {
     const hotspot = normalizedHotspotEvent(event);
     if (!hotspot) return [];
-    const args = support.isJsonRecord(hotspot.event.args) ? hotspot.event.args : {};
-    const data = support.isJsonRecord(args.data) ? args.data : {};
-    const file = support.stringValue(hotspot.event.file) ?? support.stringValue(args.file) ?? support.stringValue(data.file) ?? undefined;
-    const line = support.numberValue(hotspot.event.line) ?? support.numberValue(args.line) ?? support.numberValue(data.line) ?? undefined;
+    const args = isJsonRecord(hotspot.event.args) ? hotspot.event.args : {};
+    const data = isJsonRecord(args.data) ? args.data : {};
+    const file = stringValue(hotspot.event.file) ?? stringValue(args.file) ?? stringValue(data.file) ?? undefined;
+    const line = numberValue(hotspot.event.line) ?? numberValue(args.line) ?? numberValue(data.line) ?? undefined;
     return [{ category: hotspot.category, duration_ms: round(hotspot.duration), ...(file ? { file } : {}), ...(line ? { line } : {}) }];
   }).sort((left, right) => right.duration_ms - left.duration_ms).slice(0, 50);
 }
@@ -191,18 +196,18 @@ function eventHotspots(input: JsonValue[]): RuntimeScenario["hotspots"] {
 function normalizedHotspotEvent(event: JsonValue): { event: Record<string, JsonValue>; category: string; duration: number } | null {
   const category = eventCategory(event);
   const duration = durationMs(event);
-  if (!support.isJsonRecord(event) || !category || /frame/i.test(category) || duration === null || !Number.isFinite(duration) || duration < 0) return null;
+  if (!isJsonRecord(event) || !category || /frame/i.test(category) || duration === null || !Number.isFinite(duration) || duration < 0) return null;
   return { event, category, duration };
 }
 
 function eventCategory(value: JsonValue): string | null {
-  if (!support.isJsonRecord(value)) return null;
+  if (!isJsonRecord(value)) return null;
   for (const key of ["category", "cat", "name"]) if (typeof value[key] === "string") return value[key];
   return null;
 }
 
 function durationMs(value: JsonValue): number | null {
-  if (!support.isJsonRecord(value)) return null;
+  if (!isJsonRecord(value)) return null;
   if (typeof value.duration_ms === "number") return value.duration_ms;
   return typeof value.dur === "number" ? value.dur / 1000 : null;
 }
@@ -211,7 +216,7 @@ function performanceSourceReason(scenarios: RuntimeScenario[], context: Analysis
   for (const scenario of scenarios) {
     const hashes = scenario.environment.source_sha256;
     if (hashes === undefined) continue;
-    if (!support.isJsonRecord(hashes)) return "Invalid profiler source manifest.";
+    if (!isJsonRecord(hashes)) return "Invalid profiler source manifest.";
     const stale = context.sources.filter((source) => ["qml", "js"].includes(source.kind))
       .some((source) => hashes[source.relativePath] !== createHash("sha256").update(source.text).digest("hex"));
     if (stale) return "Profiler source manifest is stale or does not cover current sources.";

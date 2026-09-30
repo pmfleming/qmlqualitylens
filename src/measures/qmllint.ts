@@ -1,9 +1,12 @@
 import { qmllintDiagnostic } from "../qmllint.js";
-import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext } from "./foundation.js";
+import type { Config } from "../types.js";
+import type { AnalysisContext } from "../analyzer.js";
+import { applySuppressions } from "../suppressions.js";
+import { enrichFindings } from "../rules.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 
 export function measureQmllint(config: Config, command: string, context: AnalysisContext) {
-  const findings = support.applySuppressions(support.enrichFindings(context.qmllintFindings.map(qmllintDiagnostic), config), config);
+  const findings = applySuppressions(enrichFindings(context.qmllintFindings.map(qmllintDiagnostic), config), config);
   const summary = findingSummary(findings);
   const artifact = {
     ...baseArtifact(context, "quality.qmllint", command),

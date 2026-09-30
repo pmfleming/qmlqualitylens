@@ -1,7 +1,11 @@
 import path from "node:path";
 import { hasCaptures } from "../value-utils.js";
 import { discoverCmakeFiles, discoverQmlModules } from "../cmake-project.js";
-import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding } from "./foundation.js";
+import type { Config, Finding } from "../types.js";
+import type { AnalysisContext } from "../analyzer.js";
+import { applySuppressions } from "../suppressions.js";
+import { enrichFindings } from "../rules.js";
+import { publicToolExecution, toolVersion, executeTool, projectRelativePath } from "../tool-execution.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 
 type CmakeDiagnostic = {
@@ -13,7 +17,7 @@ type CmakeDiagnostic = {
   message: string;
 };
 
-type CmakeStep = Omit<ReturnType<typeof support.publicToolExecution>, "status"> & {
+type CmakeStep = Omit<ReturnType<typeof publicToolExecution>, "status"> & {
   phase: "configure" | "build";
   status: "pass" | "warn" | "failed" | "incomplete";
   diagnostics: CmakeDiagnostic[];
@@ -39,7 +43,7 @@ export function measureBuildEvidence(config: Config, command: string, context: A
   const raw: Finding[] = [];
   if (cmakeProject && modules.length === 0 && context.sources.some((source) => source.kind === "qml")) raw.push({ id: "build.qml_module_missing", kind: "build.qml_module_missing", severity: "low", message: "CMake files were found, but no qt_add_qml_module() declaration was discovered", actions: ["Use qt_add_qml_module() for application QML modules where appropriate so tooling receives type/import information and QML can be compiled ahead of time."] });
   raw.push(...execution.steps.flatMap(stepFindings));
-  const findings = support.applySuppressions(support.enrichFindings(raw, config), config);
+  const findings = applySuppressions(enrichFindings(raw, config), config);
   const status = execution.enabled ? execution.status : cmakeProject ? "observed" : "not_applicable";
   const artifact = {
     ...baseArtifact(context, "quality.build_evidence", command, { cmake: execution.version }),
@@ -80,21 +84,21 @@ function runCmake(config: Config): CmakeExecution {
     steps.push(runCmakeStep(config, "build", ["--build", config.tools.cmakeBuildDir, ...configuration, ...targets, ...config.tools.cmakeBuildArguments]));
   }
   const status = cmakeStatus(steps);
-  return { enabled: true, status, version: support.toolVersion(config.tools.cmakeCommand, config.tools.cmakeWorkingDirectory, config.tools.cmakeTimeoutMs, { ...process.env, ...config.tools.cmakeEnvironment }, config.tools.cmakeRedactPatterns), build_dir: config.tools.cmakeBuildDir, reason: cmakeFailureReason(status, steps), steps };
+  return { enabled: true, status, version: toolVersion(config.tools.cmakeCommand, config.tools.cmakeWorkingDirectory, config.tools.cmakeTimeoutMs, { ...process.env, ...config.tools.cmakeEnvironment }, config.tools.cmakeRedactPatterns), build_dir: config.tools.cmakeBuildDir, reason: cmakeFailureReason(status, steps), steps };
 }
 
 function cmakeStatus(steps: CmakeStep[]): CmakeExecution["status"] { if (steps.some((step) => step.status === "incomplete")) return "incomplete"; if (steps.some((step) => step.status === "failed")) return "failed"; return steps.some((step) => step.status === "warn") ? "warn" : "pass"; }
 function cmakeFailureReason(status: CmakeExecution["status"], steps: CmakeStep[]): string | null { if (status === "incomplete") return steps.find((step) => step.status === "incomplete")?.error ?? "CMake execution was incomplete."; return status === "failed" ? "A configured CMake configure/build step failed." : null; }
 
 function runCmakeStep(config: Config, phase: CmakeStep["phase"], args: string[]): CmakeStep {
-  const result = support.executeTool(config.tools.cmakeCommand, args, config.tools.cmakeWorkingDirectory, config.tools.cmakeTimeoutMs, { ...process.env, ...config.tools.cmakeEnvironment }, config.tools.cmakeRedactPatterns);
+  const result = executeTool(config.tools.cmakeCommand, args, config.tools.cmakeWorkingDirectory, config.tools.cmakeTimeoutMs, { ...process.env, ...config.tools.cmakeEnvironment }, config.tools.cmakeRedactPatterns);
   const diagnostics = parseCmakeDiagnostics(`${result.stdout}\n${result.stderr}`, phase, config);
   const error = result.error;
   const status = error ? "incomplete"
     : result.exit_code !== 0 || diagnostics.some((item) => item.severity === "error") ? "failed"
       : diagnostics.some((item) => item.severity === "warning") ? "warn"
         : "pass";
-  return { ...support.publicToolExecution(result), phase, status, diagnostics };
+  return { ...publicToolExecution(result), phase, status, diagnostics };
 }
 
 function parseCmakeDiagnostics(output: string, phase: CmakeStep["phase"], config: Config): CmakeDiagnostic[] {
@@ -130,7 +134,7 @@ function diagnostic(phase: CmakeStep["phase"], severity: string, message: string
   return {
     phase,
     severity: /error|fatal/i.test(severity) ? "error" : "warning",
-    ...(file ? { file: support.projectRelativePath(path.resolve(relativeTo, file.replace(/^file:\/\//, "")), config.projectRoot) } : {}),
+    ...(file ? { file: projectRelativePath(path.resolve(relativeTo, file.replace(/^file:\/\//, "")), config.projectRoot) } : {}),
     ...(line ? { line: Number(line) } : {}),
     ...(column ? { column: Number(column) } : {}),
     message: message.trim(),

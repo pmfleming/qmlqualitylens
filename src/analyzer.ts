@@ -36,6 +36,7 @@ import type {
 
 export type AnalysisContext = {
   config: Config;
+  evaluatedAnalyses: ReadonlySet<"clones" | "rules">;
   buildStatus?: { status: "skipped" | "pass" | "warn" | "failed" | "incomplete"; reason: string | null };
   run: AnalysisRun;
   sources: SourceFile[];
@@ -72,22 +73,49 @@ export function createAnalysisContext(config: Config): AnalysisContext {
   const parserDiagnostics = files.flatMap((file) => file.parserDiagnostics);
   const qmllint = loadQmllintResult(config, sources.filter((source) => source.kind === "qml" || source.kind === "js").map((source) => source.relativePath));
   const qmllintFindings = qmllint.findings;
-  const { groups: clones, coverage: cloneDetection } = analyzeClones(sources, config.thresholds.cloneWindow);
   const run = createAnalysisRun(config, sources, qmllint.version);
-  const baseContext: AnalysisContext = { config, run, sources, qmlDocuments, resolution, typeEvidence, ruleCoverage: [], files, components, functions, bindings, parserDiagnostics, qmllint, qmllintFindings, clones, cloneDetection, findings: [], scores: emptyScores() };
-  const evaluation = evaluateQmlRules(baseContext);
+  const evaluatedAnalyses = new Set<"clones" | "rules">();
+  const clones = once(() => {
+    const result = analyzeClones(sources, config.thresholds.cloneWindow);
+    evaluatedAnalyses.add("clones");
+    return result;
+  });
+  const evaluation = once(() => {
+    const result = evaluateQmlRules(context);
+    evaluatedAnalyses.add("rules");
+    return result;
+  });
+  const findings = once(() => collectFindings(context, evaluation().findings));
+  const scores = once(() => scoreProject(config, files, components, functions, context.clones, context.findings));
+  const context: AnalysisContext = {
+    config, run, sources, qmlDocuments, resolution, typeEvidence, files, components, functions, bindings,
+    parserDiagnostics, qmllint, qmllintFindings, evaluatedAnalyses,
+    get clones() { return clones().groups; },
+    get cloneDetection() { return clones().coverage; },
+    get ruleCoverage() { return evaluation().coverage; },
+    get findings() { return findings(); },
+    get scores() { return scores(); },
+  };
+  return context;
+}
+
+function once<T>(compute: () => T): () => T {
+  let cached: { value: T } | undefined;
+  return () => (cached ??= { value: compute() }).value;
+}
+
+function collectFindings(context: AnalysisContext, ruleFindings: Finding[]): Finding[] {
+  const { config, sources, qmlDocuments, files, components, functions, bindings, clones, cloneDetection, resolution, qmllintFindings } = context;
   const candidates = attachSemanticAnchors([
     ...inputFindings(config, sources),
     ...(cloneDetection.status === "partial" ? [{ id: "duplication.analysis_limit", kind: "duplication.analysis_limit", severity: "low", message: `Clone analysis reached its limits: ${cloneDetection.omitted_windows} windows and ${cloneDetection.omitted_groups} groups omitted; duplication metrics are partial`, actions: ["Inspect clone_detection in the quality report; analyze smaller source scopes for complete duplication coverage."] } satisfies Finding] : []),
     ...deriveFindings(config, files, components, functions, bindings, clones, resolution),
-    ...evaluation.findings,
-    ...cleanupFindings(baseContext),
+    ...ruleFindings,
+    ...cleanupFindings(context),
     ...qmllintFindings.map(qmllintDiagnostic),
   ], qmlDocuments);
   const rawFindings = deduplicateToolFindings(enrichFindings(candidates, config));
-  const findings = attachSourceExcerpts([...applySuppressions(rawFindings, config), ...enrichFindings(staleSuppressionFindings(rawFindings, config), config)], sources);
-  const scores = scoreProject(config, files, components, functions, clones, findings);
-  return { ...baseContext, ruleCoverage: evaluation.coverage, findings, scores };
+  return attachSourceExcerpts([...applySuppressions(rawFindings, config), ...enrichFindings(staleSuppressionFindings(rawFindings, config), config)], sources);
 }
 
 export function analyzeProject(config: Config): AnalysisArtifact {

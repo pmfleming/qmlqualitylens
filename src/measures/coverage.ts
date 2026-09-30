@@ -1,7 +1,12 @@
 import fs from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding } from "./foundation.js";
+import type { Config, Finding } from "../types.js";
+import type { AnalysisContext } from "../analyzer.js";
+import { componentRiskScore } from "../metrics.js";
+import { applySuppressions } from "../suppressions.js";
+import { enrichFindings } from "../rules.js";
+import { parseJson, isJsonRecord } from "../value-utils.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 
 type ObservedSites = { objects: number[]; bindings: number[]; executables: number[] };
@@ -20,7 +25,7 @@ export function measureCoverageEvidence(config: Config, command: string, context
   const records = parsed.files.map((coverage) => coverageRecord(coverage, context));
   const unobserved = context.qmlDocuments.map((entry) => entry.file).filter((file) => !observedFiles.has(file));
   const rawFindings = context.components.flatMap((component) => highRiskUnobserved(component, observedFiles));
-  const findings = support.applySuppressions(support.enrichFindings(rawFindings, config), config);
+  const findings = applySuppressions(enrichFindings(rawFindings, config), config);
   const qmlFiles = context.qmlDocuments.length;
   const mappedQml = new Set(parsed.files.map((file) => file.file).filter((file) => context.qmlDocuments.some((entry) => entry.file === file))).size;
   return writeCoverage(config, {
@@ -78,22 +83,22 @@ function lineAtOffset(context: AnalysisContext, file: string, offset: number): n
 }
 
 function highRiskUnobserved(component: AnalysisContext["components"][number], observed: Set<string>): Finding[] {
-  const risk = support.componentRiskScore(component);
+  const risk = componentRiskScore(component);
   if (risk < 120 || observed.has(component.file)) return [];
   return [{ id: `coverage.unobserved_high_risk.${component.file}`, kind: "coverage.unobserved_high_risk", severity: "medium", file: component.file, line: component.line, message: `High-risk component ${component.name} was not observed in the imported coverage scenarios`, metric: risk, actions: ["Add a representative QML test or runtime scenario, or document why this component is outside the report scope."] }];
 }
 
 function parseProfilerObservations(text: string, context: AnalysisContext): { files: CoverageFile[]; reportFiles: number; reason: string | null } {
   let value;
-  try { value = support.parseJson(text); }
+  try { value = parseJson(text); }
   catch { return { files: [], reportFiles: 0, reason: "Malformed profiler observation JSON." }; }
-  if (!support.isJsonRecord(value) || value.format !== "qml-profiler-observations" || !Array.isArray(value.files)
-      || !support.isJsonRecord(value.environment) || !value.environment.qt || !value.environment.platform)
+  if (!isJsonRecord(value) || value.format !== "qml-profiler-observations" || !Array.isArray(value.files)
+      || !isJsonRecord(value.environment) || !value.environment.qt || !value.environment.platform)
     return { files: [], reportFiles: 0, reason: "Invalid profiler observation report or missing Qt/platform provenance." };
   const files: CoverageFile[] = [];
   let rejected = 0;
   for (const entry of value.files) {
-    if (!support.isJsonRecord(entry)) { rejected++; continue; }
+    if (!isJsonRecord(entry)) { rejected++; continue; }
     const source = context.sources.find((source) => source.relativePath === entry.file);
     if (!source || createHash("sha256").update(source.text).digest("hex") !== entry.sha256) { rejected++; continue; }
     const sites = (key: string): number[] => Array.isArray(entry[key]) ? entry[key].filter((line): line is number => typeof line === "number" && Number.isInteger(line) && line > 0) : [];

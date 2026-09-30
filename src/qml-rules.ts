@@ -1,4 +1,5 @@
-import type { AnalysisContext } from "./analyzer.js";
+import type { AnalysisContext as FullAnalysisContext } from "./analyzer.js";
+type AnalysisContext = Pick<FullAnalysisContext, "config" | "sources" | "qmlDocuments" | "components" | "bindings" | "resolution" | "typeEvidence">;
 import { lineNumberAt, stripCommentsAndStrings } from "./metrics.js";
 import { createIdResolver, type IdResolver } from "./qml-scope.js";
 import { analyzeAssignments } from "./expression-analysis.js";
@@ -28,7 +29,12 @@ const RULE_GROUPS: RuleGroup[] = [
 
 export function evaluateQmlRules(context: AnalysisContext): { findings: Finding[]; coverage: RuleCoverageRecord[] } {
   const cleanFiles = new Set(context.qmlDocuments.filter((entry) => !entry.document.diagnostics.length).map((entry) => entry.file));
-  const cleanContext = { ...context, qmlDocuments: context.qmlDocuments.filter((entry) => cleanFiles.has(entry.file)), components: context.components.filter((item) => cleanFiles.has(item.file)), bindings: context.bindings.filter((item) => cleanFiles.has(item.file)) };
+  const cleanContext: AnalysisContext = {
+    config: context.config, sources: context.sources, resolution: context.resolution, typeEvidence: context.typeEvidence,
+    qmlDocuments: context.qmlDocuments.filter((entry) => cleanFiles.has(entry.file)),
+    components: context.components.filter((item) => cleanFiles.has(item.file)),
+    bindings: context.bindings.filter((item) => cleanFiles.has(item.file)),
+  };
   const findings: Finding[] = [];
   const coverage: RuleCoverageRecord[] = [];
   for (const group of RULE_GROUPS) {

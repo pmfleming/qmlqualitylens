@@ -1,5 +1,9 @@
 import fs from "node:fs";
-import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding, type MeasureJsonValue as JsonValue } from "./foundation.js";
+import type { Config, Finding, JsonValue } from "../types.js";
+import type { AnalysisContext } from "../analyzer.js";
+import { applySuppressions } from "../suppressions.js";
+import { enrichFindings } from "../rules.js";
+import { parseJson, isJsonRecord, errorMessage, numberValue } from "../value-utils.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./shared.js";
 
 type BenchmarkResult = { name: string; average: number; median: number | null; samples: number; standard_deviation: number | null; coefficient_of_variation: number | null; results: number[] };
@@ -23,7 +27,7 @@ function compareBenchmarkReports(config: Config, command: string, context: Analy
   const environmentMismatch = baseline ? compareEnvironment(current.environment, baseline.environment) : [];
   const comparisons = baseline && !environmentMismatch.length ? compareReports(current, baseline) : [];
   const rawFindings = [...current.benchmarks.flatMap((benchmark) => noiseFindings(benchmark, config)), ...comparisons.flatMap((comparison) => regressionFindings(comparison, config))];
-  const findings = support.applySuppressions(support.enrichFindings(rawFindings, config), config);
+  const findings = applySuppressions(enrichFindings(rawFindings, config), config);
   const incompleteReasons = [
     ...(environmentMismatch.length ? [`Benchmark environment differs from baseline: ${environmentMismatch.join(", ")}.`] : []),
     ...(baseline && (comparisons.length !== current.benchmarks.length || comparisons.length !== baseline.benchmarks.length) ? ["Current and baseline reports do not contain the same benchmark set."] : []),
@@ -51,28 +55,28 @@ function compareBenchmarkReports(config: Config, command: string, context: Analy
 function loadReport(file: string): { status: "missing" | "incomplete" | "complete"; reason: string | null; report: QmlBenchReport | null } {
   if (!fs.existsSync(file)) return { status: "missing", reason: "Configured qmlbench JSON report does not exist.", report: null };
   try {
-    const value = support.parseJson(fs.readFileSync(file, "utf8"));
-    if (!support.isJsonRecord(value)) return { status: "incomplete", reason: "qmlbench report root must be an object.", report: null };
+    const value = parseJson(fs.readFileSync(file, "utf8"));
+    if (!isJsonRecord(value)) return { status: "incomplete", reason: "qmlbench report root must be an object.", report: null };
     const benchmarks = Object.entries(value).flatMap(([name, result]) => METADATA_KEYS.has(name) ? [] : normalizeBenchmark(name, result));
     if (!benchmarks.length) return { status: "incomplete", reason: "qmlbench report contains no benchmark result objects.", report: null };
     return { status: "complete", reason: null, report: { environment: environment(value), benchmarks } };
   } catch (error) {
-    return { status: "incomplete", reason: `Unable to parse qmlbench report: ${support.errorMessage(error)}`, report: null };
+    return { status: "incomplete", reason: `Unable to parse qmlbench report: ${errorMessage(error)}`, report: null };
   }
 }
 
 function normalizeBenchmark(name: string, value: JsonValue): BenchmarkResult[] {
-  if (!support.isJsonRecord(value)) return [];
+  if (!isJsonRecord(value)) return [];
   const results = Array.isArray(value.results) ? value.results.filter((item): item is number => typeof item === "number" && Number.isFinite(item)) : [];
-  const average = support.numberValue(value.average) ?? (results.length ? results.reduce((sum, item) => sum + item, 0) / results.length : null);
+  const average = numberValue(value.average) ?? (results.length ? results.reduce((sum, item) => sum + item, 0) / results.length : null);
   if (average === null || average <= 0) return [];
   return [{
     name,
     average,
-    median: support.numberValue(value.median),
-    samples: support.numberValue(value["samples-in-average"]) ?? support.numberValue(value["samples-total"]) ?? results.length,
-    standard_deviation: support.numberValue(value["standard-deviation"]),
-    coefficient_of_variation: support.numberValue(value["coefficient-of-variation"]),
+    median: numberValue(value.median),
+    samples: numberValue(value["samples-in-average"]) ?? numberValue(value["samples-total"]) ?? results.length,
+    standard_deviation: numberValue(value["standard-deviation"]),
+    coefficient_of_variation: numberValue(value["coefficient-of-variation"]),
     results,
   }];
 }

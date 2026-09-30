@@ -1,4 +1,5 @@
-import type { MeasureConfig as Config, MeasureContext as AnalysisContext, MeasureThresholds as Thresholds } from "./foundation.js";
+import type { Config, Thresholds } from "../types.js";
+import type { AnalysisContext } from "../analyzer.js";
 import { baseArtifact, writeArtifact } from "./shared.js";
 
 export function measureHotspots(config: Config, command: string, context: AnalysisContext) {

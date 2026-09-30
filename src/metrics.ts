@@ -1,6 +1,10 @@
-import type { LocMetrics } from "./types.js";
+import type { ComponentRecord, LocMetrics } from "./types.js";
 import type Parser from "tree-sitter";
 import { javascriptSyntax } from "./javascript-syntax.js";
+
+export function componentRiskScore(component: ComponentRecord): number {
+  return Math.round(component.effort * 0.25 + component.distinctIdReferences * 5 + component.processBoundaryViolations * 15 + Math.max(0, component.objectCount - 20) * 2 + Math.max(0, component.loc.source - 200) * 0.1);
+}
 
 export function locFor(text: string): LocMetrics {
   const lines = physicalLines(text);

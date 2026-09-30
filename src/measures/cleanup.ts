@@ -1,10 +1,12 @@
 import path from "node:path";
-import { support, type MeasureConfig as Config, type MeasureContext as AnalysisContext, type MeasureFinding as Finding } from "./foundation.js";
+import type { Config, Finding } from "../types.js";
+import type { AnalysisContext } from "../analyzer.js";
+import { activeFindings } from "../suppressions.js";
 import { baseArtifact, writeArtifact } from "./shared.js";
 
 export function measureCleanup(config: Config, command: string, context: AnalysisContext) {
   const findings = context.findings.filter((finding) => finding.kind.startsWith("cleanup."));
-  const active = support.activeFindings(findings);
+  const active = activeFindings(findings);
   const artifact = {
     ...baseArtifact(context, "quality.cleanup", command),
     summary: {
