@@ -33,6 +33,8 @@ A `pass` means every completed check satisfied the configured policy. It does **
 
 When `policy.require_qmllint` is true, missing or unusable evidence follows `policy.incomplete`. Structured reports are checked against discovered QML/JavaScript inputs; partial coverage is incomplete. The shell-free native adapter passes every discovered file to `qmllint --json -` and records import paths, `.qmltypes`, version, exit status, and coverage. Coverage from project-specific commands is unknown unless the report identifies its files.
 
+Static-rule prerequisite and abstention semantics are specified in [the semantic scope contract](../contracts/semantic-scope.md). Unknown call targets, incomplete signal hierarchies and approximate function/binding metrics cannot certify fully evaluated semantics. Required rule skips participate in `policy.incomplete` even when no code finding is emitted.
+
 ## Profiles
 
 - `generic`: framework-neutral parsing and architecture rules.

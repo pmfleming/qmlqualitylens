@@ -34,6 +34,7 @@ export function measureHotspots(config: Config, command: string, context: Analys
           process_boundary_violations: component.processBoundaryViolations,
           max_cyclomatic: maxCyclomatic,
           max_cognitive: maxCognitive,
+          complexity_complete: fileFunctions.every((item) => item.complexityEvidence?.complete === true),
           effort: component.effort,
         },
       };

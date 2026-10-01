@@ -185,14 +185,20 @@ function isDesignTokenFile(file: SourceFile): boolean {
 }
 
 function bindingsFromDocument(file: SourceFile, document: QmlDocument): BindingRecord[] {
-  return document.bindings.map((binding) => ({
-    file: file.relativePath,
-    property: binding.propertyPath,
-    line: binding.line,
-    expression: binding.expression,
-    complexity: isObjectValuedExpression(binding.expression) ? 1 : bindingComplexity(binding.expression),
-    dependencyCount: new Set(binding.references.map((reference) => reference.name)).size,
-  }));
+  return document.bindings.map((binding) => {
+    const complexity = isObjectValuedExpression(binding.expression)
+      ? { cyclomatic: 1, backend: "qml-object-declaration", complete: true }
+      : complexityForCode(binding.expression);
+    return {
+      file: file.relativePath,
+      property: binding.propertyPath,
+      line: binding.line,
+      expression: binding.expression,
+      complexity: complexity.cyclomatic,
+      complexityEvidence: { backend: complexity.backend, complete: complexity.complete },
+      dependencyCount: new Set(binding.references.map((reference) => reference.name)).size,
+    };
+  });
 }
 
 function parseComponent(file: SourceFile, functions: FunctionRecord[], bindings: BindingRecord[], document: QmlDocument, config: Config): ComponentRecord {
@@ -313,10 +319,6 @@ function advanceStringState(state: StringScanState, char: string): boolean {
   else if (char === "\\") state.escaped = true;
   else if (char === state.quote) state.quote = null;
   return true;
-}
-
-function bindingComplexity(expression: string): number {
-  return complexityForCode(expression).cyclomatic;
 }
 
 function configuredPatternMatches(text: string, patterns: string[]): number {

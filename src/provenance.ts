@@ -30,9 +30,15 @@ export function confidence(context: AnalysisContext, scope: "full" | "requested"
   const capabilities = context.evaluatedAnalyses.has("rules") ? ruleCapabilities(context) : [];
   const cloneDetection = context.evaluatedAnalyses.has("clones") ? context.cloneDetection : null;
   const incompleteRules = capabilities.some((item) => item.status === "partial");
+  const approximateFunctions = context.functions.filter((item) => item.complexityEvidence?.complete !== true).length;
+  const approximateBindings = context.bindings.filter((item) => item.complexityEvidence?.complete !== true).length;
+  const partial = diagnostics > 0 || unresolved > 0 || incompleteInputs || incompleteRules ||
+    context.typeEvidence.status !== "complete" || approximateFunctions > 0 || approximateBindings > 0 || cloneDetection?.status === "partial";
   return {
-    complete: diagnostics === 0 && unresolved === 0 && !incompleteInputs && !incompleteRules && cloneDetection?.status !== "partial",
-    partial: diagnostics > 0 || unresolved > 0 || incompleteInputs || incompleteRules || cloneDetection?.status === "partial",
+    complete: !partial,
+    partial,
+    approximate_function_metrics: approximateFunctions,
+    approximate_binding_metrics: approximateBindings,
     capabilities,
     clone_detection: cloneDetection,
     not_requested: (["clones", "rules", "qmllint"] as const).filter((name) => !context.evaluatedAnalyses.has(name)),

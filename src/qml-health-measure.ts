@@ -1,8 +1,7 @@
 import type { AnalysisContext } from "./analyzer.js";
 import { isProcessBoundaryFile } from "./config.js";
-import { stripCommentsAndStrings } from "./metrics.js";
 import { baseArtifact, findingSummary, writeArtifact } from "./measures/shared.js";
-import { isObjectValuedExpression, isSignalHandlerPath, matchesAnyConfiguredTypeName } from "./qml-model.js";
+import { matchesAnyConfiguredTypeName } from "./qml-model.js";
 import type { Config, Finding } from "./types.js";
 
 export function measureQmlHealth(config: Config, command: string, context: AnalysisContext) {
@@ -19,7 +18,6 @@ export function measureQmlHealth(config: Config, command: string, context: Analy
 export function qmlHealthFindings(context: Pick<AnalysisContext, "config" | "components" | "bindings" | "qmlDocuments">): Finding[] {
   return [
     ...context.components.flatMap(componentHealthFindings),
-    ...context.bindings.filter((binding) => !isSignalHandlerPath(binding.property) && !isObjectValuedExpression(binding.expression)).flatMap(sideEffectBindingFinding),
     ...context.qmlDocuments.flatMap((entry) => processPlacementFinding(entry, context.config)),
   ];
 }
@@ -31,12 +29,6 @@ function componentHealthFindings(component: AnalysisContext["components"][number
     component.aliases > 6 ? healthFinding(`qml.alias_leakage.${component.file}`, "qml.alias_leakage", component, `${component.name} exposes ${component.aliases} aliases`, "Prefer semantic properties/signals over aliasing internal child implementation details.") : null,
     component.bindings > 90 ? healthFinding(`qml.binding_pressure.${component.file}`, "qml.binding_pressure", component, `${component.name} has ${component.bindings} parsed bindings`, "Extract subcomponents and move complex derived state to named readonly properties or helpers.") : null,
   ].filter(isFinding);
-}
-
-function sideEffectBindingFinding(binding: AnalysisContext["bindings"][number]): Finding[] {
-  return /\b(?:exec|spawn|openUrlExternally)\s*\(/.test(stripCommentsAndStrings(binding.expression))
-    ? [{ id: `qml.side_effect_binding.${binding.file}.${binding.line}`, kind: "qml.side_effect_in_binding", severity: "high", file: binding.file, line: binding.line, message: `${binding.property} binding appears to call a side-effect API`, actions: ["Move side effects out of bindings and into explicit handlers or service modules."] }]
-    : [];
 }
 
 function processPlacementFinding(entry: AnalysisContext["qmlDocuments"][number], config: Config): Finding[] {

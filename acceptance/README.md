@@ -8,7 +8,7 @@ Each passed row must cite commands, actual results, source revision, bounded sco
 
 ## Current closure result
 
-Steps 1–5 are implementation iterations, not completed acceptance. Five criteria have scoped evidence; **20/25 remain unresolved**. `trust.md` records subsequent consumer-backed Trust closure; `step-5.md` retains the earlier native workflows, investigated failures and platform gaps. Operational recovery/limits are in `../contracts/operational-scope.md`.
+Steps 1–5 are implementation iterations, not completed acceptance. Six criteria have scoped evidence; **19/25 remain unresolved**. `trust.md` records subsequent consumer-backed Trust closure; `step-5.md` retains the earlier native workflows, investigated failures and platform gaps. Operational recovery/limits are in `../contracts/operational-scope.md`.
 
 Additional checks:
 

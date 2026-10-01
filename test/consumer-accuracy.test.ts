@@ -114,8 +114,9 @@ test("QML casts preserve public members read through local variables", (t) => {
 import Demo.Ui as Ui
 Item {
   Ui.Action {}
+  property var resource: null
   function help() {
-    const shortcut = resources[0] as Ui.Action;
+    const shortcut = resource as Ui.Action;
     return shortcut.keys;
   }
 }`,

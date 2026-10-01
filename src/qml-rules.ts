@@ -3,9 +3,11 @@ type AnalysisContext = Pick<FullAnalysisContext, "config" | "sources" | "qmlDocu
 import { lineNumberAt, stripCommentsAndStrings } from "./metrics.js";
 import { createIdResolver, type IdResolver } from "./qml-scope.js";
 import { analyzeAssignments } from "./expression-analysis.js";
+import { bindingEffectEvaluation, isPureBuiltinCall } from "./binding-effects.js";
 import { baseTypeName, isObjectValuedExpression, isTestFile } from "./qml-model.js";
 import { qmlHealthFindings } from "./qml-health-measure.js";
-import { inheritedSignals, typeIsA } from "./type-evidence.js";
+import { inheritedSignals, signalHierarchyComplete, typeIsA } from "./type-evidence.js";
+import { expressionReason, genericRuleReason, GENERIC_RULE_REQUIREMENTS, resolutionReason } from "./rule-prerequisites.js";
 import type { Finding, RuleCoverageRecord } from "./types.js";
 
 const EXTERNAL_API_PREFIXES = new Set(["anchors", "Layout", "Accessible", "Keys", "Component"]);
@@ -24,7 +26,7 @@ const RULE_GROUPS: RuleGroup[] = [
   { rules: ["qml.process_command_construction"], run: perFile(processCommandFindings) },
   { rules: ["qml.function_missing_types"], run: perFile(functionConventionFindings) },
   { rules: ["qml.performance_complex_delegate_js", "qml.performance.image_without_source_size", "qml.performance.loader_without_active"], run: perFile(performanceSmellFindings) },
-  { rules: ["qml.api_surface", "qml.alias_leakage", "qml.binding_pressure", "qml.side_effect_in_binding", "quickshell.process_placement"], run: qmlHealthFindings },
+  { rules: ["qml.api_surface", "qml.alias_leakage", "qml.binding_pressure", "quickshell.process_placement"], run: qmlHealthFindings },
 ];
 
 export function evaluateQmlRules(context: AnalysisContext): { findings: Finding[]; coverage: RuleCoverageRecord[] } {
@@ -39,17 +41,25 @@ export function evaluateQmlRules(context: AnalysisContext): { findings: Finding[
   const coverage: RuleCoverageRecord[] = [];
   for (const group of RULE_GROUPS) {
     const projectReason = group.needsWholeProject && cleanFiles.size !== context.qmlDocuments.length ? "project_parser_diagnostic" : undefined;
-    const enabled = group.rules.filter((rule) => context.config.rules[rule]?.enabled !== false);
-    if (!projectReason && enabled.length) findings.push(...group.run(cleanContext).filter((finding) => enabled.includes(finding.kind)));
+    const allowed = new Map<string, Set<string>>();
     for (const rule of group.rules) {
-      const targets = context.qmlDocuments.map((entry) => evaluationTarget(entry.file, undefined, context.config.rules[rule]?.enabled === false ? "rule_disabled" : projectReason ?? (entry.document.diagnostics.length ? "parser_diagnostic" : undefined)));
-      coverage.push(coverageRecord(rule, "file", targets, ["File-level evaluation by the internal QML parser; JavaScript and dynamic behavior are not fully resolved."]));
+      const targets = context.qmlDocuments.map((entry) => evaluationTarget(entry.file, undefined,
+        context.config.rules[rule]?.enabled === false ? "rule_disabled" : projectReason ?? genericRuleReason(context, entry, rule)));
+      allowed.set(rule, new Set(targets.filter((target) => target.status === "evaluated").map((target) => target.file)));
+      coverage.push(coverageRecord(rule, "file", targets, [
+        `Declared prerequisites: QML syntax, ${(GENERIC_RULE_REQUIREMENTS[rule] ?? []).join(", ") || "declaration/count pattern only"}.`,
+        "Evaluation establishes only this rule's declared static pattern, not application behavior or exhaustive Qt semantics.",
+      ]));
+    }
+    if ([...allowed.values()].some((files) => files.size)) {
+      findings.push(...group.run(cleanContext).filter((finding) => finding.file && allowed.get(finding.kind)?.has(finding.file)));
     }
   }
   evaluatePublicApi(context, findings, coverage);
   evaluateFileRule(context, "qml.binding_loss", bindingLossEvaluation, findings, coverage);
   evaluateFileRule(context, "qml.binding_cycle", bindingCycleEvaluation, findings, coverage);
   evaluateConnections(context, findings, coverage);
+  evaluateFileRule(context, "qml.side_effect_in_binding", bindingEffectEvaluation, findings, coverage);
   return { findings, coverage };
 }
 
@@ -89,14 +99,25 @@ function connectionSkipReason(connection: CycleObject, ids: IdResolver, rule: st
   if (!target) return "dynamic_target";
   const object = ids(connection.objectId, target);
   if (!object) return isLikelyLocalId(target) ? rule === "qml.connections.unknown_target" ? undefined : "unknown_target" : "external_or_singleton_target";
-  if (rule === "qml.connection_signal_mismatch" && !connectionTargetSignals(context, file, object).size) return "missing_signal_evidence";
-  return undefined;
+  if (rule === "qml.connection_signal_mismatch") {
+    if (context.typeEvidence.status !== "complete") return "incomplete_type_metadata";
+    const signals = connectionTargetSignals(context, file, object);
+    if (!signals.size) return "missing_signal_evidence";
+    const unknownHandler = connectionHandlerEntries(connection).some((handler) => {
+      const signal = signalNameForHandler(handler.name);
+      return signal && !signals.has(signal);
+    });
+    // A partial list proves a known handler exists, never that another does not.
+    const targetFile = resolvedTargetForObject(context, file, object.typeName, object.line);
+    if (unknownHandler && !signalHierarchyComplete(context.typeEvidence, targetFile ? pathTypeName(targetFile) : object.typeName)) return "incomplete_signal_hierarchy";
+  }
+  return resolutionReason(context, file);
 }
 
 function evaluateFileRule(context: AnalysisContext, rule: string, evaluate: (entry: DocumentEntry) => { findings: Finding[]; reason?: string }, findings: Finding[], coverage: RuleCoverageRecord[]): void {
   const targets: EvaluationTarget[] = [];
   for (const entry of context.qmlDocuments) {
-    const reason = context.config.rules[rule]?.enabled === false ? "rule_disabled" : entry.document.diagnostics.length ? "parser_diagnostic" : undefined;
+    const reason = context.config.rules[rule]?.enabled === false ? "rule_disabled" : entry.document.diagnostics.length ? "parser_diagnostic" : resolutionReason(context, entry.file);
     const result = reason ? { findings: [], reason } : evaluate(entry);
     targets.push(evaluationTarget(entry.file, undefined, result.reason));
     if (!result.reason) findings.push(...result.findings);
@@ -114,7 +135,16 @@ function bindingLossEvaluation({ file, document }: DocumentEntry): { findings: F
       for (const assignment of analysis.assignments) {
         if (EXTERNAL_API_PREFIXES.has(assignment.owner ?? assignment.property)) continue;
         const target = assignment.owner ? ids(object.objectId, assignment.owner) : object;
-        if (!target?.bindings.some((binding) => !isHandlerPath(binding.propertyPath) && binding.propertyPath === assignment.property && isDynamicBinding(binding.expression))) continue;
+        if (!target) return { findings: [], reason: "unresolved_assignment_owner" };
+        const binding = target.bindings.find((item) => !isHandlerPath(item.propertyPath) && item.propertyPath === assignment.property);
+        if (!binding) {
+          if (!target.properties.some((property) => property.name === assignment.property)) return { findings: [], reason: "unresolved_assignment_member" };
+          continue;
+        }
+        const bindingAnalysis = analyzeAssignments(binding.expression);
+        if (bindingAnalysis.reason) return { findings: [], reason: bindingAnalysis.reason };
+        if (bindingAnalysis.unresolvedCalls || bindingAnalysis.calls?.some((call) => !isPureBuiltinCall(call, document.imports))) return { findings: [], reason: "indirect_binding_dependency" };
+        if (!isDynamicBinding(binding.expression)) continue;
         const line = executable.line + assignment.line - 1;
         findings.push(finding(`qml.binding_loss.${file}.${line}.${assignment.owner ?? "self"}.${assignment.property}`, "qml.binding_loss", "high", file, line, `Imperative assignment to '${assignment.owner ? `${assignment.owner}.` : ""}${assignment.property}' can break its declarative binding`, "Move the mutable value into a separate state property or replace the binding intentionally with Qt.binding()."));
       }
@@ -132,7 +162,12 @@ function bindingCycleEvaluation({ file, document }: DocumentEntry): { findings: 
   for (const binding of bindings) {
     const analysis = analyzeAssignments(binding.expression);
     if (analysis.reason) return { findings: [], reason: analysis.reason };
-    edges.set(bindingNodeKey(binding.ownerObjectId, binding.propertyPath), bindingTargets(binding, objectById, resolveId, analysis.references ?? []));
+    if (analysis.calls === undefined) return { findings: [], reason: "javascript_parser_unavailable" };
+    if (analysis.unresolvedCalls || analysis.calls.some((call) => !isPureBuiltinCall(call, document.imports))) return { findings: [], reason: "indirect_binding_dependency" };
+    if (analysis.references?.some((reference) => document.imports.some((item) => item.alias !== null && item.alias === reference.owner))) return { findings: [], reason: "external_binding_dependency" };
+    const dependencies = bindingTargets(binding, objectById, resolveId, analysis.references ?? []);
+    if (dependencies.reason) return { findings: [], reason: dependencies.reason };
+    edges.set(bindingNodeKey(binding.ownerObjectId, binding.propertyPath), dependencies.targets);
   }
   return { findings: stronglyConnectedComponents(edges).filter((nodes) => nodes.length > 1 || Boolean(nodes[0] && edges.get(nodes[0])?.has(nodes[0]))).map((nodes) => bindingCycleFinding(file, nodes, lineByNode)) };
 }
@@ -140,14 +175,21 @@ function bindingCycleEvaluation({ file, document }: DocumentEntry): { findings: 
 type CycleBinding = AnalysisContext["qmlDocuments"][number]["document"]["bindings"][number];
 type CycleObject = AnalysisContext["qmlDocuments"][number]["document"]["objects"][number];
 
-function bindingTargets(binding: CycleBinding, objectById: Map<number, CycleObject>, resolveId: IdResolver, references: Array<{ owner: string | null; property: string }>): Set<string> {
-  return new Set(references.flatMap((reference) => {
-    // QML ids are object references, including when an injected property's name
-    // matches an outer id (for example, controller: controller).
-    if (!reference.owner && resolveId(binding.ownerObjectId, reference.property)) return [];
+function bindingTargets(binding: CycleBinding, objectById: Map<number, CycleObject>, resolveId: IdResolver, references: Array<{ owner: string | null; property: string }>): { targets: Set<string>; reason?: string } {
+  const targets = new Set<string>();
+  for (const reference of references) {
+    // QML ids used as values are object identity, not property dependencies.
+    if (!reference.owner && resolveId(binding.ownerObjectId, reference.property)) continue;
+    if (NON_REACTIVE_GLOBALS.has(reference.owner ?? reference.property) || isPureBuiltinCall(reference)) continue;
     const target = !reference.owner || reference.owner === "this" ? objectById.get(binding.ownerObjectId) : resolveId(binding.ownerObjectId, reference.owner);
-    return target?.bindings.some((candidate) => candidate.propertyPath === reference.property && !isHandlerPath(candidate.propertyPath)) ? [bindingNodeKey(target.objectId, reference.property)] : [];
-  }));
+    if (!target) return { targets, reason: "unresolved_binding_owner" };
+    if (target.bindings.some((candidate) => candidate.propertyPath === reference.property && !isHandlerPath(candidate.propertyPath))) {
+      targets.add(bindingNodeKey(target.objectId, reference.property));
+    } else if (!target.properties.some((property) => property.name === reference.property)) {
+      return { targets, reason: "unresolved_binding_member" };
+    }
+  }
+  return { targets };
 }
 
 function bindingCycleFinding(file: string, nodes: string[], lineByNode: Map<string, number>): Finding {
@@ -246,22 +288,19 @@ function hasContradictoryGeometry(names: Set<string>): boolean {
 // In particular, the optional-parser fallback must not turn unknown reads into dead API.
 function evaluatePublicApi(context: AnalysisContext, findings: Finding[], coverage: RuleCoverageRecord[]): void {
   const reasons = new Map<string, string>();
-  const projectReason = context.qmlDocuments.some((entry) => entry.document.diagnostics.length) ? "project_parser_diagnostic" : undefined;
+  const projectReason = context.qmlDocuments.some((entry) => entry.document.diagnostics.length) ? "project_parser_diagnostic" : resolutionReason(context);
   for (const entry of context.qmlDocuments) {
     const reason = publicApiAnalysisReason(entry);
     if (!reason) continue;
-    reasons.set(entry.file, reason);
-    // Unresolved reads in a derived type may use any of its inherited members.
-    const visited = new Set([entry.file]);
-    let root = entry.document.root;
-    let file = entry.file;
-    while (root) {
-      const base = resolvedTargetForObject(context, file, root.typeName, root.line);
-      if (!base || visited.has(base)) break;
-      visited.add(base);
-      reasons.set(base, reason);
-      file = base;
-      root = context.qmlDocuments.find((candidate) => candidate.file === base)?.document.root ?? null;
+    // Unknown reads in consumers can reach inherited or instantiated APIs.
+    const pending = [entry.file];
+    const visited = new Set<string>();
+    while (pending.length) {
+      const file = pending.pop()!;
+      if (visited.has(file)) continue;
+      visited.add(file);
+      reasons.set(file, reason);
+      pending.push(...context.resolution.componentUses.flatMap((use) => use.from === file && use.target ? [use.target] : []));
     }
   }
   const rules = ["cleanup.unused_public_property", "cleanup.unused_public_signal"];
@@ -274,14 +313,23 @@ function evaluatePublicApi(context: AnalysisContext, findings: Finding[], covera
 }
 
 function publicApiAnalysisReason(entry: DocumentEntry): string | undefined {
+  const syntaxReason = expressionReason(entry);
+  if (syntaxReason) return syntaxReason;
+  const ids = createIdResolver(entry.document);
   for (const object of entry.document.objects) {
     const expressions = [
       ...object.bindings.filter((binding) => !isHandlerPath(binding.propertyPath) && !isObjectValuedExpression(binding.expression)).map((binding) => ({ body: binding.expression, parameters: [] as string[] })),
       ...[...object.functions, ...object.handlers].map((fn) => ({ body: fn.body, parameters: fn.parameters.map((parameter) => parameter.name) })),
     ];
     for (const expression of expressions) {
-      const reason = analyzeAssignments(expression.body, expression.parameters).reason;
-      if (reason) return reason;
+      const analysis = analyzeAssignments(expression.body, expression.parameters);
+      if (!analysis.calls) return "javascript_parser_unavailable";
+      if (analysis.unresolvedCalls) return "unresolved_call_target";
+      for (const call of analysis.calls) {
+        if (isPureBuiltinCall(call, entry.document.imports)) continue;
+        const owner = call.owner ? ids(object.objectId, call.owner) : object;
+        if (!owner || ![...owner.functions, ...owner.signals].some((member) => member.name === call.property)) return "unresolved_call_target";
+      }
     }
   }
   return undefined;

@@ -1,0 +1,45 @@
+{
+  "criterion": "T3",
+  "source_tree": "2f3d62998d8c2e338f253931a008dd5ad90c6026",
+  "test_tree": "7c873df894c5d33dff302e3fb3866aebe4eb2837",
+  "native_profile": {"node": "24.15.0", "qt": "6.11.0", "tests": 119, "failures": 0, "skipped": 0, "acceptance_tests": 6, "oracle": "pass", "integration": "pass", "installed_package_cmake": "pass"},
+  "shelllist": {
+    "revision": "1bd52a383b13bab34ccbbe426e2695bae5e49bbd plus preserved wifi/NetworkListRow.qml working-tree edit",
+    "source_hash": "11b6a3ef598878fc9e0a9e6cda7db6a04a87e467277e22ad5b798c85620a0535",
+    "static": {
+      "runs": 3,
+      "artifacts_per_run": 26,
+      "normalized_sha256": "30a5153ac8d7e948699a1ef1a660208b00ede9788d59770216c9846a96ccc379",
+      "semantic_findings": 397,
+      "rule_evaluations_skipped": 2731,
+      "approximate_function_metrics": 0,
+      "approximate_binding_metrics": 0,
+      "confidence_complete": false,
+      "audit_verdict": "incomplete",
+      "audit_exit": 0,
+      "raw_captures": "/tmp/qml-trust-t3-final"
+    },
+    "native": {
+      "command": "nix develop --offline --no-write-lock-file ../shelllist --command node /home/laufan/Projects/qmlqualitylens/dist/bin/qmlqualitylens.js audit --config /tmp/qml-trust-t3-native-final/config.json --incomplete fail --format json",
+      "qt": "6.11.1",
+      "audit_verdict": "fail",
+      "audit_exit": 1,
+      "active_findings": 803,
+      "warnings": 81,
+      "review": 722,
+      "incomplete_reasons": ["192 required side-effect rule targets were unresolved", "qmlformat: one execution error"],
+      "qmllint_files_expected": 387,
+      "qmllint_files_reported": 387,
+      "qmllint_findings": 0,
+      "parser_oracle_files": 333,
+      "parser_oracle_status": "pass",
+      "test_executions": 300,
+      "test_failures": 0,
+      "runtime_smoke_status": "complete",
+      "qmlformat_drift": 80,
+      "qmlformat_errors": 1,
+      "raw_captures": "/tmp/qml-trust-t3-native-final"
+    }
+  },
+  "interpretation": "Trust pass is honest scoped evidence and abstention, not a clean Shelllist verdict or a claim to resolve arbitrary QML/JS/C++ behavior. More abstentions and fewer findings are not measured accuracy gains."
+}

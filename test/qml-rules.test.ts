@@ -72,10 +72,16 @@ Item {
 }
 `,
   });
-  const mismatches = context.findings.filter((finding) => finding.kind === "qml.connection_signal_mismatch");
+  // Known inherited/local handlers remain recognized, but an unknown handler
+  // cannot be disproved by the intentionally incomplete builtin role database.
+  assert.equal(context.findings.filter((finding) => finding.kind === "qml.connection_signal_mismatch").length, 0);
+  assert.equal(context.ruleCoverage.find((rule) => rule.rule === "qml.connection_signal_mismatch")?.skip_reasons.incomplete_signal_hierarchy, 1);
+  context.config.tools.qmllintQmltypes = [path.resolve("test/fixtures/oracle/qmllint/signal-contract.qmltypes")];
+  const resolved = createAnalysisContext(context.config);
+  const mismatches = resolved.findings.filter((finding) => finding.kind === "qml.connection_signal_mismatch");
   assert.equal(mismatches.length, 1);
   assert.match(mismatches[0]?.message ?? "", /onMissing/);
-  assert.equal(context.ruleCoverage.find((rule) => rule.rule === "qml.connection_signal_mismatch")?.evaluated, 1);
+  assert.equal(resolved.ruleCoverage.find((rule) => rule.rule === "qml.connection_signal_mismatch")?.evaluated, 1);
 });
 
 test("Shelllist-style object injection and literal mutable state do not imply binding failures", () => {

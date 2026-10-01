@@ -15,7 +15,7 @@ function fixture(raw: Record<string, unknown> = {}) {
   fs.writeFileSync(path.join(root, "Main.qml"), `import QtQuick
 Item {
   property var answer: 42
-  property string result: exec("command")
+  property bool result: Qt.openUrlExternally("https://example.com")
   Component.onCompleted: Qt.openUrlExternally("https://example.com")
   Image { id: unusedImage; source: "photo.jpg" }
 }

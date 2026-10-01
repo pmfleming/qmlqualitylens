@@ -13,6 +13,7 @@ type QmlTypeRecord = {
   methods: string[];
   source: "builtin" | "project" | "qmltypes";
   source_file?: string;
+  ambiguous?: boolean;
 };
 
 export type TypeEvidence = {
@@ -63,7 +64,11 @@ const CPP_QML_NAMES: Record<string, string> = {
 
 export function buildTypeEvidence(config: Config, documents: Array<{ file: string; document: QmlDocument }>): TypeEvidence {
   const types = new Map<string, QmlTypeRecord>();
-  const sources: TypeEvidence["sources"] = [{ kind: "builtin", status: "complete" }, { kind: "project", status: "complete" }];
+  const projectIncomplete = documents.some((entry) => entry.document.diagnostics.length);
+  const sources: TypeEvidence["sources"] = [{ kind: "builtin", status: "complete" }, {
+    kind: "project", status: projectIncomplete ? "invalid" : "complete",
+    ...(projectIncomplete ? { reason: "Project parser diagnostics prevent complete type declarations." } : {}),
+  }];
   for (const [name, parent] of Object.entries(BUILTIN_PARENTS)) addType(types, { name, parent, properties: {}, signals: [], methods: [], source: "builtin" });
   for (const { file, document } of documents) addProjectType(types, file, document);
 
@@ -87,6 +92,9 @@ export function buildTypeEvidence(config: Config, documents: Array<{ file: strin
     addQmltypes(types, relative, parsed);
     sources.push({ kind: "qmltypes", file: relative, status: "complete" });
   }
+  for (const record of types.values()) {
+    if (record.ambiguous) sources.push({ kind: "project", status: "invalid", reason: `Ambiguous unqualified type metadata: ${record.name}.` });
+  }
   const incomplete = sources.some((source) => source.status !== "complete");
   return { status: incomplete ? "partial" : "complete", qt_version: null, sources, types, missing_sources: missingSources };
 }
@@ -103,6 +111,21 @@ export function typeIsA(evidence: TypeEvidence, typeName: string, expected: stri
   return false;
 }
 
+export function signalHierarchyComplete(evidence: TypeEvidence, typeName: string): boolean {
+  if (evidence.status !== "complete") return false;
+  let current = canonicalType(typeName);
+  const visited = new Set<string>();
+  while (current) {
+    if (visited.has(current)) return false;
+    visited.add(current);
+    const record = evidence.types.get(current);
+    // Builtins describe roles, not an exhaustive Qt property/signal API.
+    if (!record || record.ambiguous || record.source === "builtin") return false;
+    current = canonicalType(record.parent ?? "");
+  }
+  return true;
+}
+
 export function inheritedSignals(evidence: TypeEvidence, typeName: string): Set<string> {
   const result = new Set<string>();
   let current = canonicalType(typeName);
@@ -110,6 +133,7 @@ export function inheritedSignals(evidence: TypeEvidence, typeName: string): Set<
   while (current && !visited.has(current)) {
     visited.add(current);
     const record = evidence.types.get(current);
+    if (record?.ambiguous) break;
     for (const signal of record?.signals ?? []) result.add(signal);
     for (const property of Object.keys(record?.properties ?? {})) result.add(`${property}Changed`);
     current = canonicalType(record?.parent ?? "");
@@ -185,6 +209,7 @@ function addType(types: Map<string, QmlTypeRecord>, record: QmlTypeRecord): void
     properties: { ...previous.properties, ...record.properties },
     signals: [...new Set([...previous.signals, ...record.signals])],
     methods: [...new Set([...previous.methods, ...record.methods])],
+    ...(previous.ambiguous || (previous.source === "project" && record.source === "project" && previous.source_file !== record.source_file) ? { ambiguous: true } : {}),
   } : { ...record, name });
 }
 

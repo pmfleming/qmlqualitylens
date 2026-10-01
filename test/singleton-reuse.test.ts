@@ -40,7 +40,8 @@ Item {
   assert.equal(context.components.find((component) => component.file === "Main.qml")?.fanOut, 2);
   assert.ok(context.resolution.reachableFiles.has("ui/Drawing.qml"));
   const unused = context.findings.filter((finding) => finding.file === "ui/Drawing.qml" && finding.kind === "cleanup.unused_public_property");
-  assert.equal(unused.length, 1);
-  assert.match(unused[0].message, /'unused'/);
+  assert.equal(unused.length, 0, "unresolved qualified calls in consumers cannot certify an unused singleton member");
+  const coverage = context.ruleCoverage.find((record) => record.rule === "cleanup.unused_public_property");
+  assert.equal(coverage?.targets?.find((target) => target.file === "ui/Drawing.qml")?.status, "skipped");
   assert.equal(context.bindings.find((binding) => binding.property === "optional")?.complexity, 2);
 });

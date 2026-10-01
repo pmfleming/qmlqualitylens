@@ -3,7 +3,8 @@ import { javascriptSyntax } from "./javascript-syntax.js";
 import { lexQml } from "./qml-lexer.js";
 
 type AssignmentTarget = { owner: string | null; property: string; line: number };
-export type AssignmentAnalysis = { assignments: AssignmentTarget[]; references?: Array<Omit<AssignmentTarget, "line">>; reason?: string };
+type CallTarget = AssignmentTarget & { primitiveArguments: boolean };
+export type AssignmentAnalysis = { assignments: AssignmentTarget[]; references?: Array<Omit<AssignmentTarget, "line">>; calls?: CallTarget[]; unresolvedCalls?: boolean; reason?: string };
 type Node = Parser.SyntaxNode;
 type Scope = { names: Set<string>; parent?: Scope };
 
@@ -33,6 +34,8 @@ function analyzeAssignmentsUncached(expression: string, parameters: string[], us
     const value = syntax.node;
     const assignments: AssignmentTarget[] = [];
     const references: Array<Omit<AssignmentTarget, "line">> = [];
+    const calls: CallTarget[] = [];
+    let unresolvedCalls = false;
     let reason: string | undefined;
     const visit = (node: Node, parent: Scope, dynamicThis: boolean): void => {
       const scope = isScope(node) ? scopeFor(node, parent) : parent;
@@ -48,6 +51,14 @@ function analyzeAssignmentsUncached(expression: string, parameters: string[], us
           }
         }
       }
+      if (isFunction(node)) unresolvedCalls = true; // Bodies/closures require call-graph execution semantics.
+      if (node.type === "call_expression" || node.type === "new_expression") {
+        const callable = node.childForFieldName("function") ?? node.childForFieldName("constructor");
+        const target = callable ? assignmentTarget(callable) : null;
+        if (!target || isLocal(target.owner ?? target.property, scope)) unresolvedCalls = true;
+        else calls.push({ ...target, line: node.startPosition.row + 1,
+          primitiveArguments: (node.childForFieldName("arguments")?.namedChildren ?? []).every(primitiveExpression) });
+      }
       if (node.type === "subscript_expression") reason ??= "dynamic_property_access";
       const read = referenceTarget(node);
       if (read && !isLocal(read.owner ?? read.property, scope) && !(read.owner === "this" && nestedThis)) references.push(read);
@@ -56,8 +67,13 @@ function analyzeAssignmentsUncached(expression: string, parameters: string[], us
     const root: Scope = { names: new Set(parameters) };
     collectVarNames(value, root.names, true);
     visit(value, root, false);
-    return { assignments, references, ...(reason ? { reason } : {}) };
+    return { assignments, references, calls, unresolvedCalls, ...(reason ? { reason } : {}) };
   } catch { return { assignments: [], reason: "unsupported_javascript" }; }
+}
+
+function primitiveExpression(node: Node): boolean {
+  if (["number", "string", "true", "false", "null"].includes(node.type)) return true;
+  return ["unary_expression", "binary_expression", "parenthesized_expression"].includes(node.type) && node.namedChildren.every(primitiveExpression);
 }
 
 function isFunction(node: Node): boolean {

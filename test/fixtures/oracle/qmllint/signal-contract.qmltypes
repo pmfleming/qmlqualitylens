@@ -1,0 +1,44 @@
+// Explicit signal contract for the regression fixture's QObject/Item base types.
+// Names are transcribed from Qt 6.11.1 tooling metadata. This fixture is not a
+// production Qt type database; consumers must supply their own matching metadata.
+import QtQuick.tooling 1.2
+Module {
+    Component {
+        name: "QtObject"
+        Signal { name: "objectNameChanged" }
+    }
+    Component {
+        name: "Item"
+        prototype: "QtObject"
+        Signal { name: "childrenRectChanged" }
+        Signal { name: "baselineOffsetChanged" }
+        Signal { name: "stateChanged" }
+        Signal { name: "focusChanged" }
+        Signal { name: "activeFocusChanged" }
+        Signal { name: "focusPolicyChanged" }
+        Signal { name: "activeFocusOnTabChanged" }
+        Signal { name: "parentChanged" }
+        Signal { name: "transformOriginChanged" }
+        Signal { name: "smoothChanged" }
+        Signal { name: "antialiasingChanged" }
+        Signal { name: "clipChanged" }
+        Signal { name: "windowChanged" }
+        Signal { name: "childrenChanged" }
+        Signal { name: "opacityChanged" }
+        Signal { name: "enabledChanged" }
+        Signal { name: "visibleChanged" }
+        Signal { name: "visibleChildrenChanged" }
+        Signal { name: "rotationChanged" }
+        Signal { name: "scaleChanged" }
+        Signal { name: "xChanged" }
+        Signal { name: "yChanged" }
+        Signal { name: "widthChanged" }
+        Signal { name: "heightChanged" }
+        Signal { name: "zChanged" }
+        Signal { name: "implicitWidthChanged" }
+        Signal { name: "implicitHeightChanged" }
+        Signal { name: "containmentMaskChanged" }
+        Signal { name: "paletteChanged" }
+        Signal { name: "paletteCreated" }
+    }
+}

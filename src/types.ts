@@ -128,6 +128,7 @@ export type BindingRecord = {
   line: number;
   expression: string;
   complexity: number;
+  complexityEvidence?: { backend: string; complete: boolean };
   dependencyCount: number;
 };
 
