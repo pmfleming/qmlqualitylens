@@ -56,7 +56,12 @@ export function artifactFreshness(context: AnalysisContext, artifact: unknown): 
   if (recorded.source_hash !== context.run.source_hash || recorded.config_hash !== context.run.config_hash) return "Artifact source/configuration hashes do not match this analysis.";
   if (recorded.lens_version !== LENS_VERSION) return "Artifact was produced by a different analyzer version.";
   const versions = recorded.tool_versions;
-  if (!isRecord(versions) || Object.entries(context.run.tool_versions).some(([tool, version]) => versions[tool] !== version)) return "Artifact tool versions do not match this analysis run.";
+  const unrequested = isRecord(artifact.confidence) && Array.isArray(artifact.confidence.not_requested) ? artifact.confidence.not_requested : [];
+  if (!isRecord(versions) || Object.entries(context.run.tool_versions).some(([tool, version]) => {
+    // A source-only artifact remains valid when a later task first requests Qt.
+    if (tool === "qmllint" && artifact.task_id !== "quality.qmllint" && unrequested.includes("qmllint")) return false;
+    return versions[tool] !== version;
+  })) return "Artifact tool versions do not match this analysis run.";
   if (recorded.evidence_hash !== evidenceHash(context.config, artifact.task_id)) return "Imported evidence changed after this artifact was produced.";
   return null;
 }

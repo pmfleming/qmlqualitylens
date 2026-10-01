@@ -1,5 +1,7 @@
 # QML validation map
 
+Latest clean pinned Linux profile: 112 tests and live Qt 6.11 oracle/integration/installed CMake package passed. Reproduce with `nix develop --offline --command bash -c 'npm ci && npm test && npm run oracle:qmllint && npm run integration:qt && npm run package:smoke -- --cmake && python3 acceptance/profile.py'` after provisioning the pinned closures. See `step-5.md` and `criteria.json`; other version profiles remain unvalidated.
+
 Baseline revision: 31ae9e6. Prior suites do not automatically discharge broad criteria.
 
 | Criteria | Implementation / regression starting points | Reproduce |
@@ -10,4 +12,4 @@ Baseline revision: 31ae9e6. Prior suites do not automatically discharge broad cr
 | O1–O7 | src/analyzer.ts, src/run-evidence.ts, src/tool-execution.ts; test/lazy-analysis.test.ts, test/tool-execution.test.ts, test/evidence-freshness.test.ts, test/clone-detector.test.ts | npm test; npm run benchmark:clones |
 | T4 | scripts/integration-qt.mjs, scripts/package-smoke.mjs, test/oracle-qmllint.oracle.ts | npm run oracle:qmllint; npm run integration:qt; npm run package:smoke -- --cmake |
 
-Qt campaigns require a working Qt/CMake toolchain. Missing optional JS parsers must abstain rather than claim semantic negatives. QML JS-module/C++/dynamic boundaries need a bounded support matrix; configured qmllint and type resolution are currently eager.
+Qt campaigns require a working Qt/CMake toolchain. Missing optional JS parsers must abstain rather than claim semantic negatives. QML JS-module/C++/dynamic boundaries need a bounded support matrix; qmllint is now lazy/memoized, while source parsing and type resolution remain eager.

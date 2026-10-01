@@ -1,5 +1,13 @@
 # Cross-lens upgrade execution
 
+## Latest: acceptance closure steps 1–5
+
+Clean pinned Linux Node 24.15 / Qt 6.11 validation passed: 112 tests, live oracle, Qt/CMake integration, installed-package CMake smoke and three resource-profile repetitions. Configured qmllint work is now lazy and memoized without falsifying earlier artifact freshness.
+
+Acceptance is **not complete**: 4/25 required criteria are evidenced, 21 remain unresolved. No push is permitted yet. See the repository ledger `acceptance/criteria.json`, `acceptance/step-5.md`, and packaged operational limits in `contracts/operational-scope.md`. Independent calibration/intent review and broader semantic, operational and version-profile obligations remain open.
+
+## Historical implementation record
+
 The review's phases 0–4 are executed as phases 1–5. Each phase has its own commit. These are implementation iterations; full plan acceptance remains open (see `contracts/upgrade-validation.md`).
 
 ## Phase 1 — Trust repairs

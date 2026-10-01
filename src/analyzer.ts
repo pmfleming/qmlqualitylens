@@ -36,7 +36,7 @@ import type {
 
 export type AnalysisContext = {
   config: Config;
-  evaluatedAnalyses: ReadonlySet<"clones" | "rules">;
+  evaluatedAnalyses: ReadonlySet<"clones" | "rules" | "qmllint">;
   buildStatus?: { status: "skipped" | "pass" | "warn" | "failed" | "incomplete"; reason: string | null };
   run: AnalysisRun;
   sources: SourceFile[];
@@ -71,10 +71,14 @@ export function createAnalysisContext(config: Config): AnalysisContext {
   const functions = files.flatMap((file) => file.functions);
   const bindings = files.flatMap((file) => file.bindings);
   const parserDiagnostics = files.flatMap((file) => file.parserDiagnostics);
-  const qmllint = loadQmllintResult(config, sources.filter((source) => source.kind === "qml" || source.kind === "js").map((source) => source.relativePath));
-  const qmllintFindings = qmllint.findings;
-  const run = createAnalysisRun(config, sources, qmllint.version);
-  const evaluatedAnalyses = new Set<"clones" | "rules">();
+  const run = createAnalysisRun(config, sources, null);
+  const evaluatedAnalyses = new Set<"clones" | "rules" | "qmllint">();
+  const qmllint = once(() => {
+    const result = loadQmllintResult(config, sources.filter((source) => source.kind === "qml" || source.kind === "js").map((source) => source.relativePath));
+    run.tool_versions.qmllint = result.version;
+    evaluatedAnalyses.add("qmllint");
+    return result;
+  });
   const clones = once(() => {
     const result = analyzeClones(sources, config.thresholds.cloneWindow);
     evaluatedAnalyses.add("clones");
@@ -89,7 +93,9 @@ export function createAnalysisContext(config: Config): AnalysisContext {
   const scores = once(() => scoreProject(config, files, components, functions, context.clones, context.findings));
   const context: AnalysisContext = {
     config, run, sources, qmlDocuments, resolution, typeEvidence, files, components, functions, bindings,
-    parserDiagnostics, qmllint, qmllintFindings, evaluatedAnalyses,
+    parserDiagnostics, evaluatedAnalyses,
+    get qmllint() { return qmllint(); },
+    get qmllintFindings() { return qmllint().findings; },
     get clones() { return clones().groups; },
     get cloneDetection() { return clones().coverage; },
     get ruleCoverage() { return evaluation().coverage; },

@@ -1,0 +1,578 @@
+{
+  "status": "passed",
+  "revision": "d8ed3b743a572299d4bb9ce27d5acfc327dadde2",
+  "platform": "Linux-6.18.39-x86_64-with-glibc2.42",
+  "budgets": {
+    "profile": "linux-x86_64, Node 24; clone fixtures 1000/2000/4000/8000 lines per file; first/repeat without context cache",
+    "command": [
+      "node",
+      "scripts/benchmark-clones.mjs"
+    ],
+    "repetitions": 3,
+    "records_per_repetition": 8,
+    "max_duration_ms": 2000,
+    "rss_field": "process_peak_rss_kib",
+    "max_peak_rss_kib": 262144,
+    "limitations": "Regression resource ceilings fixed before this campaign, not general runtime bounds. Build excluded; RSS cumulative within a process; OS caches may be warm. This is not a full semantic benchmark."
+  },
+  "samples": [
+    {
+      "repetition": 1,
+      "environment": {
+        "node": "v24.15.0",
+        "platform": "linux",
+        "scope": "same process; peak RSS cumulative; no analysis-context cache"
+      },
+      "records": [
+        {
+          "lines_per_file": 1000,
+          "run": "first",
+          "node": "v24.15.0",
+          "platform": "linux",
+          "duration_ms": 21,
+          "rss_bytes": 71307264,
+          "heap_used_bytes": 8707496,
+          "process_peak_rss_kib": 69636,
+          "scope": "same process; peak RSS cumulative; no analysis-context cache",
+          "groups": 1,
+          "status": "complete",
+          "limits": {
+            "keys": 50000,
+            "windows_per_key": 25,
+            "groups": 100
+          },
+          "omitted_windows": 0,
+          "omitted_groups": 0,
+          "expanded_windows": 1,
+          "skipped_covered_windows": 994
+        },
+        {
+          "lines_per_file": 1000,
+          "run": "repeat",
+          "node": "v24.15.0",
+          "platform": "linux",
+          "duration_ms": 9,
+          "rss_bytes": 75956224,
+          "heap_used_bytes": 7306424,
+          "process_peak_rss_kib": 74176,
+          "scope": "same process; peak RSS cumulative; no analysis-context cache",
+          "groups": 1,
+          "status": "complete",
+          "limits": {
+            "keys": 50000,
+            "windows_per_key": 25,
+            "groups": 100
+          },
+          "omitted_windows": 0,
+          "omitted_groups": 0,
+          "expanded_windows": 1,
+          "skipped_covered_windows": 994
+        },
+        {
+          "lines_per_file": 2000,
+          "run": "first",
+          "node": "v24.15.0",
+          "platform": "linux",
+          "duration_ms": 16,
+          "rss_bytes": 82137088,
+          "heap_used_bytes": 9294568,
+          "process_peak_rss_kib": 80212,
+          "scope": "same process; peak RSS cumulative; no analysis-context cache",
+          "groups": 1,
+          "status": "complete",
+          "limits": {
+            "keys": 50000,
+            "windows_per_key": 25,
+            "groups": 100
+          },
+          "omitted_windows": 0,
+          "omitted_groups": 0,
+          "expanded_windows": 1,
+          "skipped_covered_windows": 1994
+        },
+        {
+          "lines_per_file": 2000,
+          "run": "repeat",
+          "node": "v24.15.0",
+          "platform": "linux",
+          "duration_ms": 11,
+          "rss_bytes": 85647360,
+          "heap_used_bytes": 13586032,
+          "process_peak_rss_kib": 85716,
+          "scope": "same process; peak RSS cumulative; no analysis-context cache",
+          "groups": 1,
+          "status": "complete",
+          "limits": {
+            "keys": 50000,
+            "windows_per_key": 25,
+            "groups": 100
+          },
+          "omitted_windows": 0,
+          "omitted_groups": 0,
+          "expanded_windows": 1,
+          "skipped_covered_windows": 1994
+        },
+        {
+          "lines_per_file": 4000,
+          "run": "first",
+          "node": "v24.15.0",
+          "platform": "linux",
+          "duration_ms": 23,
+          "rss_bytes": 90165248,
+          "heap_used_bytes": 18803440,
+          "process_peak_rss_kib": 88052,
+          "scope": "same process; peak RSS cumulative; no analysis-context cache",
+          "groups": 1,
+          "status": "complete",
+          "limits": {
+            "keys": 50000,
+            "windows_per_key": 25,
+            "groups": 100
+          },
+          "omitted_windows": 0,
+          "omitted_groups": 0,
+          "expanded_windows": 1,
+          "skipped_covered_windows": 3994
+        },
+        {
+          "lines_per_file": 4000,
+          "run": "repeat",
+          "node": "v24.15.0",
+          "platform": "linux",
+          "duration_ms": 26,
+          "rss_bytes": 105500672,
+          "heap_used_bytes": 11609480,
+          "process_peak_rss_kib": 103028,
+          "scope": "same process; peak RSS cumulative; no analysis-context cache",
+          "groups": 1,
+          "status": "complete",
+          "limits": {
+            "keys": 50000,
+            "windows_per_key": 25,
+            "groups": 100
+          },
+          "omitted_windows": 0,
+          "omitted_groups": 0,
+          "expanded_windows": 1,
+          "skipped_covered_windows": 3994
+        },
+        {
+          "lines_per_file": 8000,
+          "run": "first",
+          "node": "v24.15.0",
+          "platform": "linux",
+          "duration_ms": 42,
+          "rss_bytes": 111009792,
+          "heap_used_bytes": 15895272,
+          "process_peak_rss_kib": 109168,
+          "scope": "same process; peak RSS cumulative; no analysis-context cache",
+          "groups": 1,
+          "status": "complete",
+          "limits": {
+            "keys": 50000,
+            "windows_per_key": 25,
+            "groups": 100
+          },
+          "omitted_windows": 0,
+          "omitted_groups": 0,
+          "expanded_windows": 1,
+          "skipped_covered_windows": 7994
+        },
+        {
+          "lines_per_file": 8000,
+          "run": "repeat",
+          "node": "v24.15.0",
+          "platform": "linux",
+          "duration_ms": 43,
+          "rss_bytes": 132505600,
+          "heap_used_bytes": 32945880,
+          "process_peak_rss_kib": 129400,
+          "scope": "same process; peak RSS cumulative; no analysis-context cache",
+          "groups": 1,
+          "status": "complete",
+          "limits": {
+            "keys": 50000,
+            "windows_per_key": 25,
+            "groups": 100
+          },
+          "omitted_windows": 0,
+          "omitted_groups": 0,
+          "expanded_windows": 1,
+          "skipped_covered_windows": 7994
+        }
+      ]
+    },
+    {
+      "repetition": 2,
+      "environment": {
+        "node": "v24.15.0",
+        "platform": "linux",
+        "scope": "same process; peak RSS cumulative; no analysis-context cache"
+      },
+      "records": [
+        {
+          "lines_per_file": 1000,
+          "run": "first",
+          "node": "v24.15.0",
+          "platform": "linux",
+          "duration_ms": 19,
+          "rss_bytes": 71229440,
+          "heap_used_bytes": 9268824,
+          "process_peak_rss_kib": 69560,
+          "scope": "same process; peak RSS cumulative; no analysis-context cache",
+          "groups": 1,
+          "status": "complete",
+          "limits": {
+            "keys": 50000,
+            "windows_per_key": 25,
+            "groups": 100
+          },
+          "omitted_windows": 0,
+          "omitted_groups": 0,
+          "expanded_windows": 1,
+          "skipped_covered_windows": 994
+        },
+        {
+          "lines_per_file": 1000,
+          "run": "repeat",
+          "node": "v24.15.0",
+          "platform": "linux",
+          "duration_ms": 10,
+          "rss_bytes": 75694080,
+          "heap_used_bytes": 7314784,
+          "process_peak_rss_kib": 73920,
+          "scope": "same process; peak RSS cumulative; no analysis-context cache",
+          "groups": 1,
+          "status": "complete",
+          "limits": {
+            "keys": 50000,
+            "windows_per_key": 25,
+            "groups": 100
+          },
+          "omitted_windows": 0,
+          "omitted_groups": 0,
+          "expanded_windows": 1,
+          "skipped_covered_windows": 994
+        },
+        {
+          "lines_per_file": 2000,
+          "run": "first",
+          "node": "v24.15.0",
+          "platform": "linux",
+          "duration_ms": 12,
+          "rss_bytes": 81436672,
+          "heap_used_bytes": 9283576,
+          "process_peak_rss_kib": 79528,
+          "scope": "same process; peak RSS cumulative; no analysis-context cache",
+          "groups": 1,
+          "status": "complete",
+          "limits": {
+            "keys": 50000,
+            "windows_per_key": 25,
+            "groups": 100
+          },
+          "omitted_windows": 0,
+          "omitted_groups": 0,
+          "expanded_windows": 1,
+          "skipped_covered_windows": 1994
+        },
+        {
+          "lines_per_file": 2000,
+          "run": "repeat",
+          "node": "v24.15.0",
+          "platform": "linux",
+          "duration_ms": 10,
+          "rss_bytes": 86020096,
+          "heap_used_bytes": 13500096,
+          "process_peak_rss_kib": 85288,
+          "scope": "same process; peak RSS cumulative; no analysis-context cache",
+          "groups": 1,
+          "status": "complete",
+          "limits": {
+            "keys": 50000,
+            "windows_per_key": 25,
+            "groups": 100
+          },
+          "omitted_windows": 0,
+          "omitted_groups": 0,
+          "expanded_windows": 1,
+          "skipped_covered_windows": 1994
+        },
+        {
+          "lines_per_file": 4000,
+          "run": "first",
+          "node": "v24.15.0",
+          "platform": "linux",
+          "duration_ms": 21,
+          "rss_bytes": 90533888,
+          "heap_used_bytes": 18761824,
+          "process_peak_rss_kib": 88412,
+          "scope": "same process; peak RSS cumulative; no analysis-context cache",
+          "groups": 1,
+          "status": "complete",
+          "limits": {
+            "keys": 50000,
+            "windows_per_key": 25,
+            "groups": 100
+          },
+          "omitted_windows": 0,
+          "omitted_groups": 0,
+          "expanded_windows": 1,
+          "skipped_covered_windows": 3994
+        },
+        {
+          "lines_per_file": 4000,
+          "run": "repeat",
+          "node": "v24.15.0",
+          "platform": "linux",
+          "duration_ms": 24,
+          "rss_bytes": 105738240,
+          "heap_used_bytes": 11618528,
+          "process_peak_rss_kib": 103260,
+          "scope": "same process; peak RSS cumulative; no analysis-context cache",
+          "groups": 1,
+          "status": "complete",
+          "limits": {
+            "keys": 50000,
+            "windows_per_key": 25,
+            "groups": 100
+          },
+          "omitted_windows": 0,
+          "omitted_groups": 0,
+          "expanded_windows": 1,
+          "skipped_covered_windows": 3994
+        },
+        {
+          "lines_per_file": 8000,
+          "run": "first",
+          "node": "v24.15.0",
+          "platform": "linux",
+          "duration_ms": 43,
+          "rss_bytes": 111693824,
+          "heap_used_bytes": 15943512,
+          "process_peak_rss_kib": 109940,
+          "scope": "same process; peak RSS cumulative; no analysis-context cache",
+          "groups": 1,
+          "status": "complete",
+          "limits": {
+            "keys": 50000,
+            "windows_per_key": 25,
+            "groups": 100
+          },
+          "omitted_windows": 0,
+          "omitted_groups": 0,
+          "expanded_windows": 1,
+          "skipped_covered_windows": 7994
+        },
+        {
+          "lines_per_file": 8000,
+          "run": "repeat",
+          "node": "v24.15.0",
+          "platform": "linux",
+          "duration_ms": 40,
+          "rss_bytes": 133320704,
+          "heap_used_bytes": 32993800,
+          "process_peak_rss_kib": 130196,
+          "scope": "same process; peak RSS cumulative; no analysis-context cache",
+          "groups": 1,
+          "status": "complete",
+          "limits": {
+            "keys": 50000,
+            "windows_per_key": 25,
+            "groups": 100
+          },
+          "omitted_windows": 0,
+          "omitted_groups": 0,
+          "expanded_windows": 1,
+          "skipped_covered_windows": 7994
+        }
+      ]
+    },
+    {
+      "repetition": 3,
+      "environment": {
+        "node": "v24.15.0",
+        "platform": "linux",
+        "scope": "same process; peak RSS cumulative; no analysis-context cache"
+      },
+      "records": [
+        {
+          "lines_per_file": 1000,
+          "run": "first",
+          "node": "v24.15.0",
+          "platform": "linux",
+          "duration_ms": 21,
+          "rss_bytes": 73445376,
+          "heap_used_bytes": 6862368,
+          "process_peak_rss_kib": 71724,
+          "scope": "same process; peak RSS cumulative; no analysis-context cache",
+          "groups": 1,
+          "status": "complete",
+          "limits": {
+            "keys": 50000,
+            "windows_per_key": 25,
+            "groups": 100
+          },
+          "omitted_windows": 0,
+          "omitted_groups": 0,
+          "expanded_windows": 1,
+          "skipped_covered_windows": 994
+        },
+        {
+          "lines_per_file": 1000,
+          "run": "repeat",
+          "node": "v24.15.0",
+          "platform": "linux",
+          "duration_ms": 5,
+          "rss_bytes": 75943936,
+          "heap_used_bytes": 9517816,
+          "process_peak_rss_kib": 74164,
+          "scope": "same process; peak RSS cumulative; no analysis-context cache",
+          "groups": 1,
+          "status": "complete",
+          "limits": {
+            "keys": 50000,
+            "windows_per_key": 25,
+            "groups": 100
+          },
+          "omitted_windows": 0,
+          "omitted_groups": 0,
+          "expanded_windows": 1,
+          "skipped_covered_windows": 994
+        },
+        {
+          "lines_per_file": 2000,
+          "run": "first",
+          "node": "v24.15.0",
+          "platform": "linux",
+          "duration_ms": 12,
+          "rss_bytes": 79896576,
+          "heap_used_bytes": 12846696,
+          "process_peak_rss_kib": 78024,
+          "scope": "same process; peak RSS cumulative; no analysis-context cache",
+          "groups": 1,
+          "status": "complete",
+          "limits": {
+            "keys": 50000,
+            "windows_per_key": 25,
+            "groups": 100
+          },
+          "omitted_windows": 0,
+          "omitted_groups": 0,
+          "expanded_windows": 1,
+          "skipped_covered_windows": 1994
+        },
+        {
+          "lines_per_file": 2000,
+          "run": "repeat",
+          "node": "v24.15.0",
+          "platform": "linux",
+          "duration_ms": 12,
+          "rss_bytes": 86183936,
+          "heap_used_bytes": 9907168,
+          "process_peak_rss_kib": 84424,
+          "scope": "same process; peak RSS cumulative; no analysis-context cache",
+          "groups": 1,
+          "status": "complete",
+          "limits": {
+            "keys": 50000,
+            "windows_per_key": 25,
+            "groups": 100
+          },
+          "omitted_windows": 0,
+          "omitted_groups": 0,
+          "expanded_windows": 1,
+          "skipped_covered_windows": 1994
+        },
+        {
+          "lines_per_file": 4000,
+          "run": "first",
+          "node": "v24.15.0",
+          "platform": "linux",
+          "duration_ms": 17,
+          "rss_bytes": 88748032,
+          "heap_used_bytes": 13384904,
+          "process_peak_rss_kib": 86668,
+          "scope": "same process; peak RSS cumulative; no analysis-context cache",
+          "groups": 1,
+          "status": "complete",
+          "limits": {
+            "keys": 50000,
+            "windows_per_key": 25,
+            "groups": 100
+          },
+          "omitted_windows": 0,
+          "omitted_groups": 0,
+          "expanded_windows": 1,
+          "skipped_covered_windows": 3994
+        },
+        {
+          "lines_per_file": 4000,
+          "run": "repeat",
+          "node": "v24.15.0",
+          "platform": "linux",
+          "duration_ms": 22,
+          "rss_bytes": 99889152,
+          "heap_used_bytes": 15045768,
+          "process_peak_rss_kib": 97548,
+          "scope": "same process; peak RSS cumulative; no analysis-context cache",
+          "groups": 1,
+          "status": "complete",
+          "limits": {
+            "keys": 50000,
+            "windows_per_key": 25,
+            "groups": 100
+          },
+          "omitted_windows": 0,
+          "omitted_groups": 0,
+          "expanded_windows": 1,
+          "skipped_covered_windows": 3994
+        },
+        {
+          "lines_per_file": 8000,
+          "run": "first",
+          "node": "v24.15.0",
+          "platform": "linux",
+          "duration_ms": 48,
+          "rss_bytes": 114221056,
+          "heap_used_bytes": 16194152,
+          "process_peak_rss_kib": 112372,
+          "scope": "same process; peak RSS cumulative; no analysis-context cache",
+          "groups": 1,
+          "status": "complete",
+          "limits": {
+            "keys": 50000,
+            "windows_per_key": 25,
+            "groups": 100
+          },
+          "omitted_windows": 0,
+          "omitted_groups": 0,
+          "expanded_windows": 1,
+          "skipped_covered_windows": 7994
+        },
+        {
+          "lines_per_file": 8000,
+          "run": "repeat",
+          "node": "v24.15.0",
+          "platform": "linux",
+          "duration_ms": 44,
+          "rss_bytes": 138862592,
+          "heap_used_bytes": 37276832,
+          "process_peak_rss_kib": 135608,
+          "scope": "same process; peak RSS cumulative; no analysis-context cache",
+          "groups": 1,
+          "status": "complete",
+          "limits": {
+            "keys": 50000,
+            "windows_per_key": 25,
+            "groups": 100
+          },
+          "omitted_windows": 0,
+          "omitted_groups": 0,
+          "expanded_windows": 1,
+          "skipped_covered_windows": 7994
+        }
+      ]
+    }
+  ]
+}

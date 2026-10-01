@@ -96,9 +96,9 @@ printf '{"files":[{"filename":"%s/Main.qml","success":false,"warnings":[{"line":
   fs.writeFileSync(path.join(root, "qmlqualitylens.config.json"), JSON.stringify({ project_root: ".", source_roots: ["."], output_dir: "target", tools: { qmllint: { command: tool, check: true, import_paths: ["build/qml"], use_environment_imports: true } } }));
 
   const context = createAnalysisContext(loadConfig(path.join(root, "qmlqualitylens.config.json")));
-  const argumentsUsed = fs.readFileSync(argumentsFile, "utf8").split(/\r?\n/);
-
+  assert.equal(fs.existsSync(argumentsFile), false, "context creation must not execute qmllint");
   assert.equal(context.qmllint.source, "tool");
+  const argumentsUsed = fs.readFileSync(argumentsFile, "utf8").split(/\r?\n/);
   assert.equal(context.qmllint.status, "complete");
   assert.equal(context.qmllint.coverage, "complete");
   assert.equal(context.qmllint.version, "qmllint 6.test");
