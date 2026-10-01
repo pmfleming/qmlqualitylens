@@ -1,0 +1,50 @@
+{
+  "status": "pass",
+  "profile": "fresh-process static measure-all + JSON/SARIF audit",
+  "scope": "Identical source/config/tool profile; consumer execution and imported reports disabled explicitly",
+  "source_config": "/home/laufan/Projects/shelllist/qmlqualitylens.config.json",
+  "source_hash": "11b6a3ef598878fc9e0a9e6cda7db6a04a87e467277e22ad5b798c85620a0535",
+  "config_hash": "a673722e8d25ca3abb15767ef8e1a0c73b09a5d60c39da528cc578e74de9f55d",
+  "tool_versions": {
+    "node": "24.15.0",
+    "qmlqualitylens": "0.5.0",
+    "qmllint": null,
+    "tree-sitter": "0.25.1",
+    "tree-sitter-qmljs": "0.3.1"
+  },
+  "artifacts_per_run": 26,
+  "observations": [
+    {
+      "run_id": "370a4b0e-8347-4e51-930c-60d11a86e160",
+      "exits": [
+        0,
+        0,
+        0
+      ],
+      "normalized_sha256": "63c87dbb7c00ac11f656109f012e0bcb3779e3570138637ef1d4530acceeb4e7"
+    },
+    {
+      "run_id": "8aade9c9-0dd3-4fd9-ac43-6f0e0b31e298",
+      "exits": [
+        0,
+        0,
+        0
+      ],
+      "normalized_sha256": "63c87dbb7c00ac11f656109f012e0bcb3779e3570138637ef1d4530acceeb4e7"
+    },
+    {
+      "run_id": "76760604-abc4-4446-a8d6-1b22090a5e8b",
+      "exits": [
+        0,
+        0,
+        0
+      ],
+      "normalized_sha256": "63c87dbb7c00ac11f656109f012e0bcb3779e3570138637ef1d4530acceeb4e7"
+    }
+  ],
+  "volatile_paths": [
+    "$.generated_at",
+    "$.provenance.generated_at",
+    "$.provenance.run_id"
+  ]
+}
