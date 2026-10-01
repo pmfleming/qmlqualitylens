@@ -1,0 +1,14 @@
+build-essential 12.10ubuntu1 install ok installed
+cmake 3.28.3-1build7 install ok installed
+libc6 2.39-0ubuntu8.9 install ok installed
+ninja-build 1.11.1-2 install ok installed
+python3 3.12.3-0ubuntu2.1 install ok installed
+qml6-module-qtqml-workerscript 6.4.2+dfsg-4build3 install ok installed
+qml6-module-qtquick 6.4.2+dfsg-4build3 install ok installed
+qml6-module-qtquick-layouts 6.4.2+dfsg-4build3 install ok installed
+qml6-module-qtquick-window 6.4.2+dfsg-4build3 install ok installed
+qml6-module-qttest 6.4.2+dfsg-4build3 install ok installed
+qt6-base-dev 6.4.2+dfsg-21.1build5 install ok installed
+qt6-declarative-dev 6.4.2+dfsg-4build3 install ok installed
+qt6-declarative-dev-tools 6.4.2+dfsg-4build3 install ok installed
+qt6-qpa-plugins 6.4.2+dfsg-21.1build5 install ok installed

@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "architecture": "x86_64",
+  "profiles": {
+    "pinned-nix": { "node": "24.15.0", "qt": "6.11.0" },
+    "ubuntu-minimum": { "os_id": "ubuntu", "os_version": "24.04", "node": "24.4.0", "qt": "6.4.2" },
+    "ubuntu-current": { "os_id": "ubuntu", "os_version": "24.04", "node": "24.18.0", "qt": "6.4.2" }
+  },
+  "commands": [
+    ["npm", "ci"],
+    ["npm", "test"],
+    ["python3", "-m", "unittest", "discover", "-s", "acceptance", "-p", "test_*.py"],
+    ["npm", "run", "oracle:qmllint"],
+    ["npm", "run", "integration:qt"],
+    ["npm", "run", "package:smoke", "--", "--cmake"]
+  ]
+}

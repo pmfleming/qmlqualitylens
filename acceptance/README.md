@@ -8,7 +8,7 @@ Each passed row must cite commands, actual results, source revision, bounded sco
 
 ## Current closure result
 
-Steps 1–5 are implementation iterations, not completed acceptance. Six criteria have scoped evidence; **19/25 remain unresolved**. `trust.md` records subsequent consumer-backed Trust closure; `step-5.md` retains the earlier native workflows, investigated failures and platform gaps. Operational recovery/limits are in `../contracts/operational-scope.md`.
+Steps 1–5 are implementation iterations, not completed acceptance. Seven criteria have scoped evidence; **18/25 remain unresolved**. Trust T1–T4 are complete: `trust.md` and `native-validation.md` record consumer-backed closure and the clean native version matrix; `step-5.md` retains the earlier native workflows, investigated failures and platform gaps. Operational recovery/limits are in `../contracts/operational-scope.md`.
 
 Additional checks:
 
@@ -19,6 +19,8 @@ python3 acceptance/calibration.py --release  # intentionally blocked pending ind
 python3 acceptance/profile.py               # after native build/helper prewarming
 python3 acceptance/determinism.py           # after npm run build; fresh-process regression
 python3 acceptance/determinism.py --config ../shelllist/qmlqualitylens.config.json
+# In the matching environment, against a clean checkout:
+python3 acceptance/native_profile.py --profile pinned-nix --repository /path/to/clean/checkout --output /tmp/new-native-evidence
 ```
 
 `resource-budgets.json` fixes the sampled workload ceilings; `resource-results.json` retains all three repetitions and source-snapshot identifiers. These synthetic observations are not a cross-language benchmark or a universal memory guarantee. The structural gate also rejects deleted criteria and remains active under `python -O`.

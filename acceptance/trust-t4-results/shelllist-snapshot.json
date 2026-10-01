@@ -1,0 +1,7 @@
+{
+  "revision": "289209e168797340908f9387e9ca0977e787af8c",
+  "dirty_status": " M activity/NotificationContent.qml\n M activity/TimeWeatherListRow.qml\n M bar/SystemChooserContent.qml\n M bluetooth/BluetoothDeviceListRow.qml\n M clipboard/ClipboardListRow.qml\n M displays/DisplayListRow.qml\n M launcher/ApplicationListRow.qml\n M qml/Shelllist/Ui/ChooserListPane.qml\n M qml/Shelllist/Ui/ResultLabel.qml\n M qml/Shelllist/Ui/ResultListFrame.qml\n M qml/Shelllist/Ui/ResultRow.qml\n M qml/Shelllist/Ui/Theme.qml\n M wifi/NetworkListRow.qml\n?? docs/reviews/material-recommendations-2026-10-01.html\n",
+  "files": 646,
+  "inventory_sha256": "40d334530470faef99d8d583c8815d5ee524cf5569c9dbfc0f2ec418375e50f6",
+  "snapshot": "/tmp/qml-trust-shelllist-snapshot"
+}

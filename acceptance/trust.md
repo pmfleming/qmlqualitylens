@@ -33,3 +33,9 @@ Validation (source subtree `2f3d62998d8c2e338f253931a008dd5ad90c6026`, test subt
 `trust-t3-results.json` preserves observations and source anchors. Full captures are in `/tmp/qml-trust-t3-final` and `/tmp/qml-trust-t3-native-final`; test logs are `/tmp/qml-t3-{tests,python,oracle,integration,package}.log`. The generated native config is a copy of Shelllist's own config with absolute project/output paths; commands do not silently disable its required checks.
 
 This closes scoped semantic honesty, not P2's broader supported boundary matrix, E2's exhaustive rule accuracy contracts, or independent calibration. Fewer findings and more abstentions are not claimed as an accuracy improvement. Strict Shelllist policy currently fails for honest incomplete evidence; Trust acceptance is not a consumer quality-pass certificate.
+
+## T4 — Complete native CI profiles
+
+Closed by the three clean native profiles in `native-validation.md`: pinned Nix Node 24.15/Qt 6.11, Ubuntu 24.04 Qt 6.4.2 with minimum Node 24.4 and current Node 24.18. All CI commands, live Qt scenarios and installed-package checks passed. The actual Ubuntu provisioning command also completed successfully; initial namespace/environment failures are recorded rather than counted as passes.
+
+Continued measurement on a stable snapshot of Shelllist's newer `289209e` working tree passed three repeats in each Ubuntu Node profile. A live-source run was correctly rejected when concurrent edits changed inputs. These later static results do not imply runtime tests were executed on that newer consumer snapshot. Full Trust T1–T4 is now evidenced; the remaining 18 acceptance rows are not waived.

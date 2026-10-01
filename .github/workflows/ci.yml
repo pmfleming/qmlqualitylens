@@ -8,7 +8,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -20,7 +20,7 @@ jobs:
       - run: python3 -m unittest discover -s acceptance -p 'test_*.py'
 
   qt-integration:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
@@ -51,7 +51,7 @@ jobs:
             target/integration-qt/summary.json
 
   package:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         node: ['24.4.0', '24']
@@ -65,7 +65,7 @@ jobs:
       - run: npm run package:smoke
 
   oracle-qmllint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5

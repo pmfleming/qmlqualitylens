@@ -1,0 +1,130 @@
+{
+  "status": "pass",
+  "profile": "ubuntu-minimum",
+  "revision": "2f2dc390aee3b9fa49efa3d1c215aa72a4b1690d",
+  "source_tree": "2f3d62998d8c2e338f253931a008dd5ad90c6026",
+  "test_tree": "7c873df894c5d33dff302e3fb3866aebe4eb2837",
+  "environment": {
+    "node": "24.4.0",
+    "qt": "6.4.2",
+    "os_id": "ubuntu",
+    "os_version": "24.04"
+  },
+  "versions": {
+    "node": "v24.4.0",
+    "npm": "npm warn Unknown env config \"nodedir\". This will stop working in the next major version of npm.",
+    "qmllint": "qmllint 6.4.2",
+    "qmlformat": "qmlformat 6.4.2",
+    "cmake": "cmake version 3.28.3",
+    "ctest": "ctest version 3.28.3",
+    "ninja": "1.11.1"
+  },
+  "platform": "Linux-6.18.53-x86_64-with-glibc2.39",
+  "runner_sha256": "b128990d9dc385d1fee3748e7c1913359c457d41022c053d3faf1ad8727ad5d7",
+  "plan_sha256": "493b82de515e3e178b06e6b8df2ea9e353bcab26a164b80e835dd0e23d9839bd",
+  "runner_tests_sha256": "b70aaee4b98aed3c929b11d2edf077f243b297ed21e6fabbffb70bd38d82b0f9",
+  "commands": [
+    {
+      "command": [
+        "npm",
+        "ci"
+      ],
+      "exit": 0,
+      "duration_seconds": 4.522,
+      "log": "00.log",
+      "sha256": "a5ac2f4bb2bc2971ff1d838a9f7955196fc5a33952a4278058ee611f7d03343b"
+    },
+    {
+      "command": [
+        "npm",
+        "test"
+      ],
+      "exit": 0,
+      "duration_seconds": 8.648,
+      "log": "01.log",
+      "sha256": "b3d7aeaf3a3ca275cd1ed048aaf0a026de808b7ef5f1552e55fb9b94ec7d5224"
+    },
+    {
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "acceptance",
+        "-p",
+        "test_*.py"
+      ],
+      "exit": 0,
+      "duration_seconds": 1.666,
+      "log": "02.log",
+      "sha256": "5908fc2100299afd4d277f3b35940911e7d0290ec380ac602b6ab9377ad22c5c"
+    },
+    {
+      "command": [
+        "npm",
+        "run",
+        "oracle:qmllint"
+      ],
+      "exit": 0,
+      "duration_seconds": 0.965,
+      "log": "03.log",
+      "sha256": "53bb39533434d3d51b87955e6c9ccf7effe5b67a577d50c34864c877a10623d8"
+    },
+    {
+      "command": [
+        "npm",
+        "run",
+        "integration:qt"
+      ],
+      "exit": 0,
+      "duration_seconds": 35.217,
+      "log": "04.log",
+      "sha256": "7db93a96e79b7f40f419c37ba44281f25e4e7565934e8504adab64a4a1c650fe"
+    },
+    {
+      "command": [
+        "npm",
+        "run",
+        "package:smoke",
+        "--",
+        "--cmake"
+      ],
+      "exit": 0,
+      "duration_seconds": 2.821,
+      "log": "05.log",
+      "sha256": "af4918604080ea88f0d6d4106c881afdef6b1fb5307a197cc0126195dbcc31fc"
+    }
+  ],
+  "live_evidence": {
+    "oracle_qt": "6.4.2",
+    "oracle_missing_expected": [],
+    "integration": [
+      {
+        "scenario": "release",
+        "status": "pass",
+        "ctest_tests": 2
+      },
+      {
+        "scenario": "multi-config",
+        "status": "pass",
+        "ctest_tests": 2
+      },
+      {
+        "scenario": "configure-failure",
+        "status": "pass",
+        "expected_audit_verdict": "fail"
+      },
+      {
+        "scenario": "build-failure",
+        "status": "pass",
+        "expected_audit_verdict": "fail"
+      },
+      {
+        "scenario": "test-failure",
+        "status": "pass",
+        "expected_audit_verdict": "fail"
+      }
+    ]
+  }
+}

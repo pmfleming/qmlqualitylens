@@ -4,7 +4,7 @@
 
 Clean pinned Linux Node 24.15 / Qt 6.11 validation passed: 112 tests, live oracle, Qt/CMake integration, installed-package CMake smoke and three resource-profile repetitions. Configured qmllint work is now lazy and memoized without falsifying earlier artifact freshness.
 
-Acceptance is **not complete**: 6/25 required criteria are evidenced, 19 remain unresolved. T2/T3 now have consumer-backed determinism and fail-closed semantic evidence in `acceptance/trust.md`. No push is permitted yet. See the repository ledger `acceptance/criteria.json`, `acceptance/step-5.md`, and packaged operational limits in `contracts/operational-scope.md`. Independent calibration/intent review and broader semantic, operational and version-profile obligations remain open.
+Acceptance is **not complete**: 7/25 required criteria are evidenced, 18 remain unresolved. Trust T1–T4 are complete, with consumer-backed determinism/semantic evidence and three clean native profiles in `acceptance/trust.md` and `acceptance/native-validation.md`. No push is permitted yet. See the repository ledger `acceptance/criteria.json`, `acceptance/step-5.md`, and packaged operational limits in `contracts/operational-scope.md`. Independent calibration/intent review and broader semantic and operational obligations remain open.
 
 ## Historical implementation record
 

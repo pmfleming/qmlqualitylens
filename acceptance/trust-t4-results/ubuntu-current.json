@@ -1,0 +1,130 @@
+{
+  "status": "pass",
+  "profile": "ubuntu-current",
+  "revision": "2f2dc390aee3b9fa49efa3d1c215aa72a4b1690d",
+  "source_tree": "2f3d62998d8c2e338f253931a008dd5ad90c6026",
+  "test_tree": "7c873df894c5d33dff302e3fb3866aebe4eb2837",
+  "environment": {
+    "node": "24.18.0",
+    "qt": "6.4.2",
+    "os_id": "ubuntu",
+    "os_version": "24.04"
+  },
+  "versions": {
+    "node": "v24.18.0",
+    "npm": "11.16.0",
+    "qmllint": "qmllint 6.4.2",
+    "qmlformat": "qmlformat 6.4.2",
+    "cmake": "cmake version 3.28.3",
+    "ctest": "ctest version 3.28.3",
+    "ninja": "1.11.1"
+  },
+  "platform": "Linux-6.18.53-x86_64-with-glibc2.39",
+  "runner_sha256": "b128990d9dc385d1fee3748e7c1913359c457d41022c053d3faf1ad8727ad5d7",
+  "plan_sha256": "493b82de515e3e178b06e6b8df2ea9e353bcab26a164b80e835dd0e23d9839bd",
+  "runner_tests_sha256": "6f283ee6225d2cef4c0127d95456a6f954c45141c92b97dd89016cb1c630e8f4",
+  "commands": [
+    {
+      "command": [
+        "npm",
+        "ci"
+      ],
+      "exit": 0,
+      "duration_seconds": 4.521,
+      "log": "00.log",
+      "sha256": "a8c6a9bdad14200fe39bff0becaae22a98210563d067e63ec54ad29452bd1ef1"
+    },
+    {
+      "command": [
+        "npm",
+        "test"
+      ],
+      "exit": 0,
+      "duration_seconds": 9.143,
+      "log": "01.log",
+      "sha256": "8650331cd4072f8f9b956333aae852d493ac1e03329591ff8718635aaae6759d"
+    },
+    {
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "acceptance",
+        "-p",
+        "test_*.py"
+      ],
+      "exit": 0,
+      "duration_seconds": 1.916,
+      "log": "02.log",
+      "sha256": "52281de11e6ce1c687de862612ce92dda14a0e35136f07a2e6c85849717b53e5"
+    },
+    {
+      "command": [
+        "npm",
+        "run",
+        "oracle:qmllint"
+      ],
+      "exit": 0,
+      "duration_seconds": 1.069,
+      "log": "03.log",
+      "sha256": "19e9a329d5ea5166a8d5ce18fecfe6d735f28116b5778aeb00bce9a0ad61104a"
+    },
+    {
+      "command": [
+        "npm",
+        "run",
+        "integration:qt"
+      ],
+      "exit": 0,
+      "duration_seconds": 35.46,
+      "log": "04.log",
+      "sha256": "4d1791752066eedbff9296e5e422218f191ec7f2274da99ca21743653cd6e562"
+    },
+    {
+      "command": [
+        "npm",
+        "run",
+        "package:smoke",
+        "--",
+        "--cmake"
+      ],
+      "exit": 0,
+      "duration_seconds": 2.924,
+      "log": "05.log",
+      "sha256": "2cb5b8444e82b750cc90d5fc91a8ccb941dc82ba7a4205255e9bdd1613106c22"
+    }
+  ],
+  "live_evidence": {
+    "oracle_qt": "6.4.2",
+    "oracle_missing_expected": [],
+    "integration": [
+      {
+        "scenario": "release",
+        "status": "pass",
+        "ctest_tests": 2
+      },
+      {
+        "scenario": "multi-config",
+        "status": "pass",
+        "ctest_tests": 2
+      },
+      {
+        "scenario": "configure-failure",
+        "status": "pass",
+        "expected_audit_verdict": "fail"
+      },
+      {
+        "scenario": "build-failure",
+        "status": "pass",
+        "expected_audit_verdict": "fail"
+      },
+      {
+        "scenario": "test-failure",
+        "status": "pass",
+        "expected_audit_verdict": "fail"
+      }
+    ]
+  }
+}

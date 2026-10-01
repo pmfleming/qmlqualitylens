@@ -1,0 +1,50 @@
+{
+  "status": "pass",
+  "profile": "fresh-process static measure-all + JSON/SARIF audit",
+  "scope": "Identical source/config/tool profile; consumer execution and imported reports disabled explicitly",
+  "source_config": "/consumer/qmlqualitylens.config.json",
+  "source_hash": "b0d823b8999ac52e3b45e28fe95cfebadca0058d4f41e1482906223a61e79651",
+  "config_hash": "cd9ae16830e72e0f4ebdd22faea224eed0a45f36b047b7be11bf2e511dd14a08",
+  "tool_versions": {
+    "node": "24.4.0",
+    "qmlqualitylens": "0.5.0",
+    "qmllint": null,
+    "tree-sitter": "0.25.1",
+    "tree-sitter-qmljs": "0.3.1"
+  },
+  "artifacts_per_run": 26,
+  "observations": [
+    {
+      "run_id": "2cee5e88-62a1-48f0-a185-fc5653b05b6c",
+      "exits": [
+        0,
+        0,
+        0
+      ],
+      "normalized_sha256": "2e907f230cb5a064e9443dd079b2ff78968fbe2c02ed6a974fde65c9e1239ec5"
+    },
+    {
+      "run_id": "b0778016-d3a4-4dee-b7c1-80ce9058f0ee",
+      "exits": [
+        0,
+        0,
+        0
+      ],
+      "normalized_sha256": "2e907f230cb5a064e9443dd079b2ff78968fbe2c02ed6a974fde65c9e1239ec5"
+    },
+    {
+      "run_id": "cc89ae24-a4ca-4966-8d8e-065dd2a0576f",
+      "exits": [
+        0,
+        0,
+        0
+      ],
+      "normalized_sha256": "2e907f230cb5a064e9443dd079b2ff78968fbe2c02ed6a974fde65c9e1239ec5"
+    }
+  ],
+  "volatile_paths": [
+    "$.generated_at",
+    "$.provenance.generated_at",
+    "$.provenance.run_id"
+  ]
+}
